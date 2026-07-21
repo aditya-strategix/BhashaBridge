@@ -194,101 +194,101 @@ BhashaBridge/
 │   ├── 📂 src/                                # Source code
 │   │   │
 │   │   ├── 📂 app/                            # Next.js App Router pages
-│   │   │   ├── 📄 layout.tsx                  # Root layout with providers
-│   │   │   ├── 📄 page.tsx                    # Landing / home page
+│   │   │   ├── 📄 layout.jsx                  # Root layout with providers
+│   │   │   ├── 📄 page.jsx                    # Landing / home page
 │   │   │   ├── 🎨 globals.css                 # Global styles & design tokens
 │   │   │   │
 │   │   │   ├── 📂 (auth)/                     # Authentication pages (grouped)
 │   │   │   │   ├── 📂 login/
-│   │   │   │   │   └── 📄 page.tsx            # Login page
+│   │   │   │   │   └── 📄 page.jsx            # Login page
 │   │   │   │   ├── 📂 register/
-│   │   │   │   │   └── 📄 page.tsx            # Registration page
+│   │   │   │   │   └── 📄 page.jsx            # Registration page
 │   │   │   │   └── 📂 forgot-password/
-│   │   │   │       └── 📄 page.tsx            # Password recovery
+│   │   │   │       └── 📄 page.jsx            # Password recovery
 │   │   │   │
 │   │   │   ├── 📂 dashboard/                  # User dashboard
-│   │   │   │   ├── 📄 layout.tsx              # Dashboard layout
-│   │   │   │   └── 📄 page.tsx                # Meetings overview
+│   │   │   │   ├── 📄 layout.jsx              # Dashboard layout
+│   │   │   │   └── 📄 page.jsx                # Meetings overview
 │   │   │   │
 │   │   │   ├── 📂 meeting/                    # Meeting pages
 │   │   │   │   ├── 📂 create/
-│   │   │   │   │   └── 📄 page.tsx            # Create new meeting
+│   │   │   │   │   └── 📄 page.jsx            # Create new meeting
 │   │   │   │   └── 📂 [id]/                   # Dynamic meeting routes
-│   │   │   │       ├── 📄 page.tsx            # Meeting room
+│   │   │   │       ├── 📄 page.jsx            # Meeting room
 │   │   │   │       ├── 📂 lobby/
-│   │   │   │       │   └── 📄 page.tsx        # Pre-join lobby
+│   │   │   │       │   └── 📄 page.jsx        # Pre-join lobby
 │   │   │   │       └── 📂 report/
-│   │   │   │           └── 📄 page.tsx        # Post-meeting report
+│   │   │   │           └── 📄 page.jsx        # Post-meeting report
 │   │   │   │
 │   │   │   ├── 📂 admin/                      # Admin pages
-│   │   │   │   ├── 📄 layout.tsx              # Admin layout
+│   │   │   │   ├── 📄 layout.jsx              # Admin layout
 │   │   │   │   ├── 📂 org/                    # Organization admin
 │   │   │   │   │   ├── 📂 users/
-│   │   │   │   │   │   └── 📄 page.tsx        # User management
+│   │   │   │   │   │   └── 📄 page.jsx        # User management
 │   │   │   │   │   └── 📂 roles/
-│   │   │   │   │       └── 📄 page.tsx        # Role management
+│   │   │   │   │       └── 📄 page.jsx        # Role management
 │   │   │   │   └── 📂 platform/               # Platform admin
 │   │   │   │       ├── 📂 dashboard/
-│   │   │   │       │   └── 📄 page.tsx        # System monitoring
+│   │   │   │       │   └── 📄 page.jsx        # System monitoring
 │   │   │   │       └── 📂 services/
-│   │   │   │           └── 📄 page.tsx        # Service management
+│   │   │   │           └── 📄 page.jsx        # Service management
 │   │   │   │
 │   │   │   └── 📂 profile/                    # User profile
-│   │   │       └── 📄 page.tsx                # Profile settings
+│   │   │       └── 📄 page.jsx                # Profile settings
 │   │   │
 │   │   ├── 📂 components/                     # React components
 │   │   │   │
 │   │   │   ├── 📂 ui/                         # Reusable UI primitives
-│   │   │   │   ├── 📄 Button.tsx
-│   │   │   │   ├── 📄 Input.tsx
-│   │   │   │   ├── 📄 Modal.tsx
-│   │   │   │   ├── 📄 Card.tsx
-│   │   │   │   ├── 📄 Badge.tsx
-│   │   │   │   ├── 📄 Dropdown.tsx
-│   │   │   │   ├── 📄 Toast.tsx
-│   │   │   │   └── 📄 Loader.tsx
+│   │   │   │   ├── 📄 Button.jsx
+│   │   │   │   ├── 📄 Input.jsx
+│   │   │   │   ├── 📄 Modal.jsx
+│   │   │   │   ├── 📄 Card.jsx
+│   │   │   │   ├── 📄 Badge.jsx
+│   │   │   │   ├── 📄 Dropdown.jsx
+│   │   │   │   ├── 📄 Toast.jsx
+│   │   │   │   └── 📄 Loader.jsx
 │   │   │   │
 │   │   │   ├── 📂 layout/                     # Layout components
-│   │   │   │   ├── 📄 Header.tsx
-│   │   │   │   ├── 📄 Sidebar.tsx
-│   │   │   │   ├── 📄 Footer.tsx
-│   │   │   │   └── 📄 Navigation.tsx
+│   │   │   │   ├── 📄 Header.jsx
+│   │   │   │   ├── 📄 Sidebar.jsx
+│   │   │   │   ├── 📄 Footer.jsx
+│   │   │   │   └── 📄 Navigation.jsx
 │   │   │   │
 │   │   │   ├── 📂 auth/                       # Authentication components
-│   │   │   │   ├── 📄 LoginForm.tsx
-│   │   │   │   ├── 📄 RegisterForm.tsx
-│   │   │   │   └── 📄 AuthGuard.tsx
+│   │   │   │   ├── 📄 LoginForm.jsx
+│   │   │   │   ├── 📄 RegisterForm.jsx
+│   │   │   │   └── 📄 AuthGuard.jsx
 │   │   │   │
 │   │   │   ├── 📂 meeting/                    # Meeting components
-│   │   │   │   ├── 📄 MeetingRoom.tsx         # Main meeting container
-│   │   │   │   ├── 📄 VideoGrid.tsx           # Video tiles layout
-│   │   │   │   ├── 📄 VideoTile.tsx           # Individual video stream
-│   │   │   │   ├── 📄 MeetingControls.tsx     # Mute, camera, leave, etc.
-│   │   │   │   ├── 📄 ParticipantList.tsx     # Active participants
-│   │   │   │   ├── 📄 MeetingLobby.tsx        # Pre-join setup
-│   │   │   │   └── 📄 MeetingCard.tsx         # Meeting preview card
+│   │   │   │   ├── 📄 MeetingRoom.jsx         # Main meeting container
+│   │   │   │   ├── 📄 VideoGrid.jsx           # Video tiles layout
+│   │   │   │   ├── 📄 VideoTile.jsx           # Individual video stream
+│   │   │   │   ├── 📄 MeetingControls.jsx     # Mute, camera, leave, etc.
+│   │   │   │   ├── 📄 ParticipantList.jsx     # Active participants
+│   │   │   │   ├── 📄 MeetingLobby.jsx        # Pre-join setup
+│   │   │   │   └── 📄 MeetingCard.jsx         # Meeting preview card
 │   │   │   │
 │   │   │   ├── 📂 chat/                       # Chat components
-│   │   │   │   ├── 📄 ChatPanel.tsx           # Chat sidebar panel
-│   │   │   │   ├── 📄 ChatMessage.tsx         # Single message bubble
-│   │   │   │   ├── 📄 ChatInput.tsx           # Message input field
-│   │   │   │   └── 📄 TranslatedMessage.tsx   # Message with translations
+│   │   │   │   ├── 📄 ChatPanel.jsx           # Chat sidebar panel
+│   │   │   │   ├── 📄 ChatMessage.jsx         # Single message bubble
+│   │   │   │   ├── 📄 ChatInput.jsx           # Message input field
+│   │   │   │   └── 📄 TranslatedMessage.jsx   # Message with translations
 │   │   │   │
 │   │   │   ├── 📂 caption/                    # Caption components
-│   │   │   │   ├── 📄 CaptionOverlay.tsx      # Live caption display
-│   │   │   │   ├── 📄 CaptionSettings.tsx     # Caption preferences
-│   │   │   │   └── 📄 TranslatedCaption.tsx   # Translated caption view
+│   │   │   │   ├── 📄 CaptionOverlay.jsx      # Live caption display
+│   │   │   │   ├── 📄 CaptionSettings.jsx     # Caption preferences
+│   │   │   │   └── 📄 TranslatedCaption.jsx   # Translated caption view
 │   │   │   │
 │   │   │   ├── 📂 analytics/                  # Analytics components
-│   │   │   │   ├── 📄 AnalyticsDashboard.tsx  # Analytics overview
-│   │   │   │   ├── 📄 ParticipantChart.tsx    # Participation chart
-│   │   │   │   └── 📄 LanguageStats.tsx       # Language usage stats
+│   │   │   │   ├── 📄 AnalyticsDashboard.jsx  # Analytics overview
+│   │   │   │   ├── 📄 ParticipantChart.jsx    # Participation chart
+│   │   │   │   └── 📄 LanguageStats.jsx       # Language usage stats
 │   │   │   │
 │   │   │   └── 📂 admin/                      # Admin components
-│   │   │       ├── 📄 UserTable.tsx           # User management table
-│   │   │       ├── 📄 RoleEditor.tsx          # Role assignment editor
-│   │   │       ├── 📄 ServiceStatusCard.tsx   # Service health card
-│   │   │       └── 📄 SystemHealthMonitor.tsx # System metrics display
+│   │   │       ├── 📄 UserTable.jsx           # User management table
+│   │   │       ├── 📄 RoleEditor.jsx          # Role assignment editor
+│   │   │       ├── 📄 ServiceStatusCard.jsx   # Service health card
+│   │   │       └── 📄 SystemHealthMonitor.jsx # System metrics display
 │   │   │
 │   │   ├── 📂 hooks/                          # Custom React hooks
 │   │   │   ├── 📄 useAuth.ts                  # Auth state & actions

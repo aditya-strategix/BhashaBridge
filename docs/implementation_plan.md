@@ -387,78 +387,78 @@ BhashaBridge/
 │   │   └── images/
 │   ├── src/
 │   │   ├── app/
-│   │   │   ├── layout.tsx                    # Root layout with providers
-│   │   │   ├── page.tsx                      # Landing / home page
+│   │   │   ├── layout.jsx                    # Root layout with providers
+│   │   │   ├── page.jsx                      # Landing / home page
 │   │   │   ├── globals.css                   # Global styles + design tokens
 │   │   │   ├── (auth)/
-│   │   │   │   ├── login/page.tsx
-│   │   │   │   ├── register/page.tsx
-│   │   │   │   └── forgot-password/page.tsx
+│   │   │   │   ├── login/page.jsx
+│   │   │   │   ├── register/page.jsx
+│   │   │   │   └── forgot-password/page.jsx
 │   │   │   ├── dashboard/
-│   │   │   │   ├── page.tsx                  # User dashboard
-│   │   │   │   └── layout.tsx
+│   │   │   │   ├── page.jsx                  # User dashboard
+│   │   │   │   └── layout.jsx
 │   │   │   ├── meeting/
-│   │   │   │   ├── create/page.tsx           # Create meeting
+│   │   │   │   ├── create/page.jsx           # Create meeting
 │   │   │   │   ├── [id]/
-│   │   │   │   │   ├── page.tsx              # Meeting room
-│   │   │   │   │   ├── lobby/page.tsx        # Pre-join lobby
-│   │   │   │   │   └── report/page.tsx       # Post-meeting report
+│   │   │   │   │   ├── page.jsx              # Meeting room
+│   │   │   │   │   ├── lobby/page.jsx        # Pre-join lobby
+│   │   │   │   │   └── report/page.jsx       # Post-meeting report
 │   │   │   ├── admin/
-│   │   │   │   ├── layout.tsx
+│   │   │   │   ├── layout.jsx
 │   │   │   │   ├── org/
-│   │   │   │   │   ├── users/page.tsx        # Org user management
-│   │   │   │   │   └── roles/page.tsx        # Role management
+│   │   │   │   │   ├── users/page.jsx        # Org user management
+│   │   │   │   │   └── roles/page.jsx        # Role management
 │   │   │   │   └── platform/
-│   │   │   │       ├── dashboard/page.tsx    # System monitoring
-│   │   │   │       └── services/page.tsx     # Service management
+│   │   │   │       ├── dashboard/page.jsx    # System monitoring
+│   │   │   │       └── services/page.jsx     # Service management
 │   │   │   └── profile/
-│   │   │       └── page.tsx                  # User profile settings
+│   │   │       └── page.jsx                  # User profile settings
 │   │   │
 │   │   ├── components/
 │   │   │   ├── ui/                           # Reusable UI primitives
-│   │   │   │   ├── Button.tsx
-│   │   │   │   ├── Input.tsx
-│   │   │   │   ├── Modal.tsx
-│   │   │   │   ├── Card.tsx
-│   │   │   │   ├── Badge.tsx
-│   │   │   │   ├── Dropdown.tsx
-│   │   │   │   ├── Toast.tsx
-│   │   │   │   └── Loader.tsx
+│   │   │   │   ├── Button.jsx
+│   │   │   │   ├── Input.jsx
+│   │   │   │   ├── Modal.jsx
+│   │   │   │   ├── Card.jsx
+│   │   │   │   ├── Badge.jsx
+│   │   │   │   ├── Dropdown.jsx
+│   │   │   │   ├── Toast.jsx
+│   │   │   │   └── Loader.jsx
 │   │   │   ├── layout/
-│   │   │   │   ├── Header.tsx
-│   │   │   │   ├── Sidebar.tsx
-│   │   │   │   ├── Footer.tsx
-│   │   │   │   └── Navigation.tsx
+│   │   │   │   ├── Header.jsx
+│   │   │   │   ├── Sidebar.jsx
+│   │   │   │   ├── Footer.jsx
+│   │   │   │   └── Navigation.jsx
 │   │   │   ├── auth/
-│   │   │   │   ├── LoginForm.tsx
-│   │   │   │   ├── RegisterForm.tsx
-│   │   │   │   └── AuthGuard.tsx
+│   │   │   │   ├── LoginForm.jsx
+│   │   │   │   ├── RegisterForm.jsx
+│   │   │   │   └── AuthGuard.jsx
 │   │   │   ├── meeting/
-│   │   │   │   ├── MeetingRoom.tsx           # Main meeting container
-│   │   │   │   ├── VideoGrid.tsx             # Video tiles layout
-│   │   │   │   ├── VideoTile.tsx             # Individual video
-│   │   │   │   ├── MeetingControls.tsx       # Mute, camera, leave, etc.
-│   │   │   │   ├── ParticipantList.tsx
-│   │   │   │   ├── MeetingLobby.tsx
-│   │   │   │   └── MeetingCard.tsx           # Meeting preview card
+│   │   │   │   ├── MeetingRoom.jsx           # Main meeting container
+│   │   │   │   ├── VideoGrid.jsx             # Video tiles layout
+│   │   │   │   ├── VideoTile.jsx             # Individual video
+│   │   │   │   ├── MeetingControls.jsx       # Mute, camera, leave, etc.
+│   │   │   │   ├── ParticipantList.jsx
+│   │   │   │   ├── MeetingLobby.jsx
+│   │   │   │   └── MeetingCard.jsx           # Meeting preview card
 │   │   │   ├── chat/
-│   │   │   │   ├── ChatPanel.tsx             # Chat sidebar
-│   │   │   │   ├── ChatMessage.tsx           # Single message
-│   │   │   │   ├── ChatInput.tsx             # Message input
-│   │   │   │   └── TranslatedMessage.tsx     # Message with translations
+│   │   │   │   ├── ChatPanel.jsx             # Chat sidebar
+│   │   │   │   ├── ChatMessage.jsx           # Single message
+│   │   │   │   ├── ChatInput.jsx             # Message input
+│   │   │   │   └── TranslatedMessage.jsx     # Message with translations
 │   │   │   ├── caption/
-│   │   │   │   ├── CaptionOverlay.tsx        # Live caption display
-│   │   │   │   ├── CaptionSettings.tsx       # Caption preferences
-│   │   │   │   └── TranslatedCaption.tsx
+│   │   │   │   ├── CaptionOverlay.jsx        # Live caption display
+│   │   │   │   ├── CaptionSettings.jsx       # Caption preferences
+│   │   │   │   └── TranslatedCaption.jsx
 │   │   │   ├── analytics/
-│   │   │   │   ├── AnalyticsDashboard.tsx
-│   │   │   │   ├── ParticipantChart.tsx
-│   │   │   │   └── LanguageStats.tsx
+│   │   │   │   ├── AnalyticsDashboard.jsx
+│   │   │   │   ├── ParticipantChart.jsx
+│   │   │   │   └── LanguageStats.jsx
 │   │   │   └── admin/
-│   │   │       ├── UserTable.tsx
-│   │   │       ├── RoleEditor.tsx
-│   │   │       ├── ServiceStatusCard.tsx
-│   │   │       └── SystemHealthMonitor.tsx
+│   │   │       ├── UserTable.jsx
+│   │   │       ├── RoleEditor.jsx
+│   │   │       ├── ServiceStatusCard.jsx
+│   │   │       └── SystemHealthMonitor.jsx
 │   │   │
 │   │   ├── hooks/
 │   │   │   ├── useAuth.ts
