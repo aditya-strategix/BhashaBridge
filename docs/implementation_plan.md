@@ -94,7 +94,11 @@ graph TB
 | Technology | Purpose |
 |-----------|---------|
 | **Next.js 14 (App Router)** | React framework with SSR/SSG, routing, API routes |
+<<<<<<< HEAD
 | **JavaScript** | Standard web scripting language |
+=======
+| **JavaScript (ES6+)** | Modern JavaScript across the codebase |
+>>>>>>> ab81b9fb344b1b648a4e647b79b24b30a8bf2233
 | **Socket.IO Client** | Real-time bidirectional communication |
 | **WebRTC (simple-peer)** | Peer-to-peer audio/video streaming |
 | **Zustand** | Lightweight state management |
@@ -104,9 +108,9 @@ graph TB
 | Technology | Purpose |
 |-----------|---------|
 | **Node.js + Express** | REST API server |
-| **TypeScript** | Type safety |
+| **JavaScript (ES6+)** | Modern JavaScript |
 | **Socket.IO** | Real-time events (chat, captions, signaling) |
-| **Prisma ORM** | Database access with type-safe queries |
+| **Prisma ORM** | Database access with structured queries |
 | **PostgreSQL** | Primary relational database |
 | **Redis** | Session caching, pub/sub for real-time events |
 | **JWT + bcrypt** | Authentication & password hashing |
@@ -490,7 +494,11 @@ BhashaBridge/
 │   │   │   ├── constants.js
 │   │   │   └── utils.js
 │   │   │
+<<<<<<< HEAD
 │   │   └── types/
+=======
+│   │   └── constants/
+>>>>>>> ab81b9fb344b1b648a4e647b79b24b30a8bf2233
 │   │       ├── user.js
 │   │       ├── meeting.js
 │   │       ├── chat.js
@@ -504,102 +512,100 @@ BhashaBridge/
 │
 ├── backend/
 │   ├── package.json
-│   ├── tsconfig.json
+│   ├── jsconfig.json
 │   ├── .env.example
 │   ├── prisma/
 │   │   ├── schema.prisma                     # Database schema
 │   │   ├── migrations/
-│   │   └── seed.ts                           # Seed data
+│   │   └── seed.js                           # Seed data
 │   ├── src/
-│   │   ├── index.ts                          # Entry point
-│   │   ├── app.ts                            # Express app setup
-│   │   ├── server.ts                         # HTTP + Socket.IO server
+│   │   ├── index.js                          # Entry point
+│   │   ├── app.js                            # Express app setup
+│   │   ├── server.js                         # HTTP + Socket.IO server
 │   │   │
 │   │   ├── config/
-│   │   │   ├── database.ts
-│   │   │   ├── redis.ts
-│   │   │   ├── socket.ts
-│   │   │   ├── cors.ts
-│   │   │   └── env.ts                        # Environment variables validation
+│   │   │   ├── database.js
+│   │   │   ├── redis.js
+│   │   │   ├── socket.js
+│   │   │   ├── cors.js
+│   │   │   └── env.js                        # Environment variables validation
 │   │   │
 │   │   ├── middleware/
-│   │   │   ├── auth.ts                       # JWT verification
-│   │   │   ├── rbac.ts                       # Role-based access control
-│   │   │   ├── validation.ts                 # Zod request validation
-│   │   │   ├── errorHandler.ts               # Global error handler
-│   │   │   └── rateLimiter.ts
+│   │   │   ├── auth.js                       # JWT verification
+│   │   │   ├── rbac.js                       # Role-based access control
+│   │   │   ├── validation.js                 # Zod request validation
+│   │   │   ├── errorHandler.js               # Global error handler
+│   │   │   └── rateLimiter.js
 │   │   │
 │   │   ├── routes/
-│   │   │   ├── index.ts                      # Route aggregator
-│   │   │   ├── auth.routes.ts
-│   │   │   ├── user.routes.ts
-│   │   │   ├── meeting.routes.ts
-│   │   │   ├── analytics.routes.ts
-│   │   │   ├── translation.routes.ts
-│   │   │   └── admin.routes.ts
+│   │   │   ├── index.js                      # Route aggregator
+│   │   │   ├── auth.routes.js
+│   │   │   ├── user.routes.js
+│   │   │   ├── meeting.routes.js
+│   │   │   ├── analytics.routes.js
+│   │   │   ├── translation.routes.js
+│   │   │   └── admin.routes.js
 │   │   │
 │   │   ├── controllers/
-│   │   │   ├── auth.controller.ts
-│   │   │   ├── user.controller.ts
-│   │   │   ├── meeting.controller.ts
-│   │   │   ├── analytics.controller.ts
-│   │   │   ├── translation.controller.ts
-│   │   │   └── admin.controller.ts
+│   │   │   ├── auth.controller.js
+│   │   │   ├── user.controller.js
+│   │   │   ├── meeting.controller.js
+│   │   │   ├── analytics.controller.js
+│   │   │   ├── translation.controller.js
+│   │   │   └── admin.controller.js
 │   │   │
 │   │   ├── services/
-│   │   │   ├── auth.service.ts
-│   │   │   ├── user.service.ts
-│   │   │   ├── meeting.service.ts
-│   │   │   ├── chat.service.ts
-│   │   │   ├── audio.service.ts
-│   │   │   ├── caption.service.ts            # Speech-to-text engine
-│   │   │   ├── translation.service.ts        # ITranslationService impl
-│   │   │   ├── analytics.service.ts
-│   │   │   ├── report.service.ts             # IReportGenerator impl
-│   │   │   └── admin.service.ts
+│   │   │   ├── auth.service.js
+│   │   │   ├── user.service.js
+│   │   │   ├── meeting.service.js
+│   │   │   ├── chat.service.js
+│   │   │   ├── audio.service.js
+│   │   │   ├── caption.service.js            # Speech-to-text engine
+│   │   │   ├── translation.service.js        # ITranslationService impl
+│   │   │   ├── analytics.service.js
+│   │   │   ├── report.service.js             # IReportGenerator impl
+│   │   │   └── admin.service.js
 │   │   │
 │   │   ├── interfaces/
-│   │   │   ├── ITranslationService.ts
-│   │   │   └── IReportGenerator.ts
+│   │   │   ├── ITranslationService.js
+│   │   │   └── IReportGenerator.js
 │   │   │
 │   │   ├── socket/
-│   │   │   ├── index.ts                      # Socket.IO initialization
+│   │   │   ├── index.js                      # Socket.IO initialization
 │   │   │   ├── handlers/
-│   │   │   │   ├── meeting.handler.ts        # Meeting room events
-│   │   │   │   ├── chat.handler.ts           # Chat message events
-│   │   │   │   ├── audio.handler.ts          # Audio/signaling events
-│   │   │   │   └── caption.handler.ts        # Caption stream events
+│   │   │   │   ├── meeting.handler.js        # Meeting room events
+│   │   │   │   ├── chat.handler.js           # Chat message events
+│   │   │   │   ├── audio.handler.js          # Audio/signaling events
+│   │   │   │   └── caption.handler.js        # Caption stream events
 │   │   │   └── middleware/
-│   │   │       └── socketAuth.ts             # Socket authentication
+│   │   │       └── socketAuth.js             # Socket authentication
 │   │   │
 │   │   ├── utils/
-│   │   │   ├── logger.ts
-│   │   │   ├── errors.ts                     # Custom error classes
-│   │   │   ├── validators.ts                 # Zod schemas
-│   │   │   └── helpers.ts
+│   │   │   ├── logger.js
+│   │   │   ├── errors.js                     # Custom error classes
+│   │   │   ├── validators.js                 # Zod schemas
+│   │   │   └── helpers.js
 │   │   │
-│   │   └── types/
-│   │       ├── express.d.ts                  # Express type extensions
-│   │       ├── socket.d.ts
-│   │       └── enums.ts                      # UserRole, MeetingState, Language
+│   │   └── constants/
+│   │       └── enums.js                      # UserRole, MeetingState, Language
 │   │
 │   └── tests/
 │       ├── unit/
 │       │   ├── services/
 │       │   └── controllers/
 │       ├── integration/
-│       │   ├── auth.test.ts
-│       │   ├── meeting.test.ts
-│       │   └── translation.test.ts
-│       └── setup.ts
+│       │   ├── auth.test.js
+│       │   ├── meeting.test.js
+│       │   └── translation.test.js
+│       └── setup.js
 │
 └── shared/
     ├── package.json
     └── src/
-        ├── types.ts                          # Shared TypeScript types
-        ├── constants.ts                      # Shared constants
-        ├── enums.ts                          # Shared enumerations
-        └── validators.ts                     # Shared Zod schemas
+        ├── types.js                          # Shared data schemas
+        ├── constants.js                      # Shared constants
+        ├── enums.js                          # Shared enumerations
+        └── validators.js                     # Shared Zod schemas
 ```
 
 ---
