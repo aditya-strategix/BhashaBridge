@@ -94,7 +94,7 @@ graph TB
 | Technology | Purpose |
 |-----------|---------|
 | **Next.js 14 (App Router)** | React framework with SSR/SSG, routing, API routes |
-| **TypeScript** | Type safety across the codebase |
+| **JavaScript** | Standard web scripting language |
 | **Socket.IO Client** | Real-time bidirectional communication |
 | **WebRTC (simple-peer)** | Peer-to-peer audio/video streaming |
 | **Zustand** | Lightweight state management |
@@ -378,7 +378,7 @@ BhashaBridge/
 │
 ├── frontend/
 │   ├── package.json
-│   ├── tsconfig.json
+│   ├── jsconfig.json
 │   ├── next.config.js
 │   ├── .env.local.example
 │   ├── public/
@@ -461,42 +461,42 @@ BhashaBridge/
 │   │   │       └── SystemHealthMonitor.jsx
 │   │   │
 │   │   ├── hooks/
-│   │   │   ├── useAuth.ts
-│   │   │   ├── useMeeting.ts
-│   │   │   ├── useSocket.ts
-│   │   │   ├── useWebRTC.ts
-│   │   │   ├── useChat.ts
-│   │   │   ├── useCaptions.ts
-│   │   │   ├── useTranslation.ts
-│   │   │   └── useMediaDevices.ts
+│   │   │   ├── useAuth.js
+│   │   │   ├── useMeeting.js
+│   │   │   ├── useSocket.js
+│   │   │   ├── useWebRTC.js
+│   │   │   ├── useChat.js
+│   │   │   ├── useCaptions.js
+│   │   │   ├── useTranslation.js
+│   │   │   └── useMediaDevices.js
 │   │   │
 │   │   ├── stores/
-│   │   │   ├── authStore.ts
-│   │   │   ├── meetingStore.ts
-│   │   │   ├── chatStore.ts
-│   │   │   └── captionStore.ts
+│   │   │   ├── authStore.js
+│   │   │   ├── meetingStore.js
+│   │   │   ├── chatStore.js
+│   │   │   └── captionStore.js
 │   │   │
 │   │   ├── services/
-│   │   │   ├── api.ts                        # Axios/fetch instance
-│   │   │   ├── authService.ts
-│   │   │   ├── meetingService.ts
-│   │   │   ├── chatService.ts
-│   │   │   ├── translationService.ts
-│   │   │   └── adminService.ts
+│   │   │   ├── api.js                        # Axios/fetch instance
+│   │   │   ├── authService.js
+│   │   │   ├── meetingService.js
+│   │   │   ├── chatService.js
+│   │   │   ├── translationService.js
+│   │   │   └── adminService.js
 │   │   │
 │   │   ├── lib/
-│   │   │   ├── socket.ts                     # Socket.IO client setup
-│   │   │   ├── webrtc.ts                     # WebRTC helpers
-│   │   │   ├── constants.ts
-│   │   │   └── utils.ts
+│   │   │   ├── socket.js                     # Socket.IO client setup
+│   │   │   ├── webrtc.js                     # WebRTC helpers
+│   │   │   ├── constants.js
+│   │   │   └── utils.js
 │   │   │
 │   │   └── types/
-│   │       ├── user.ts
-│   │       ├── meeting.ts
-│   │       ├── chat.ts
-│   │       ├── caption.ts
-│   │       ├── analytics.ts
-│   │       └── admin.ts
+│   │       ├── user.js
+│   │       ├── meeting.js
+│   │       ├── chat.js
+│   │       ├── caption.js
+│   │       ├── analytics.js
+│   │       └── admin.js
 │   │
 │   └── tests/
 │       ├── components/
@@ -701,10 +701,8 @@ Two admin types with distinct responsibilities:
 >
 > Which approach should we use?
 
-> [!IMPORTANT]
-> **Video Conferencing Scope**: The report mentions both 1-to-1 calls (in the SRS summary) and group meetings (in the main body). Should we:
-> - Start with **1-to-1 calls** and extend to groups later?
-> - Build **group meetings** from the start using an SFU (Selective Forwarding Unit) like mediasoup?
+> [!NOTE]
+> **Video Conferencing Scope**: Based on the SRS report, the system focuses on **1-to-1 video calls** in its initial version. We will start with 1-to-1 calls and extend to group meetings later using an SFU (Selective Forwarding Unit) like mediasoup if needed.
 
 ---
 
