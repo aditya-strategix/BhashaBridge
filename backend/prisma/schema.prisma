@@ -1,0 +1,142 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  HOST
+  PARTICIPANT
+  ORG_ADMIN
+  PLATFORM_ADMIN
+}
+
+enum MeetingState {
+  SCHEDULED
+  ONGOING
+  COMPLETED
+  CANCELLED
+}
+
+enum ParticipantRole {
+  HOST
+  PARTICIPANT
+}
+
+model Organization {
+  id         String   @id @default(uuid())
+  name       String
+  slug       String   @unique
+  createdAt  DateTime @default(now())
+  users      User[]
+}
+
+model User {
+  id               String        @id @default(uuid())
+  name             String
+  email            String        @unique
+  passwordHash     String
+  role             UserRole      @default(PARTICIPANT)
+  preferredLanguage String       @default("en")
+  organizationId   String?
+  organization     Organization? @relation(fields: [organizationId], references: [id])
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  meetingsHosted   Meeting[]     @relation("HostRelation")
+  participations   Participant[]
+  chatMessages     ChatMessage[]
+  captions         Caption[]
+}
+
+model Meeting {
+  id          String       @id @default(uuid())
+  meetingLink String       @unique
+  title       String
+  hostId      String
+  host        User         @relation("HostRelation", fields: [hostId], references: [id])
+  state       MeetingState @default(SCHEDULED)
+  startTime   DateTime?
+  endTime     DateTime?
+  createdAt   DateTime     @default(now())
+
+  participants Participant[]
+  chatMessages ChatMessage[]
+  captions     Caption[]
+  analytics    MeetingAnalytics?
+  reports      MeetingReport[]
+}
+
+model Participant {
+  id         String          @id @default(uuid())
+  userId     String
+  user       User            @relation(fields: [userId], references: [id])
+  meetingId  String
+  meeting    Meeting         @relation(fields: [meetingId], references: [id])
+  joinTime   DateTime        @default(now())
+  leaveTime  DateTime?
+  role       ParticipantRole @default(PARTICIPANT)
+
+  sessions   ParticipantSession[]
+
+  @@unique([userId, meetingId])
+}
+
+model ParticipantSession {
+  id            String      @id @default(uuid())
+  participantId String
+  participant   Participant @relation(fields: [participantId], references: [id])
+  joinedAt      DateTime    @default(now())
+  leftAt        DateTime?
+}
+
+model ChatMessage {
+  id               String   @id @default(uuid())
+  meetingId        String
+  meeting          Meeting  @relation(fields: [meetingId], references: [id])
+  senderId         String
+  sender           User     @relation(fields: [senderId], references: [id])
+  originalText     String
+  originalLanguage String
+  translations     Json?
+  timestamp        DateTime @default(now())
+}
+
+model Caption {
+  id               String   @id @default(uuid())
+  meetingId        String
+  meeting          Meeting  @relation(fields: [meetingId], references: [id])
+  speakerId        String
+  speaker          User     @relation(fields: [speakerId], references: [id])
+  originalText     String
+  originalLanguage String
+  translatedText   Json?
+  timestamp        DateTime @default(now())
+}
+
+model MeetingAnalytics {
+  id                    String   @id @default(uuid())
+  meetingId             String   @unique
+  meeting               Meeting  @relation(fields: [meetingId], references: [id])
+  totalParticipants     Int      @default(0)
+  totalDurationSeconds  Int      @default(0)
+  languagesUsed         Json?
+  participantDurations  Json?
+  generatedAt           DateTime @default(now())
+
+  reports               MeetingReport[]
+}
+
+model MeetingReport {
+  id          String           @id @default(uuid())
+  meetingId   String
+  meeting     Meeting          @relation(fields: [meetingId], references: [id])
+  analyticsId String
+  analytics   MeetingAnalytics @relation(fields: [analyticsId], references: [id])
+  reportData  Json
+  format      String           @default("json")
+  generatedAt DateTime         @default(now())
+}
