@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const authRoutes = require('./routes/auth.routes');
 const meetingRoutes = require('./routes/meeting.routes');
+const organizationRoutes = require('./routes/organization.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
 // const translationRoutes = require('./routes/translation.routes');
 const adminRoutes = require('./routes/admin.routes');
@@ -14,6 +15,7 @@ app.use(express.json());
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/organizations', organizationRoutes);
 app.use('/api/meetings', meetingRoutes);
 app.use('/api/analytics', analyticsRoutes);
 // app.use('/api/translate', translationRoutes);

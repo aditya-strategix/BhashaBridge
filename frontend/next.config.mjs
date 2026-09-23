@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  /* config options here */
+  reactStrictMode: false, // Disabled: StrictMode double-mounts effects, causing duplicate socket connections in meetings
 };
 
 export default nextConfig;

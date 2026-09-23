@@ -54,3 +54,28 @@ exports.login = async (req, res) => {
   }
 };
 
+exports.updateProfile = async (req, res) => {
+  try {
+    const { name, preferredLanguage } = req.body;
+    
+    const user = await prisma.user.update({
+      where: { id: req.user.userId },
+      data: { 
+        ...(name && { name }),
+        ...(preferredLanguage && { preferredLanguage })
+      }
+    });
+
+    const token = jwt.sign(
+      { userId: user.id, role: user.role, language: user.preferredLanguage },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email, language: user.preferredLanguage } });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+

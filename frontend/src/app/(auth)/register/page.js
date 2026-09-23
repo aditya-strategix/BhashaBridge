@@ -19,7 +19,9 @@ export default function Register() {
     e.preventDefault();
     const success = await register(name, email, password, language);
     if (success) {
-      router.push('/login');
+      const urlParams = new URLSearchParams(window.location.search);
+      const redirect = urlParams.get('redirect');
+      router.push(redirect ? `/login?redirect=${redirect}` : '/login');
     }
   };
 
@@ -89,7 +91,7 @@ export default function Register() {
         </form>
 
         <span className={styles.linkText}>
-          Already have an account? <Link href="/login" className={styles.link}>Sign In</Link>
+          Already have an account? <Link href={`/login${typeof window !== 'undefined' && window.location.search ? window.location.search : ''}`} className={styles.link}>Sign In</Link>
         </span>
       </div>
     </div>

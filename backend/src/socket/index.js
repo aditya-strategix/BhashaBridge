@@ -14,32 +14,86 @@ function setupSocket(server) {
   io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
 
+    // Allow users to join their personal notification room
+    socket.on('user:register', ({ userId }) => {
+      if (userId) {
+        socket.join(`user:${userId}`);
+        socket.userId = userId;
+        console.log(`User ${userId} registered for notifications`);
+      }
+    });
+
     // Join meeting room
     socket.on('meeting:join', async ({ meetingId, userId, peerId, language }) => {
-      socket.join(meetingId);
-      // save details to socket for quick access later
-      socket.userLanguage = language || 'en';
-      socket.userId = userId;
-      socket.meetingId = meetingId;
-      
-      socket.to(meetingId).emit('participant:joined', { userId, peerId, socketId: socket.id });
-      console.log(`User ${userId} joined meeting ${meetingId}`);
-
       try {
         const meeting = await prisma.meeting.findUnique({ where: { meetingLink: meetingId } });
-        if (meeting) {
-          const participant = await prisma.participant.findUnique({
-            where: { userId_meetingId: { userId, meetingId: meeting.id } }
+        if (!meeting) return;
+        if (meeting.state === 'COMPLETED') {
+          socket.disconnect(true);
+          return;
+        }
+
+        const participant = await prisma.participant.findUnique({
+          where: { userId_meetingId: { userId, meetingId: meeting.id } }
+        });
+        
+        if (!participant) return;
+
+        socket.join(meetingId);
+        socket.userLanguage = language || 'en';
+        socket.userId = userId;
+        socket.meetingId = meetingId;
+        socket.dbMeetingId = meeting.id;
+
+        if (participant.status === 'WAITING') {
+          // Tell hosts someone is waiting
+          socket.to(meetingId).emit('waiting:request', { userId, name: participant.user?.name || 'User' });
+        } else if (participant.status === 'ADMITTED') {
+          socket.to(meetingId).emit('participant:joined', { userId, peerId, socketId: socket.id });
+          console.log(`User ${userId} joined meeting ${meetingId}`);
+          
+          const session = await prisma.participantSession.create({
+            data: { participantId: participant.id }
           });
-          if (participant) {
-            const session = await prisma.participantSession.create({
-              data: { participantId: participant.id }
-            });
-            socket.sessionId = session.id;
-          }
+          socket.sessionId = session.id;
         }
       } catch (err) {
-        console.error('Failed to log attendance session', err);
+        console.error('Socket join error', err);
+      }
+    });
+
+    socket.on('meeting:admit', async ({ meetingId, targetUserId }) => {
+      // Must verify caller is HOST or COHOST
+      try {
+        const meeting = await prisma.meeting.findUnique({ where: { meetingLink: meetingId } });
+        const caller = await prisma.participant.findUnique({ where: { userId_meetingId: { userId: socket.userId, meetingId: meeting.id } } });
+        
+        if (caller && (caller.role === 'HOST' || caller.role === 'COHOST')) {
+          await prisma.participant.update({
+            where: { userId_meetingId: { userId: targetUserId, meetingId: meeting.id } },
+            data: { status: 'ADMITTED' }
+          });
+          io.to(meetingId).emit('waiting:admitted', { userId: targetUserId });
+        }
+      } catch (err) {
+        console.error('Socket admit error', err);
+      }
+    });
+
+    socket.on('meeting:reject', async ({ meetingId, targetUserId }) => {
+      try {
+        const meeting = await prisma.meeting.findUnique({ where: { meetingLink: meetingId } });
+        const caller = await prisma.participant.findUnique({ where: { userId_meetingId: { userId: socket.userId, meetingId: meeting.id } } });
+        
+        if (caller && (caller.role === 'HOST' || caller.role === 'COHOST')) {
+          await prisma.participant.update({
+            where: { userId_meetingId: { userId: targetUserId, meetingId: meeting.id } },
+            data: { status: 'REJECTED' }
+          });
+          io.to(meetingId).emit('waiting:rejected', { userId: targetUserId });
+        }
+      } catch (err) {
+        console.error('Socket reject error', err);
       }
     });
 
@@ -50,12 +104,24 @@ function setupSocket(server) {
       // Emit original message to everyone immediately
       io.to(meetingId).emit('chat:message', data);
 
+      // Save chat message to database asynchronously
+      if (socket.dbMeetingId) {
+        prisma.chatMessage.create({
+          data: {
+            meetingId: socket.dbMeetingId,
+            senderId,
+            originalText: text,
+            originalLanguage: language,
+          }
+        }).catch(err => console.error("DB chat save error:", err));
+      }
+
       try {
         // Broadcast translated message by iterating over sockets in room
         const clients = await io.in(meetingId).fetchSockets();
         const targetLanguages = new Set();
         clients.forEach(c => {
-          if (c.userLanguage && c.userLanguage !== language) {
+          if (c.userLanguage) {
             targetLanguages.add(c.userLanguage);
           }
         });
@@ -90,11 +156,23 @@ function setupSocket(server) {
       // Broadcast live caption
       io.to(meetingId).emit('caption:text', data);
       
+      // Save caption to database asynchronously
+      if (socket.dbMeetingId) {
+        prisma.caption.create({
+          data: {
+            meetingId: socket.dbMeetingId,
+            speakerId,
+            originalText: text,
+            originalLanguage: language,
+          }
+        }).catch(err => console.error("DB caption save error:", err));
+      }
+      
       try {
         const clients = await io.in(meetingId).fetchSockets();
         const targetLanguages = new Set();
         clients.forEach(c => {
-          if (c.userLanguage && c.userLanguage !== language) {
+          if (c.userLanguage) {
             targetLanguages.add(c.userLanguage);
           }
         });
@@ -117,6 +195,10 @@ function setupSocket(server) {
 
     socket.on('disconnect', async () => {
       console.log(`User disconnected: ${socket.id}`);
+      if (socket.meetingId) {
+        socket.to(socket.meetingId).emit('participant:left', { socketId: socket.id, userId: socket.userId });
+      }
+
       if (socket.sessionId) {
         try {
           await prisma.participantSession.update({

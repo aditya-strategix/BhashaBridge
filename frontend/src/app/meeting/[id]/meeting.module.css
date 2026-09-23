@@ -110,6 +110,20 @@
   filter: brightness(1.1);
 }
 
+.btnSecondary {
+  background: var(--secondary-hover);
+  color: white;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+}
+
+.btnSecondary:hover {
+  background: #475569;
+}
+
 /* Chat Section */
 .chatSection {
   width: 350px;
@@ -227,6 +241,7 @@
   justify-content: center;
   pointer-events: none;
   padding: 0 2rem;
+  z-index: 100;
 }
 
 .captionText {

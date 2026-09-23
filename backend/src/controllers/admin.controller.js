@@ -3,11 +3,24 @@ const prisma = new PrismaClient();
 
 exports.getOrgUsers = async (req, res) => {
   try {
-    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
-    if (!user.organizationId) return res.json({ users: [] });
+    const user = await prisma.user.findUnique({ 
+      where: { id: req.user.userId },
+      include: { ownedOrganizations: { include: { users: true } } }
+    });
+    
+    if (!user.ownedOrganizations.length) return res.json({ users: [] });
 
-    const users = await prisma.user.findMany({ where: { organizationId: user.organizationId }, select: { id: true, name: true, email: true, role: true }});
-    res.json({ users });
+    // Aggregate users across all owned orgs
+    const userMap = new Map();
+    user.ownedOrganizations.forEach(org => {
+      org.users.forEach(u => {
+        if (!userMap.has(u.id)) {
+          userMap.set(u.id, { id: u.id, name: u.name, email: u.email, role: u.role });
+        }
+      });
+    });
+
+    res.json({ users: Array.from(userMap.values()) });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Server error' });
@@ -16,9 +29,12 @@ exports.getOrgUsers = async (req, res) => {
 
 exports.addOrgUser = async (req, res) => {
   try {
-    const adminUser = await prisma.user.findUnique({ where: { id: req.user.userId } });
-    if (!adminUser.organizationId) {
-      return res.status(400).json({ error: 'You do not belong to an organization' });
+    const adminUser = await prisma.user.findUnique({ 
+      where: { id: req.user.userId },
+      include: { ownedOrganizations: true } 
+    });
+    if (!adminUser.ownedOrganizations.length) {
+      return res.status(400).json({ error: 'You do not own an organization' });
     }
 
     const { email } = req.body;
@@ -27,9 +43,10 @@ exports.addOrgUser = async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    await prisma.user.update({
-      where: { email },
-      data: { organizationId: adminUser.organizationId }
+    // Add to the first owned organization for backward compatibility in this old admin panel
+    await prisma.organization.update({
+      where: { id: adminUser.ownedOrganizations[0].id },
+      data: { users: { connect: { id: targetUser.id } } }
     });
 
     res.status(201).json({ message: 'User added to organization successfully' });
@@ -41,22 +58,20 @@ exports.addOrgUser = async (req, res) => {
 
 exports.removeOrgUser = async (req, res) => {
   try {
-    const adminUser = await prisma.user.findUnique({ where: { id: req.user.userId } });
-    if (!adminUser.organizationId) {
-      return res.status(400).json({ error: 'You do not belong to an organization' });
+    const adminUser = await prisma.user.findUnique({ 
+      where: { id: req.user.userId },
+      include: { ownedOrganizations: true }
+    });
+    if (!adminUser.ownedOrganizations.length) {
+      return res.status(400).json({ error: 'You do not own an organization' });
     }
 
     const { id } = req.params;
     
-    // Verify user belongs to same org
-    const targetUser = await prisma.user.findUnique({ where: { id } });
-    if (!targetUser || targetUser.organizationId !== adminUser.organizationId) {
-      return res.status(403).json({ error: 'User not in your organization' });
-    }
-
-    await prisma.user.update({
-      where: { id },
-      data: { organizationId: null, role: 'PARTICIPANT' }
+    // Disconnect from the first owned organization
+    await prisma.organization.update({
+      where: { id: adminUser.ownedOrganizations[0].id },
+      data: { users: { disconnect: { id } } }
     });
 
     res.json({ message: 'User removed from organization successfully' });

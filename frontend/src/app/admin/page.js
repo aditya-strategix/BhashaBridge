@@ -58,7 +58,7 @@ export default function AdminDashboard() {
       setNewUserEmail('');
       fetchUsers();
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to add user');
+      setAlertMessage(err.response?.data?.error || 'Failed to add user');
     }
   };
 
@@ -67,7 +67,7 @@ export default function AdminDashboard() {
       await api.delete(`/admin/org/users/${userId}`);
       fetchUsers();
     } catch (err) {
-      alert('Failed to remove user');
+      setAlertMessage('Failed to remove user');
     }
   };
 
@@ -76,9 +76,11 @@ export default function AdminDashboard() {
       await api.patch(`/admin/org/users/${userId}/role`, { role: newRole });
       fetchUsers();
     } catch (err) {
-      alert('Failed to change role');
+      setAlertMessage('Failed to change role');
     }
   };
+
+  const [alertMessage, setAlertMessage] = useState(null);
 
   if (!user || (user.role !== 'ORG_ADMIN' && user.role !== 'PLATFORM_ADMIN')) return null;
 
@@ -160,6 +162,37 @@ export default function AdminDashboard() {
           ← Back to Main Dashboard
         </button>
       </div>
+
+      {/* Alert Modal */}
+      {alertMessage && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999
+        }}>
+          <div className="glass" style={{
+            background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95))',
+            padding: '2rem', borderRadius: '16px', border: '1px solid rgba(255, 255, 255, 0.1)',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 40px rgba(96, 165, 250, 0.2)',
+            maxWidth: '400px', width: '90%', textAlign: 'center', animation: 'scaleUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
+          }}>
+            <h3 style={{ margin: '0 0 1rem', color: '#f8fafc', fontSize: '1.25rem' }}>Notification</h3>
+            <p style={{ margin: '0 0 1.5rem', color: '#94a3b8', fontSize: '0.95rem', lineHeight: 1.5 }}>
+              {alertMessage}
+            </p>
+            <button 
+              onClick={() => setAlertMessage(null)}
+              style={{
+                width: '100%', padding: '0.875rem', background: '#3b82f6',
+                color: 'white', border: 'none', borderRadius: '8px', fontSize: '1rem', fontWeight: 600,
+                cursor: 'pointer', transition: 'transform 0.1s'
+              }}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -16,7 +16,9 @@ export default function Login() {
     e.preventDefault();
     const success = await login(email, password);
     if (success) {
-      router.push('/dashboard');
+      const urlParams = new URLSearchParams(window.location.search);
+      const redirect = urlParams.get('redirect');
+      router.push(redirect || '/dashboard');
     }
   };
 
@@ -55,7 +57,7 @@ export default function Login() {
         </form>
 
         <span className={styles.linkText}>
-          Don't have an account? <Link href="/register" className={styles.link}>Register</Link>
+          Don&apos;t have an account? <Link href={`/register${typeof window !== 'undefined' && window.location.search ? window.location.search : ''}`} className={styles.link}>Register</Link>
         </span>
       </div>
     </div>
