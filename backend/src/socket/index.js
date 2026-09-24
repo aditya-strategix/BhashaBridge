@@ -34,22 +34,30 @@ function setupSocket(server) {
         }
 
         const participant = await prisma.participant.findUnique({
-          where: { userId_meetingId: { userId, meetingId: meeting.id } }
+          where: { userId_meetingId: { userId, meetingId: meeting.id } },
+          include: { user: true }
         });
         
         if (!participant) return;
 
-        socket.join(meetingId);
         socket.userLanguage = language || 'en';
         socket.userId = userId;
         socket.meetingId = meetingId;
         socket.dbMeetingId = meeting.id;
+        socket.join(`user_${userId}`);
 
         if (participant.status === 'WAITING') {
           // Tell hosts someone is waiting
           socket.to(meetingId).emit('waiting:request', { userId, name: participant.user?.name || 'User' });
         } else if (participant.status === 'ADMITTED') {
-          socket.to(meetingId).emit('participant:joined', { userId, peerId, socketId: socket.id });
+          socket.join(meetingId);
+          socket.to(meetingId).emit('participant:joined', { 
+            userId, 
+            peerId, 
+            socketId: socket.id,
+            name: participant.user?.name,
+            role: participant.role 
+          });
           console.log(`User ${userId} joined meeting ${meetingId}`);
           
           const session = await prisma.participantSession.create({
@@ -74,6 +82,7 @@ function setupSocket(server) {
             data: { status: 'ADMITTED' }
           });
           io.to(meetingId).emit('waiting:admitted', { userId: targetUserId });
+          io.to(`user_${targetUserId}`).emit('waiting:admitted', { userId: targetUserId });
         }
       } catch (err) {
         console.error('Socket admit error', err);
@@ -91,6 +100,7 @@ function setupSocket(server) {
             data: { status: 'REJECTED' }
           });
           io.to(meetingId).emit('waiting:rejected', { userId: targetUserId });
+          io.to(`user_${targetUserId}`).emit('waiting:rejected', { userId: targetUserId });
         }
       } catch (err) {
         console.error('Socket reject error', err);
@@ -195,6 +205,8 @@ function setupSocket(server) {
         console.error('Caption translation error:', error);
       }
     });
+
+    socket.on('user:update_language', ({ language }) => { socket.userLanguage = language; });
 
     socket.on('disconnect', async () => {
       console.log(`User disconnected: ${socket.id}`);

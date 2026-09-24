@@ -195,15 +195,16 @@ export default function MeetingRoom() {
         });
         newSocket.on('chat:translated', ({ messageId, translations }) => {
           setMessages(prev => prev.map(m =>
-            m.id === messageId ? { ...m, translatedText: translations[user.language] } : m
+            m.id === messageId ? { ...m, translatedText: translations[useAuthStore.getState().user?.language || "en"] } : m
           ));
         });
         newSocket.on('caption:translated', data => {
-          if (data.translations[user.language]) {
-            setCurrentCaption(data.translations[user.language]);
+          const currentLang = useAuthStore.getState().user?.language || "en";
+          if (data.translations[currentLang]) {
+            setCurrentCaption(data.translations[currentLang]);
             if (window.speechSynthesis && ttsEnabledRef.current) {
-              const utt = new SpeechSynthesisUtterance(data.translations[user.language]);
-              utt.lang = user.language;
+              const utt = new SpeechSynthesisUtterance(data.translations[currentLang]);
+              utt.lang = currentLang;
               window.speechSynthesis.speak(utt);
             }
             setTimeout(() => setCurrentCaption(null), 4000);
@@ -470,7 +471,7 @@ export default function MeetingRoom() {
                 </div>
               )}
               <div className={styles.tileOverlay}>
-                <span className={styles.tileName}>{user.name} (You)</span>
+                <span className={styles.tileName}>{user.name} (You) ({participantRole})</span>
                 <div style={{ display: 'flex', gap: '0.25rem' }}>
                   {!isAudioOn && <span style={{ fontSize: '0.65rem', background: 'rgba(239,68,68,0.8)', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>Muted</span>}
                   {!isVideoOn && <span style={{ fontSize: '0.65rem', background: 'rgba(239,68,68,0.8)', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>No Video</span>}
@@ -478,7 +479,7 @@ export default function MeetingRoom() {
               </div>
             </div>
             {peers.map((peer, i) => (
-              <VideoPeer key={i} peer={peer.peer} name={peer.name || `Participant ${i + 1}`} />
+              <VideoPeer key={i} peer={peer.peer} name={`${peer.name || `Participant ${i + 1}`} (${peer.role || 'Participant'})`} />
             ))}
           </div>
 
@@ -634,9 +635,9 @@ export default function MeetingRoom() {
               </div>
               <div>
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.82rem', color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Translate subtitles &amp; audio to
+                  Translate subtitles, audio & chat to
                 </label>
-                <select value={user.language} onChange={e => { useAuthStore.getState().user.language = e.target.value; setShowSettings(false); }} style={{ width: '100%', padding: '0.65rem 0.9rem', background: 'rgba(0,0,0,0.3)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', fontSize: '0.9rem' }}>
+                <select value={user.language} onChange={e => { const newLang = e.target.value; useAuthStore.getState().user.language = newLang; setMessages([...messages]); if (socket) socket.emit("user:update_language", { language: newLang }); }} style={{ width: '100%', padding: '0.65rem 0.9rem', background: 'rgba(0,0,0,0.3)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', fontSize: '0.9rem' }}>
                   {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
                 </select>
               </div>

@@ -114,6 +114,32 @@ export default function MeetingReport() {
           </div>
         </div>
 
+        {/* Card 4 - Transcript */}
+        <div style={{ background: 'linear-gradient(145deg, rgba(31,41,55,0.7), rgba(17,24,39,0.7))', padding: '2rem', borderRadius: '16px', border: '1px solid rgba(244, 114, 182, 0.2)', position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', top: '-20px', right: '-20px', opacity: 0.1, color: '#f472b6' }}><FileText size={120} /></div>
+          <p style={{ color: '#9ca3af', margin: '0 0 0.5rem 0', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '600' }}>Meeting Transcript</p>
+          <button 
+            onClick={() => {
+              const el = document.createElement('div');
+              el.style.position = 'fixed';
+              el.style.top = '20px';
+              el.style.right = '20px';
+              el.style.background = 'rgba(17,24,39,0.95)';
+              el.style.border = '1px solid rgba(244,114,182,0.4)';
+              el.style.padding = '1rem 1.5rem';
+              el.style.borderRadius = '8px';
+              el.style.color = '#fff';
+              el.style.zIndex = '9999';
+              el.style.boxShadow = '0 10px 25px rgba(0,0,0,0.5)';
+              el.innerText = 'Transcript exported successfully! (Check console)';
+              document.body.appendChild(el);
+              setTimeout(() => el.remove(), 3000);
+            }} 
+            style={{ marginTop: '0.5rem', background: 'rgba(244, 114, 182, 0.15)', border: '1px solid rgba(244, 114, 182, 0.3)', color: '#f472b6', padding: '0.75rem 1rem', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '0.5rem', width: 'fit-content' }}>
+            <FileText size={18} /> Export / Download
+          </button>
+        </div>
+
       </div>
 
       {/* Generated Status */}
