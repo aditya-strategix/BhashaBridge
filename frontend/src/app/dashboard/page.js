@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -98,7 +98,7 @@ function ConfirmModal({ title, message, onConfirm, onClose }) {
 }
 
 // ------- main component -------
-export default function Dashboard() {
+function DashboardContent() {
   const { user, initialize, logout } = useAuthStore();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -894,5 +894,13 @@ export default function Dashboard() {
         </div>
       </div>
     </>
+  );
+}
+
+export default function Dashboard() {
+  return (
+    <Suspense fallback={<div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', background: '#0a0f1e', color: '#60a5fa' }}>Loading Dashboard...</div>}>
+      <DashboardContent />
+    </Suspense>
   );
 }

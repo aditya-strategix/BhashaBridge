@@ -147,6 +147,9 @@ function setupSocket(server) {
       io.to(data.targetSocketId).emit('audio:signal', {
         signal: data.signal,
         callerId: socket.id,
+        name: data.name,
+        role: data.role,
+        userId: data.userId
       });
     });
 
