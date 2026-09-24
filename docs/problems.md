@@ -237,3 +237,37 @@ Button turns red and shows "Stop Demo Speech" while active.
 | 6 | TTS code outside condition block | Regex patches broke brace alignment | Read file line-by-line; manually realigned braces |
 | 7 | TTS completely silent | `getVoices()` returns `[]` async on Chrome | Pre-cache voices in `voicesRef` via `voiceschanged` event |
 | 8 | Demo Speech one-shot only | No loop logic | `setInterval` inside `useEffect` gated by `isDemoActive` |
+
+| 9 | TTS fails for certain languages | OS missing specific language voice packs | Bypassed OS entirely via a Backend Proxy to Google Cloud TTS |
+
+---
+
+## Problem 9: Missing OS Voice Packs & Google Hotlink Blocking (The Ultimate TTS Fix)
+
+### What Happened
+Even after all TTS bugs were fixed, speech-to-speech translation worked perfectly for Hindi, but was completely silent for Telugu.
+
+### Root Cause (Part 1 - OS Dependency)
+The `window.speechSynthesis` API relies entirely on the **voice packs installed on the user's Operating System**. Windows comes pre-installed with a Hindi voice pack, but **does not** include a Telugu voice pack by default. When the browser looked for a Telugu voice, it returned an empty array, and the audio was silently dropped. Asking users to manually dig into Windows Settings to install language packs is a terrible UX.
+
+### Initial Fix Attempt (Frontend Cloud Fetch)
+We tried to rip out `window.speechSynthesis` and replace it with a hidden Google Translate cloud endpoint that returns MP3 audio:
+`https://translate.google.com/translate_tts?ie=UTF-8&q=...&client=tw-ob`
+This failed because Google has strict **anti-hotlinking/CORS protections**. When the browser requested the URL directly, Google saw the browser's `Origin` and `Referer` headers and blocked the request, resulting in silence.
+
+### Final Fix (Backend Proxy Pipeline)
+To bypass both the Windows OS limitation and Google's browser blocks, we built a dedicated **Backend Proxy Pipeline**:
+1. Added a new Express route: `GET /api/tts?text=...&lang=...`
+2. The frontend passes the translated text to our backend.
+3. Our Node.js backend requests the audio from Google. Because Node.js is not a browser, it doesn't send `Origin` headers, so Google accepts the request and returns the MP3.
+4. The backend streams the raw audio binary back to the frontend.
+5. The frontend plays it using the standard HTML5 `<audio>` player.
+
+**Result:** 100% free, high-quality neural Cloud TTS for *every* language, completely independent of the user's browser or operating system!
+
+```js
+// Frontend Code
+const url = `${API_URL}/tts?text=${encodeURIComponent(textToSpeak)}&lang=${targetLangCode}`;
+const audio = new Audio(url);
+audio.play();
+```

@@ -184,73 +184,33 @@ All real-time communication happens through `backend/src/socket/index.js`. Every
 
 ---
 
-## 6. The Live Translation Pipeline (Core Feature)
+## 6. The Live Translation Pipeline (100% Free Architecture)
 
-This is the heart of BhashaBridge. Here is the complete end-to-end flow for speech-to-translated-speech:
+The translation system is designed to be highly scalable, completely free, and OS-independent.
 
-```
-SIDE A (Speaker)                    SERVER                      SIDE B (Listener)
-─────────────────                 ──────────                  ──────────────────
-1. User speaks into mic
-   │
-   ▼
-2. Browser Web Speech API
-   converts voice → text
-   (100% local, no API)
-   │
-   ▼
-3. socket.emit('caption:text',
-   { text, language: 'en' })
-   ─────────────────────────────►
-                                4. Server receives text
-                                   Looks up all sockets in room
-                                   Reads each socket's userSettings:
-                                   - Who wants captionLang?
-                                   - Who wants ttsLang?
-                                   Builds a Set of unique target languages
-                                   │
-                                   ▼
-                                5. For each unique target language:
-                                   translate(text, { to: 'hi', client: 'gtx' })
-                                   ↓ if fails → MyMemory API fallback
-                                   Builds translations map:
-                                   { hi: "नमस्ते, यह एक परीक्षण है" }
-                                   │
-                                   ▼
-                                6. io.to(meetingId).emit('caption:translated', {
-                                     text: "Hello, this is a test",
-                                     sourceLanguage: 'en',
-                                     speakerId: user.id,
-                                     senderSocketId: socket.id,  ← key for echo prevention
-                                     translations: { hi: "नमस्ते..." }
-                                   })
-                                   ─────────────────────────────────────────────►
-                                                                 7. Frontend receives event
-                                                                    Checks senderSocketId !== mySocket.id
-                                                                    → Not my own speech, proceed
-                                                                    │
-                                                                    ▼
-                                                                 8. CAPTION: if captionEnabled && captionLang='hi'
-                                                                    → Show "नमस्ते..." on screen for 4 seconds
-                                                                    │
-                                                                    ▼
-                                                                 9. TTS AUDIO: if ttsEnabled && ttsLang='hi'
-                                                                    → Look up voicesRef.current (pre-cached)
-                                                                    → Find voice matching 'hi'
-                                                                    → new SpeechSynthesisUtterance("नमस्ते...")
-                                                                    → window.speechSynthesis.speak(utt)
-                                                                    → Browser speaks Hindi out loud 🔊
-```
+### 6.1 Speech-to-Text (STT)
+- **Engine:** `window.SpeechRecognition` (Web Speech API).
+- **How it works:** In Chrome/Edge, this automatically streams the user's microphone audio to Google's Cloud STT servers. It returns highly accurate text transcription in 100+ languages natively.
+- **Why it's free:** Google subsidizes this cost to improve Chrome. 
+- **Privacy Handling:** Blocked by default on Brave. The app gracefully detects Brave and prompts the user to enable Google Services or use Chrome.
 
-### Why All Three Steps Are Free
+### 6.2 Text Translation
+- **Engine:** `google-translate-api-x` (Backend) + `MyMemory API` (Fallback).
+- **How it works:** 
+  1. The backend receives raw text via Socket.IO.
+  2. It spoofs a Chrome Extension request (`client: 'gtx'`) to bypass Google Translate's standard rate limits.
+  3. If Google temporarily IP bans the server, the `catch()` block automatically falls back to the free `MyMemory` REST API to guarantee zero downtime.
+  4. The backend broadcasts a JSON map of all translated languages to the meeting room.
 
-| Step | Technology | Cost |
-|------|-----------|------|
-| Speech → Text | Browser Web Speech API (Chrome/Edge/Safari) | Free, runs locally |
-| Text → Translated Text | `google-translate-api-x` (scrapes Google Translate) | Free, no API key |
-| Translated Text → Speech | Browser SpeechSynthesis API | Free, runs locally |
-
----
+### 6.3 Text-to-Speech (TTS)
+- **Engine:** Google Cloud TTS endpoint (`translate_tts`) via Backend Proxy.
+- **How it works (The Proxy Pipeline):**
+  1. The browser receives the translated text string.
+  2. The browser requests an audio file from our backend: `GET /api/tts?text=...&lang=...`.
+  3. Our Node.js backend makes a server-to-server request to Google's hidden TTS endpoint. By using a backend proxy, we bypass Google's strict browser anti-hotlinking (CORS) protections.
+  4. The backend pipes the raw MP3 binary data back to the frontend.
+  5. The frontend plays the audio using a standard HTML5 `new Audio()` object.
+- **Why it's better:** We completely removed the `window.speechSynthesis` API, which was strictly limited to the user's Windows OS voice packs (e.g. failing on Telugu because Windows doesn't install it by default). This new cloud architecture guarantees perfect neural voices for every language, on every device, without the user installing anything.
 
 ## 7. Per-User Settings Architecture
 
@@ -320,7 +280,7 @@ Once the handshake is complete, audio and video flow **directly between browsers
 | Real-time Client | Socket.IO Client | WebSocket communication |
 | Video/Audio | simple-peer (WebRTC) | P2P video/audio streams |
 | Speech-to-Text | Browser Web Speech API | Voice → text (free, local) |
-| Text-to-Speech | Browser SpeechSynthesis API | Text → voice (free, local) |
+| Text-to-Speech | Google Cloud TTS via Backend Proxy | Text → voice (free, cloud-based, OS-independent) |
 | Backend | Node.js + Express | REST API server |
 | Real-time Server | Socket.IO | WebSocket event hub |
 | Translation | google-translate-api-x + MyMemory | Free text translation |

@@ -226,21 +226,15 @@ export default function MeetingRoom() {
             const ttsLang = u.ttsLang || 'original';
             
             console.log("Caption arrived! ttsEnabled:", ttsEnabled, "speakerSocket:", data.senderSocketId, "mySocket:", newSocket.id);
-              if (ttsEnabled && window.speechSynthesis && data.senderSocketId !== newSocket.id) {
-                console.log("TTS condition passed! Preparing to speak...");
-                // Removed queue cancellation as it might cancel valid rapid utterances
+              if (ttsEnabled && data.senderSocketId !== newSocket.id) {
+              console.log("TTS condition passed! Preparing to speak via Backend Proxy API...");
               const textToSpeak = ttsLang === 'original' ? data.text : (data.translations[ttsLang] || data.text);
               if (textToSpeak) {
-                const utt = new SpeechSynthesisUtterance(textToSpeak);
-                  utt.lang = ttsLang === 'original' ? data.sourceLanguage : ttsLang;
-                  const voices = window.speechSynthesis.getVoices();
-                  const targetLangCode = (utt.lang || 'en').toLowerCase();
-                  const voice = voices.find(v => v.lang.toLowerCase().includes(targetLangCode));
-                  if (voice) {
-                    utt.voice = voice;
-                  }
-                  window.speechSynthesis.speak(utt);
-                  console.log("Speaking:", textToSpeak, "Language:", utt.lang, "Voice:", voice ? voice.name : "Default");
+                const targetLangCode = ttsLang === 'original' ? (data.sourceLanguage || 'en') : ttsLang;
+                const url = `${API_URL}/tts?text=${encodeURIComponent(textToSpeak)}&lang=${targetLangCode.split('-')[0]}`;
+                const audio = new Audio(url);
+                audio.play().catch(e => console.warn("Autoplay blocked for cloud TTS:", e));
+                console.log("Playing Cloud TTS:", textToSpeak, "| Lang:", targetLangCode);
               }
             }
           });

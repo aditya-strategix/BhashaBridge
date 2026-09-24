@@ -4,6 +4,7 @@ const authRoutes = require('./routes/auth.routes');
 const meetingRoutes = require('./routes/meeting.routes');
 const organizationRoutes = require('./routes/organization.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
+const ttsRoutes = require('./routes/tts.routes');
 // const translationRoutes = require('./routes/translation.routes');
 const adminRoutes = require('./routes/admin.routes');
 
@@ -18,6 +19,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/organizations', organizationRoutes);
 app.use('/api/meetings', meetingRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/tts', ttsRoutes);
 // app.use('/api/translate', translationRoutes);
 app.use('/api/admin', adminRoutes);
 
