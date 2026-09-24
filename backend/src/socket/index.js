@@ -1,5 +1,5 @@
 const { Server } = require('socket.io');
-const { translate } = require('@vitalets/google-translate-api');
+const translate = require('google-translate-api-x');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
@@ -37,7 +37,6 @@ function setupSocket(server) {
           where: { userId_meetingId: { userId, meetingId: meeting.id } },
           include: { user: true }
         });
-        
         if (!participant) return;
 
         socket.userLanguage = language || 'en';
@@ -113,40 +112,37 @@ function setupSocket(server) {
       
       // Emit original message to everyone immediately
       io.to(meetingId).emit('chat:message', data);
-
-      // Save chat message to database asynchronously
-      if (socket.dbMeetingId) {
-        prisma.chatMessage.create({
-          data: {
-            meetingId: socket.dbMeetingId,
-            senderId,
-            originalText: text,
-            originalLanguage: language,
-          }
-        }).catch(err => console.error("DB chat save error:", err));
-      }
-
-      try {
-        // Broadcast translated message by iterating over sockets in room
-        const clients = await io.in(meetingId).fetchSockets();
-        const targetLanguages = new Set();
-        clients.forEach(c => {
-          if (c.userLanguage) {
-            targetLanguages.add(c.userLanguage);
-          }
-        });
-
-        const translations = {};
-        for (let targetLang of targetLanguages) {
-          try {
-            const res = await translate(text, { to: targetLang });
-            translations[targetLang] = res.text;
-          } catch (err) {
-            console.error(`Translation failed for ${targetLang}`, err);
-          }
+        if (socket.dbMeetingId) {
+          prisma.chatMessage.create({
+            data: { meetingId: socket.dbMeetingId, senderId, originalText: text, originalLanguage: language }
+          }).catch(err => console.error("DB chat save error:", err));
         }
-
-        io.to(meetingId).emit('chat:translated', { messageId: data.id, translations });
+        try {
+          const clients = await io.in(meetingId).fetchSockets();
+          const targetLanguages = new Set();
+          clients.forEach(c => {
+            const s = c.userSettings || {};
+            if ((s.chatEnabled ?? true) && s.chatLang && s.chatLang !== 'original') {
+              targetLanguages.add(s.chatLang);
+            }
+          });
+          const translations = {};
+          for (let targetLang of targetLanguages) {
+            try {
+              const res = await translate(text, { to: targetLang, client: 'gtx' }).catch(async (e) => {
+                console.error("Google API failed, falling back to MyMemory...");
+                const fallbackUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${language}|${targetLang}`;
+                const fallbackRes = await fetch(fallbackUrl);
+                const fallbackData = await fallbackRes.json();
+                if (fallbackData?.responseData?.translatedText) {
+                  return { text: fallbackData.responseData.translatedText };
+                }
+                throw e;
+              });
+              translations[targetLang] = res.text;
+            } catch (err) { console.error("Translation Error:", err.message); }
+          }
+          io.to(meetingId).emit('chat:translated', { messageId: data.id, translations, sourceLanguage: language });
       } catch (error) {
         console.error('Translation error:', error);
       }
@@ -168,45 +164,46 @@ function setupSocket(server) {
       const { meetingId, speakerId, text, language } = data;
       // Broadcast live caption
       io.to(meetingId).emit('caption:text', data);
-      
-      // Save caption to database asynchronously
-      if (socket.dbMeetingId) {
-        prisma.caption.create({
-          data: {
-            meetingId: socket.dbMeetingId,
-            speakerId,
-            originalText: text,
-            originalLanguage: language,
-          }
-        }).catch(err => console.error("DB caption save error:", err));
-      }
-      
-      try {
-        const clients = await io.in(meetingId).fetchSockets();
-        const targetLanguages = new Set();
-        clients.forEach(c => {
-          if (c.userLanguage) {
-            targetLanguages.add(c.userLanguage);
-          }
-        });
-
-        const translations = {};
-        for (let targetLang of targetLanguages) {
-          try {
-            const res = await translate(text, { to: targetLang });
-            translations[targetLang] = res.text;
-          } catch (err) {
-            console.error(`Caption Translation failed for ${targetLang}`, err);
-          }
+        if (socket.dbMeetingId) {
+          prisma.caption.create({
+            data: { meetingId: socket.dbMeetingId, speakerId, originalText: text, originalLanguage: language }
+          }).catch(err => console.error("DB caption save error:", err));
         }
-
-        io.to(meetingId).emit('caption:translated', { text, speakerId, translations });
+        try {
+          const clients = await io.in(meetingId).fetchSockets();
+          const targetLanguages = new Set();
+          clients.forEach(c => {
+            const s = c.userSettings || {};
+            if ((s.captionEnabled ?? true) && s.captionLang && s.captionLang !== 'original') {
+              targetLanguages.add(s.captionLang);
+            }
+            if ((s.ttsEnabled ?? true) && s.ttsLang && s.ttsLang !== 'original') {
+              targetLanguages.add(s.ttsLang);
+            }
+          });
+          const translations = {};
+          for (let targetLang of targetLanguages) {
+            try {
+              const res = await translate(text, { to: targetLang, client: 'gtx' }).catch(async (e) => {
+                console.error("Google API failed, falling back to MyMemory...");
+                const fallbackUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${language}|${targetLang}`;
+                const fallbackRes = await fetch(fallbackUrl);
+                const fallbackData = await fallbackRes.json();
+                if (fallbackData?.responseData?.translatedText) {
+                  return { text: fallbackData.responseData.translatedText };
+                }
+                throw e;
+              });
+              translations[targetLang] = res.text;
+            } catch (err) { console.error("Translation Error:", err.message); }
+          }
+          io.to(meetingId).emit('caption:translated', { text, sourceLanguage: language, speakerId, senderSocketId: socket.id, translations });
       } catch (error) {
         console.error('Caption translation error:', error);
       }
     });
 
-    socket.on('user:update_language', ({ language }) => { socket.userLanguage = language; });
+    socket.on('user:update_settings', (settings) => { socket.userSettings = settings; });
 
     socket.on('disconnect', async () => {
       console.log(`User disconnected: ${socket.id}`);

@@ -73,6 +73,7 @@ export default function MeetingRoom() {
   const [chatInput, setChatInput] = useState('');
   const [currentCaption, setCurrentCaption] = useState(null);
   const [spokenLanguage, setSpokenLanguage] = useState('en');
+  const [isDemoActive, setIsDemoActive] = useState(false);
   const [isTtsEnabled, setIsTtsEnabled] = useState(true);
   const [participantStatus, setParticipantStatus] = useState(null);
   const [participantRole, setParticipantRole] = useState(null);
@@ -151,6 +152,7 @@ export default function MeetingRoom() {
         newSocket = io(SOCKET_URL);
         setSocket(newSocket);
         newSocket.emit('meeting:join', { meetingId, userId: user.id, peerId: newSocket.id, language: user.language });
+          newSocket.emit('user:update_settings', useAuthStore.getState().user || {});
 
         newSocket.on('waiting:request', ({ userId, name }) => {
           setWaitingUsers(prev => prev.some(u => u.userId === userId) ? prev : [...prev, { userId, name }]);
@@ -193,23 +195,55 @@ export default function MeetingRoom() {
         newSocket.on('chat:message', data => {
           setMessages(prev => [...prev, data]);
         });
-        newSocket.on('chat:translated', ({ messageId, translations }) => {
-          setMessages(prev => prev.map(m =>
-            m.id === messageId ? { ...m, translatedText: translations[useAuthStore.getState().user?.language || "en"] } : m
-          ));
-        });
-        newSocket.on('caption:translated', data => {
-          const currentLang = useAuthStore.getState().user?.language || "en";
-          if (data.translations[currentLang]) {
-            setCurrentCaption(data.translations[currentLang]);
-            if (window.speechSynthesis && ttsEnabledRef.current) {
-              const utt = new SpeechSynthesisUtterance(data.translations[currentLang]);
-              utt.lang = currentLang;
-              window.speechSynthesis.speak(utt);
+        newSocket.on('chat:translated', ({ messageId, translations, sourceLanguage }) => {
+            const u = useAuthStore.getState().user || {};
+            const chatEnabled = u.chatEnabled ?? true;
+            const chatLang = u.chatLang || 'original';
+            
+            setMessages(prev => prev.map(m => {
+              if (m.id === messageId) {
+                const showTranslation = chatEnabled && chatLang !== 'original';
+                return { ...m, translatedText: showTranslation ? (translations[chatLang] || `[Rate Limited] ${m.text}`) : null };
+              }
+              return m;
+            }));
+          });
+          newSocket.on('caption:translated', data => {
+            const u = useAuthStore.getState().user || {};
+            
+            const captionEnabled = u.captionEnabled ?? true;
+            const captionLang = u.captionLang || 'original';
+            
+            if (captionEnabled) {
+              const textToShow = captionLang === 'original' ? data.text : (data.translations[captionLang] || `[Rate Limited] ${data.text}`);
+              if (textToShow) {
+                setCurrentCaption(textToShow);
+                setTimeout(() => setCurrentCaption(null), 4000);
+              }
             }
-            setTimeout(() => setCurrentCaption(null), 4000);
-          }
-        });
+
+            const ttsEnabled = u.ttsEnabled ?? true;
+            const ttsLang = u.ttsLang || 'original';
+            
+            console.log("Caption arrived! ttsEnabled:", ttsEnabled, "speakerSocket:", data.senderSocketId, "mySocket:", newSocket.id);
+              if (ttsEnabled && window.speechSynthesis && data.senderSocketId !== newSocket.id) {
+                console.log("TTS condition passed! Preparing to speak...");
+                // Removed queue cancellation as it might cancel valid rapid utterances
+              const textToSpeak = ttsLang === 'original' ? data.text : (data.translations[ttsLang] || data.text);
+              if (textToSpeak) {
+                const utt = new SpeechSynthesisUtterance(textToSpeak);
+                  utt.lang = ttsLang === 'original' ? data.sourceLanguage : ttsLang;
+                  const voices = window.speechSynthesis.getVoices();
+                  const targetLangCode = (utt.lang || 'en').toLowerCase();
+                  const voice = voices.find(v => v.lang.toLowerCase().includes(targetLangCode));
+                  if (voice) {
+                    utt.voice = voice;
+                  }
+                  window.speechSynthesis.speak(utt);
+                  console.log("Speaking:", textToSpeak, "Language:", utt.lang, "Voice:", voice ? voice.name : "Default");
+              }
+            }
+          });
       } catch (err) {
         console.error(err);
         setAlertMessage(err.message || 'Failed to join meeting.');
@@ -229,7 +263,7 @@ export default function MeetingRoom() {
 
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
-    recognition.interimResults = true;
+    recognition.interimResults = false; // Changed to false to prevent Google Translate IP bans
     recognition.lang = spokenLanguage;
 
     let isStopped = false;
@@ -293,6 +327,27 @@ export default function MeetingRoom() {
     socket.emit('chat:message', msg);
     setChatInput('');
   };
+
+  useEffect(() => {
+    if (!isDemoActive || !socket || !user) return;
+    const phrases = [
+      "Hello, this is a test of the speech translation system.",
+      "I am speaking in my native language right now.",
+      "Technology makes communication so much easier."
+    ];
+    let count = 0;
+    
+    // Fire the first one immediately
+    socket.emit('caption:text', { meetingId, speakerId: user.id, text: phrases[0], language: spokenLanguage });
+    
+    const interval = setInterval(() => {
+      count++;
+      const text = phrases[count % phrases.length];
+      socket.emit('caption:text', { meetingId, speakerId: user.id, text, language: spokenLanguage });
+    }, 6000); // every 6 seconds
+
+    return () => clearInterval(interval);
+  }, [isDemoActive, socket, meetingId, user, spokenLanguage]);
 
   const isHost = participantRole === 'HOST';
   const isHostOrCoHost = isHost || participantRole === 'COHOST';
@@ -454,6 +509,9 @@ export default function MeetingRoom() {
           )}
           <button onClick={() => setShowSettings(true)} style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', padding: '0.45rem 0.9rem', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', fontWeight: 600 }}>
             <Settings size={15} /> Settings
+          </button>
+          <button onClick={() => setIsDemoActive(!isDemoActive)} style={{ background: isDemoActive ? 'rgba(239,68,68,0.15)' : 'rgba(59,130,246,0.15)', border: `1px solid ${isDemoActive ? 'rgba(239,68,68,0.4)' : 'rgba(59,130,246,0.4)'}`, color: isDemoActive ? '#ef4444' : '#60a5fa', padding: '0.45rem 0.9rem', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', fontWeight: 600 }}>
+            {isDemoActive ? 'Stop Demo Speech' : 'Start Demo Speech'}
           </button>
         </div>
       </header>
@@ -625,39 +683,83 @@ export default function MeetingRoom() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.82rem', color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  <Globe size={12} style={{ verticalAlign: 'middle', marginRight: 5 }} />My spoken language (mic)
-                </label>
-                <select value={spokenLanguage} onChange={e => setSpokenLanguage(e.target.value)} style={{ width: '100%', padding: '0.65rem 0.9rem', background: 'rgba(0,0,0,0.3)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', fontSize: '0.9rem' }}>
-                  {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.82rem', color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Translate subtitles, audio & chat to
-                </label>
-                <select value={user.language} onChange={e => { const newLang = e.target.value; useAuthStore.getState().user.language = newLang; setMessages([...messages]); if (socket) socket.emit("user:update_language", { language: newLang }); }} style={{ width: '100%', padding: '0.65rem 0.9rem', background: 'rgba(0,0,0,0.3)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', fontSize: '0.9rem' }}>
-                  {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
-                </select>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.07)' }}>
                 <div>
-                  <p style={{ margin: 0, fontWeight: 600, color: '#f1f5f9', fontSize: '0.88rem' }}>Text-to-Speech</p>
-                  <p style={{ margin: 0, color: '#6b7280', fontSize: '0.78rem' }}>Read translations out loud</p>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.82rem', color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    <Globe size={12} style={{ verticalAlign: 'middle', marginRight: 5 }} />My spoken language (mic)
+                  </label>
+                  <select value={spokenLanguage} onChange={e => setSpokenLanguage(e.target.value)} style={{ width: '100%', padding: '0.65rem 0.9rem', background: 'rgba(0,0,0,0.3)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', fontSize: '0.9rem' }}>
+                    {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                  </select>
                 </div>
-                <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={isTtsEnabled} onChange={e => { setIsTtsEnabled(e.target.checked); ttsEnabledRef.current = e.target.checked; }} style={{ display: 'none' }} />
-                  <div style={{ width: 44, height: 24, borderRadius: '999px', background: isTtsEnabled ? '#3b82f6' : 'rgba(255,255,255,0.1)', transition: 'background 0.2s', position: 'relative' }}>
-                    <div style={{ position: 'absolute', top: 2, left: isTtsEnabled ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
+                
+                {/* Speech to Speech */}
+                <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.07)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (user.ttsEnabled ?? true) ? '0.75rem' : '0' }}>
+                    <div>
+                      <p style={{ margin: 0, fontWeight: 600, color: '#f1f5f9', fontSize: '0.88rem' }}>Speech-to-Speech</p>
+                      <p style={{ margin: 0, color: '#6b7280', fontSize: '0.78rem' }}>Read out audio translations</p>
+                    </div>
+                    <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={user.ttsEnabled ?? true} onChange={e => { useAuthStore.getState().user.ttsEnabled = e.target.checked; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ display: 'none' }} />
+                      <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.ttsEnabled ?? true) ? '#3b82f6' : 'rgba(255,255,255,0.1)', transition: 'background 0.2s', position: 'relative' }}>
+                        <div style={{ position: 'absolute', top: 2, left: (user.ttsEnabled ?? true) ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
+                      </div>
+                    </label>
                   </div>
-                </label>
-              </div>
-            </div>
+                  {(user.ttsEnabled ?? true) && (
+                    <select value={user.ttsLang || 'original'} onChange={e => { useAuthStore.getState().user.ttsLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.65rem 0.9rem', background: 'rgba(0,0,0,0.3)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', fontSize: '0.9rem' }}>
+                      <option value="original">Original</option>
+                      {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                    </select>
+                  )}
+                </div>
 
-            <button onClick={() => setShowSettings(false)} style={{ width: '100%', marginTop: '1.5rem', padding: '0.875rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer', fontSize: '0.95rem' }}>
-              Done
-            </button>
+                {/* Message Chat Translation */}
+                <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.07)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (user.chatEnabled ?? true) ? '0.75rem' : '0' }}>
+                    <div>
+                      <p style={{ margin: 0, fontWeight: 600, color: '#f1f5f9', fontSize: '0.88rem' }}>Message Chat Translation</p>
+                    </div>
+                    <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={user.chatEnabled ?? true} onChange={e => { useAuthStore.getState().user.chatEnabled = e.target.checked; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ display: 'none' }} />
+                      <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.chatEnabled ?? true) ? '#3b82f6' : 'rgba(255,255,255,0.1)', transition: 'background 0.2s', position: 'relative' }}>
+                        <div style={{ position: 'absolute', top: 2, left: (user.chatEnabled ?? true) ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
+                      </div>
+                    </label>
+                  </div>
+                  {(user.chatEnabled ?? true) && (
+                    <select value={user.chatLang || 'original'} onChange={e => { useAuthStore.getState().user.chatLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.65rem 0.9rem', background: 'rgba(0,0,0,0.3)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', fontSize: '0.9rem' }}>
+                      <option value="original">Original</option>
+                      {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                    </select>
+                  )}
+                </div>
+
+                {/* Speech to Caption */}
+                <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.07)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (user.captionEnabled ?? true) ? '0.75rem' : '0' }}>
+                    <div>
+                      <p style={{ margin: 0, fontWeight: 600, color: '#f1f5f9', fontSize: '0.88rem' }}>Speech to Caption</p>
+                    </div>
+                    <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={user.captionEnabled ?? true} onChange={e => { useAuthStore.getState().user.captionEnabled = e.target.checked; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ display: 'none' }} />
+                      <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.captionEnabled ?? true) ? '#3b82f6' : 'rgba(255,255,255,0.1)', transition: 'background 0.2s', position: 'relative' }}>
+                        <div style={{ position: 'absolute', top: 2, left: (user.captionEnabled ?? true) ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
+                      </div>
+                    </label>
+                  </div>
+                  {(user.captionEnabled ?? true) && (
+                    <select value={user.captionLang || 'original'} onChange={e => { useAuthStore.getState().user.captionLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.65rem 0.9rem', background: 'rgba(0,0,0,0.3)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', fontSize: '0.9rem' }}>
+                      <option value="original">Original</option>
+                      {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                    </select>
+                  )}
+                </div>
+              </div>
+
+              <button onClick={() => setShowSettings(false)} style={{ width: '100%', marginTop: '1.5rem', padding: '0.875rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer', fontSize: '0.95rem' }}>
+                Done
+              </button>
           </div>
         </div>
       )}
