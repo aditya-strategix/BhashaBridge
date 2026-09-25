@@ -1,4 +1,5 @@
-'use client';
+const fs = require('fs');
+fs.writeFileSync('e:/BhashaBridge/BhashaBridge/frontend/src/app/meeting/[id]/report/page.js', `'use client';
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -10,25 +11,23 @@ import api from '../../../../services/api';
 export default function MeetingReport() {
   const params = useParams();
   const { id: meetingId } = params;
-  const { user, initialize } = useAuthStore();
+  const { user } = useAuthStore();
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
-  useEffect(() => { initialize(); }, [initialize]);
 
   useEffect(() => {
     if (!user) return;
     
     const fetchReport = async () => {
       try {
-        const res = await api.get(`/analytics/${meetingId}/report`);
+        const res = await api.get(\`/analytics/\${meetingId}/report\`);
         setReport(res.data.report);
       } catch (err) {
         if (err.response?.status === 404) {
           try {
-            await api.get(`/analytics/${meetingId}`);
-            const res2 = await api.post(`/analytics/${meetingId}/report`);
+            await api.get(\`/analytics/\${meetingId}\`);
+            const res2 = await api.post(\`/analytics/\${meetingId}/report\`);
             setReport(res2.data.report);
           } catch (e) {
             setError('Failed to generate report');
@@ -49,7 +48,7 @@ export default function MeetingReport() {
   if (loading) return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0f172a', gap: '1.5rem' }}>
       <div style={{ width: 48, height: 48, border: '4px solid rgba(96, 165, 250, 0.2)', borderTopColor: '#60a5fa', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <style>{\`@keyframes spin { to { transform: rotate(360deg); } }\`}</style>
       <div style={{ color: '#94a3b8', fontSize: '1.1rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
         <Sparkles size={20} color="#60a5fa" /> Synthesizing Meeting Analytics...
       </div>
@@ -73,7 +72,7 @@ export default function MeetingReport() {
     if (!seconds) return '00:00';
     const m = Math.floor(seconds / 60).toString().padStart(2, '0');
     const s = (seconds % 60).toString().padStart(2, '0');
-    return `${m}:${s}`;
+    return \`\${m}:\${s}\`;
   };
 
   const handleExport = () => {
@@ -91,7 +90,7 @@ export default function MeetingReport() {
     el.style.display = 'flex';
     el.style.alignItems = 'center';
     el.style.gap = '0.75rem';
-    el.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Transcript Exported Successfully`;
+    el.innerHTML = \`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Transcript Exported Successfully\`;
     document.body.appendChild(el);
     el.animate([{ opacity: 0, transform: 'translateY(20px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 300, fill: 'forwards', easing: 'cubic-bezier(0.175, 0.885, 0.32, 1.275)' });
     setTimeout(() => {
@@ -211,3 +210,4 @@ export default function MeetingReport() {
     </div>
   );
 }
+`);

@@ -59,6 +59,18 @@ function setupSocket(server) {
           });
           console.log(`User ${userId} joined meeting ${meetingId}`);
           
+          // If a host/co-host joins, send them the list of anyone currently waiting in the lobby
+          if (participant.role === 'HOST' || participant.role === 'COHOST') {
+            const waitingUsers = await prisma.participant.findMany({
+              where: { meetingId: meeting.id, status: 'WAITING' },
+              include: { user: true }
+            });
+            console.log('Sending waiting user to host:', waitingUsers.length);
+              waitingUsers.forEach(w => {
+              socket.emit('waiting:request', { userId: w.userId, name: w.user?.name || 'User' });
+            });
+          }
+          
           const session = await prisma.participantSession.create({
             data: { participantId: participant.id }
           });

@@ -81,6 +81,14 @@ export default function MeetingRoom() {
   const [sidebarTab, setSidebarTab] = useState('CHAT');
   const [showSettings, setShowSettings] = useState(false);
   const [showLobby, setShowLobby] = useState(false);
+  const [lobbyToast, setLobbyToast] = useState(null); // { name }
+  const lobbyToastTimer = useRef(null);
+
+  const showLobbyToast = (name) => {
+    if (lobbyToastTimer.current) clearTimeout(lobbyToastTimer.current);
+    setLobbyToast({ name });
+    lobbyToastTimer.current = setTimeout(() => setLobbyToast(null), 6000);
+  };
   const [alertMessage, setAlertMessage] = useState(null);
   const chatEndRef = useRef(null);
   const ttsEnabledRef = useRef(true);
@@ -755,6 +763,45 @@ export default function MeetingRoom() {
                 Done
               </button>
           </div>
+        </div>
+      )}
+
+      {/* === LOBBY TOAST NOTIFICATION === */}
+      {lobbyToast && (
+        <div style={{
+          position: 'fixed', bottom: '5.5rem', left: '50%', transform: 'translateX(-50%)',
+          zIndex: 9998,
+          background: 'linear-gradient(135deg, rgba(15,23,42,0.97), rgba(30,41,59,0.97))',
+          border: '1px solid rgba(239,68,68,0.4)',
+          borderRadius: '14px',
+          padding: '0.9rem 1.4rem',
+          display: 'flex', alignItems: 'center', gap: '0.8rem',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(239,68,68,0.15)',
+          backdropFilter: 'blur(12px)',
+          minWidth: 280, maxWidth: 380,
+          animation: 'slideUp 0.3s ease'
+        }}>
+          <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#ef4444', flexShrink: 0, animation: 'pulse 1s infinite' }} />
+          <div style={{ flex: 1 }}>
+            <p style={{ margin: 0, fontWeight: 700, color: '#f1f5f9', fontSize: '0.9rem' }}>
+              Someone is waiting
+            </p>
+            <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.8rem', marginTop: '0.15rem' }}>
+              <span style={{ color: '#60a5fa', fontWeight: 600 }}>{lobbyToast.name}</span> is in the lobby
+            </p>
+          </div>
+          <button
+            onClick={() => { setShowLobby(true); setLobbyToast(null); }}
+            style={{ background: '#ef4444', border: 'none', color: 'white', padding: '0.4rem 0.85rem', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+          >
+            Let In
+          </button>
+          <button
+            onClick={() => setLobbyToast(null)}
+            style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: '1.1rem', padding: '0.1rem', flexShrink: 0 }}
+          >
+            ×
+          </button>
         </div>
       )}
 
