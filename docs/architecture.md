@@ -288,3 +288,10 @@ Once the handshake is complete, audio and video flow **directly between browsers
 | Database | PostgreSQL | Persistent data storage |
 | Auth | JWT + bcrypt | Secure authentication |
 | Email | Nodemailer | Meeting invite emails |
+
+
+## Roles and Hierarchy
+- **HOST**: Full control. Can assign/remove COHOSTs. Only one true HOST (the creator).
+- **COHOST**: Sub-admin. Can admit/reject from lobby, but cannot mute/kick the HOST, nor can they promote others.
+- **Permanent Co-Hosts (Organization Level)**: Stored in Organization.coHosts. Any member of this list automatically receives the COHOST role when joining a meeting tied to this organization.
+- **Temporary Co-Hosts (Meeting Level)**: Promoted mid-meeting via socket/REST API. Their permissions expire when the meeting ends.

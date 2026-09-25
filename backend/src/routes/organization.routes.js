@@ -35,4 +35,8 @@ router.delete('/:id/leave', orgController.leaveOrganization);
 router.delete('/:id/members/:userId', orgController.removeMember);
 router.delete('/:id', orgController.deleteOrganization);
 
+router.post('/:id/cohost', orgController.addCoHost);
+router.delete('/:id/cohost/:userId', orgController.removeCoHost);
 module.exports = router;
+
+

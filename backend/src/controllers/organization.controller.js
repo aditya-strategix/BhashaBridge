@@ -43,6 +43,7 @@ exports.getMyOrganizations = async (req, res) => {
       include: {
         owner: { select: { id: true, name: true, email: true } },
         users: { select: { id: true, name: true, email: true } },
+        coHosts: { select: { id: true, name: true, email: true } },
         invitations: { 
           where: { status: 'PENDING' },
           select: { id: true, email: true, createdAt: true }
@@ -332,3 +333,41 @@ exports.declineInvitation = async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 };
+
+exports.addCoHost = async (req, res) => {
+  try {
+    const { id } = req.params; // org id
+    const { userId } = req.body;
+    const org = await prisma.organization.findUnique({ where: { id }, include: { coHosts: true } });
+    if (!org) return res.status(404).json({ error: 'Org not found' });
+    if (org.ownerId !== req.user.userId) return res.status(403).json({ error: 'Only owner can manage co-hosts' });
+    
+    await prisma.organization.update({
+      where: { id },
+      data: { coHosts: { connect: { id: userId } } }
+    });
+    res.json({ message: 'Co-Host added successfully' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+
+exports.removeCoHost = async (req, res) => {
+  try {
+    const { id, userId } = req.params;
+    const org = await prisma.organization.findUnique({ where: { id } });
+    if (!org) return res.status(404).json({ error: 'Org not found' });
+    if (org.ownerId !== req.user.userId) return res.status(403).json({ error: 'Only owner can manage co-hosts' });
+    
+    await prisma.organization.update({
+      where: { id },
+      data: { coHosts: { disconnect: { id: userId } } }
+    });
+    res.json({ message: 'Co-Host removed successfully' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+

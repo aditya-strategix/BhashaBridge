@@ -105,11 +105,14 @@ exports.joinMeeting = async (req, res) => {
       meeting.startTime = new Date();
     }
 
+    let isOrgCoHost = false;
     if (meeting.organizationId) {
       const org = await prisma.organization.findFirst({
-        where: { id: meeting.organizationId, users: { some: { id: req.user.userId } } }
+        where: { id: meeting.organizationId, users: { some: { id: req.user.userId } } },
+        include: { coHosts: { select: { id: true } } }
       });
       if (!org) return res.status(403).json({ error: 'You are not a member of this organization.' });
+      if (org.coHosts.some(c => c.id === req.user.userId)) isOrgCoHost = true;
     }
 
     let participant = await prisma.participant.findUnique({
@@ -117,7 +120,7 @@ exports.joinMeeting = async (req, res) => {
     });
 
     const isHost = meeting.hostId === req.user.userId;
-    const isCoHost = participant && participant.role === 'COHOST';
+    const isCoHost = isOrgCoHost || (participant && participant.role === 'COHOST');
     
     // Default: if you are host or cohost, you bypass waiting room.
     const newStatus = (isHost || isCoHost) ? 'ADMITTED' : 'WAITING';
@@ -127,14 +130,15 @@ exports.joinMeeting = async (req, res) => {
         data: {
           userId: req.user.userId,
           meetingId: meeting.id,
-          role: isHost ? 'HOST' : 'PARTICIPANT',
+          role: isHost ? 'HOST' : (isOrgCoHost ? 'COHOST' : 'PARTICIPANT'),
           status: newStatus
         }
       });
     } else {
+      const updatedRole = isHost ? 'HOST' : (isOrgCoHost ? 'COHOST' : participant.role);
       participant = await prisma.participant.update({
         where: { id: participant.id },
-        data: { joinTime: new Date(), status: newStatus }
+        data: { joinTime: new Date(), status: newStatus, role: updatedRole }
       });
     }
 
@@ -249,6 +253,8 @@ exports.assignCoHost = async (req, res) => {
       where: { userId_meetingId: { userId, meetingId: meeting.id } },
       data: { role: 'COHOST' }
     });
+    
+    if (global.io) global.io.to(link).emit('participant:promoted', { userId, role: 'COHOST' });
     res.json({ participant });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
@@ -258,13 +264,24 @@ exports.assignCoHost = async (req, res) => {
 exports.removeCoHost = async (req, res) => {
   try {
     const { link, userId } = req.params;
-    const meeting = await prisma.meeting.findUnique({ where: { meetingLink: link } });
+    const meeting = await prisma.meeting.findUnique({ 
+      where: { meetingLink: link },
+      include: { organization: { include: { coHosts: true } } }
+    });
     if (meeting.hostId !== req.user.userId) return res.status(403).json({ error: 'Only main Host can remove Co-hosts' });
+
+    // Check if the user is a permanent org co-host
+    const isPermanent = meeting.organization.coHosts.some(c => c.id === userId);
+    if (isPermanent) {
+      return res.status(403).json({ error: 'Cannot demote a permanent Organization Co-Host.' });
+    }
 
     const participant = await prisma.participant.update({
       where: { userId_meetingId: { userId, meetingId: meeting.id } },
       data: { role: 'PARTICIPANT' }
     });
+    
+    if (global.io) global.io.to(link).emit('participant:promoted', { userId, role: 'PARTICIPANT' });
     res.json({ participant });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });

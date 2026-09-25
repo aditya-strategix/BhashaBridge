@@ -751,3 +751,12 @@ npx playwright test
 - **Admin**: Org admin adds user → Platform admin monitors system health
 - **Performance**: Measure translation latency (target < 300ms from SRS)
 - **Cross-browser**: Test on Chrome, Firefox, Edge
+
+
+## Completed: Co-Host System
+- Added coHosts relation to Organization in Prisma schema.
+- Implemented auto-promotion to COHOST when joining an org meeting if user is a permanent co-host.
+- Added API routes to assign and remove Co-Hosts mid-meeting.
+- Added UI to Organization Dashboard to toggle Permanent Co-Hosts.
+- Added UI to Meeting Members sidebar to toggle live Co-Hosts.
+- Emits participant:promoted via socket to instantly update permissions.

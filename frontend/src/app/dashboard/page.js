@@ -314,6 +314,19 @@ function DashboardContent() {
     });
   };
 
+  const handleToggleOrgCoHost = async (orgId, targetUserId, isCurrentlyCoHost) => {
+    try {
+      if (isCurrentlyCoHost) {
+        await api.delete(`/organizations/${orgId}/cohost/${targetUserId}`);
+      } else {
+        await api.post(`/organizations/${orgId}/cohost`, { userId: targetUserId });
+      }
+      fetchData();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to toggle co-host');
+    }
+  };
+
   const handleRemoveMember = (orgId, memberId, memberName) => {
     setConfirmModal({
       title: 'Remove Member',
@@ -519,7 +532,7 @@ function DashboardContent() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                       <span style={{ fontWeight: 500, color: '#f1f5f9', fontSize: '0.9rem' }}>{u.name}</span>
-                      <RoleBadge role={u.id === showAllMembersOrg.ownerId ? 'HOST' : 'PARTICIPANT'} />
+                      <RoleBadge role={u.id === showAllMembersOrg.ownerId ? 'HOST' : (showAllMembersOrg.coHosts?.some(c => c.id === u.id) ? 'COHOST' : 'PARTICIPANT')} />
                     </div>
                     <p style={{ margin: '0.2rem 0 0', color: '#9ca3af', fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</p>
                   </div>
@@ -712,9 +725,12 @@ function DashboardContent() {
                                 {org.users?.slice(0, 5).map(u => (
                                   <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.25)', padding: '0.2rem 0.55rem', borderRadius: '999px', fontSize: '0.78rem', color: '#93c5fd' }}>
                                     <span>{u.name}</span>
-                                    {u.id === org.ownerId && <RoleBadge role="HOST" />}
+                                    {u.id === org.ownerId ? <RoleBadge role="HOST" /> : (org.coHosts?.some(c => c.id === u.id) && <RoleBadge role="COHOST" />)}
                                     {isOwner && u.id !== user.id && (
-                                      <button onClick={() => handleRemoveMember(org.id, u.id, u.name)} title="Remove" style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 0, marginLeft: '0.2rem', lineHeight: 1, fontSize: '1rem' }}>×</button>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', marginLeft: '0.2rem' }}>
+                                        <button onClick={() => handleToggleOrgCoHost(org.id, u.id, org.coHosts?.some(c => c.id === u.id))} title={org.coHosts?.some(c => c.id === u.id) ? "Remove Co-Host" : "Make Co-Host"} style={{ background: 'none', border: 'none', color: org.coHosts?.some(c => c.id === u.id) ? '#c084fc' : '#9ca3af', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: '0.9rem' }}>★</button>
+                                        <button onClick={() => handleRemoveMember(org.id, u.id, u.name)} title="Remove" style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: '1rem' }}>×</button>
+                                      </div>
                                     )}
                                   </div>
                                 ))}
@@ -904,3 +920,6 @@ export default function Dashboard() {
     </Suspense>
   );
 }
+
+
+

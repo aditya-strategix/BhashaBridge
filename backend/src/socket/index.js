@@ -161,6 +161,32 @@ function setupSocket(server) {
     });
 
     // Handle WebRTC signaling
+    socket.on('meeting:status_update', ({ isAudioOn, isVideoOn }) => {
+      if (socket.meetingId) {
+        socket.to(socket.meetingId).emit('participant:status_update', { socketId: socket.id, isAudioOn, isVideoOn });
+      }
+    });
+
+    socket.on('meeting:force_mute_all', async ({ role }) => {
+      if (socket.meetingId && (role === 'HOST' || role === 'COHOST')) {
+        socket.to(socket.meetingId).emit('participant:force_mute_received', { muterRole: role });
+      }
+    });
+
+    socket.on('meeting:force_video_off_all', async ({ role }) => {
+      if (socket.meetingId && (role === 'HOST' || role === 'COHOST')) {
+        socket.to(socket.meetingId).emit('participant:force_video_off_received', { muterRole: role });
+      }
+    });
+
+    socket.on('meeting:lock_hardware', async ({ role, type, locked }) => {
+      console.log('BACKEND RECEIVED lock_hardware', { role, type, locked, meetingId: socket.meetingId });
+      if (socket.meetingId && (role === 'HOST' || role === 'COHOST')) {
+        socket.to(socket.meetingId).emit('participant:hardware_locked', { muterRole: role, type, locked });
+        console.log('BACKEND EMITTED hardware_locked to', socket.meetingId);
+      }
+    });
+
     socket.on('audio:signal', (data) => {
       io.to(data.targetSocketId).emit('audio:signal', {
         signal: data.signal,

@@ -7,7 +7,7 @@ import Peer from 'simple-peer';
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff, Send,
   Users, Settings, Shield, UserCheck, UserX,
-  MessageSquare, Globe, ChevronRight
+  MessageSquare, Globe, ChevronRight, VolumeX, MoreVertical, Star
 } from 'lucide-react';
 import useAuthStore from '../../../stores/authStore';
 import styles from './meeting.module.css';
@@ -42,7 +42,7 @@ function Avatar({ name, size = 36, color = '#3b82f6' }) {
 }
 
 // -------- Video peer tile --------
-const VideoPeer = ({ peer, name }) => {
+const VideoPeer = ({ peer, name, isAudioOn = true, isVideoOn = true }) => {
   const ref = useRef();
   useEffect(() => {
     peer.on('stream', stream => { if (ref.current) ref.current.srcObject = stream; });
@@ -50,8 +50,17 @@ const VideoPeer = ({ peer, name }) => {
   return (
     <div className={styles.videoTile}>
       <video playsInline autoPlay ref={ref} className={styles.video} />
+      {!isVideoOn && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0c1527' }}>
+          <Avatar name={name ? name.split(' (')[0] : 'P'} size={60} color="#3b82f6" />
+        </div>
+      )}
       <div className={styles.tileOverlay}>
         <span className={styles.tileName}>{name || 'Participant'}</span>
+        <div style={{ display: 'flex', gap: '0.25rem' }}>
+          {!isAudioOn && <div style={{ background: 'rgba(0,0,0,0.5)', padding: '0.2rem', borderRadius: '50%', display: 'flex' }}><MicOff size={15} color='#ef4444' /></div>}
+          {!isVideoOn && <div style={{ background: 'rgba(0,0,0,0.5)', padding: '0.2rem', borderRadius: '50%', display: 'flex' }}><VideoOff size={15} color='#ef4444' /></div>}
+        </div>
       </div>
     </div>
   );
@@ -62,9 +71,10 @@ export default function MeetingRoom() {
   const params = useParams();
   const { id: meetingId } = params;
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, initialize } = useAuthStore();
 
   const [socket, setSocket] = useState(null);
+  useEffect(() => { initialize(); }, [initialize]);
   const [peers, setPeers] = useState([]);
   const [stream, setStream] = useState(null);
   const [isVideoOn, setIsVideoOn] = useState(true);
@@ -95,6 +105,37 @@ export default function MeetingRoom() {
   const userVideo = useRef();
   const peersRef = useRef([]);
   const socketInitialized = useRef(false);
+  const roleRef = useRef(null);
+  const audioRef = useRef(true);
+  const videoRef = useRef(true);
+  const streamRef = useRef(null);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const moreMenuRef = useRef(null);
+  
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(event.target)) {
+        setShowMoreMenu(false);
+      }
+    };
+    if (showMoreMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showMoreMenu]);
+  const audioLockedRef = useRef(false);
+  const videoLockedRef = useRef(false);
+  const [isAudioLocked, setIsAudioLocked] = useState(false);
+  const [isVideoLocked, setIsVideoLocked] = useState(false);
+  const [roomAudioLocked, setRoomAudioLocked] = useState(false);
+  const [roomVideoLocked, setRoomVideoLocked] = useState(false);
+
+  useEffect(() => { roleRef.current = participantRole; }, [participantRole]);
+  useEffect(() => { audioRef.current = isAudioOn; }, [isAudioOn]);
+  useEffect(() => { videoRef.current = isVideoOn; }, [isVideoOn]);
+  useEffect(() => { streamRef.current = stream; }, [stream]);
 
   const iceServers = {
     iceServers: [
@@ -127,6 +168,23 @@ export default function MeetingRoom() {
 
     let newSocket;
 
+      const handleToggleMeetingCoHost = async (targetUserId, isCoHost) => {
+    try {
+      const token = localStorage.getItem('token');
+      let res;
+      if (isCoHost) {
+        res = await fetch(`${API_URL}/meetings/${meetingId}/cohost/${targetUserId}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
+      } else {
+        res = await fetch(`${API_URL}/meetings/${meetingId}/cohost`, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: targetUserId }) });
+      }
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || 'Failed to toggle co-host');
+      }
+    } catch (err) {
+      alert('Failed to toggle co-host');
+    }
+  };
     const initializeMeeting = async () => {
       try {
         const token = localStorage.getItem('token');
@@ -160,9 +218,19 @@ export default function MeetingRoom() {
         newSocket = io(SOCKET_URL);
         setSocket(newSocket);
         newSocket.emit('meeting:join', { meetingId, userId: user.id, peerId: newSocket.id, language: user.language });
+        setTimeout(() => newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current }), 2000);
           newSocket.emit('user:update_settings', useAuthStore.getState().user || {});
 
-        newSocket.on('waiting:request', ({ userId, name }) => {
+                  newSocket.on('participant:promoted', ({ userId, role }) => {
+            if (userId === useAuthStore.getState().user?.id) {
+              setParticipantRole(role);
+              // role updated to COHOST
+              // role updated to PARTICIPANT
+            } else {
+              setPeers(prev => prev.map(p => p.userId === userId ? { ...p, role } : p));
+            }
+          });
+          newSocket.on('waiting:request', ({ userId, name }) => {
           setWaitingUsers(prev => prev.some(u => u.userId === userId) ? prev : [...prev, { userId, name }]);
           // Auto-show lobby panel for host
           setShowLobby(true);
@@ -171,6 +239,7 @@ export default function MeetingRoom() {
           if (userId === user.id) {
             setParticipantStatus('ADMITTED');
             newSocket.emit('meeting:join', { meetingId, userId: user.id, peerId: newSocket.id, language: user.language });
+        setTimeout(() => newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current }), 2000);
           } else {
             setWaitingUsers(prev => prev.filter(u => u.userId !== userId));
           }
@@ -180,6 +249,7 @@ export default function MeetingRoom() {
           else setWaitingUsers(prev => prev.filter(u => u.userId !== userId));
         });
         newSocket.on('participant:joined', ({ userId, socketId, name, role }) => {
+          newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current });
           const peer = createPeer(socketId, newSocket.id, currentStream, newSocket, user.name, data.participantRole);
           peersRef.current.push({ peerID: socketId, userId, peer, name, role });
           setPeers([...peersRef.current]);
@@ -200,6 +270,60 @@ export default function MeetingRoom() {
             setPeers([...peersRef.current]);
           }
         });
+        newSocket.on('participant:status_update', ({ socketId, isAudioOn, isVideoOn }) => {
+          const idx = peersRef.current.findIndex(p => p.peerID === socketId);
+          if (idx !== -1) {
+            peersRef.current[idx] = { ...peersRef.current[idx], isAudioOn, isVideoOn };
+            setPeers([...peersRef.current]);
+          }
+        });
+
+        newSocket.on('participant:force_mute_received', ({ muterRole }) => {
+          const myRole = roleRef.current;
+          if (muterRole === 'HOST' || (muterRole === 'COHOST' && myRole !== 'HOST')) {
+            setIsAudioOn(false);
+            if (streamRef.current) {
+              streamRef.current.getAudioTracks().forEach(t => { t.enabled = false; });
+            }
+            newSocket.emit('meeting:status_update', { isAudioOn: false, isVideoOn: videoRef.current });
+          }
+        });
+
+        newSocket.on('participant:force_video_off_received', ({ muterRole }) => {
+          const myRole = roleRef.current;
+          if (muterRole === 'HOST' || (muterRole === 'COHOST' && myRole !== 'HOST')) {
+            setIsVideoOn(false);
+            if (streamRef.current) {
+              streamRef.current.getVideoTracks().forEach(t => { t.enabled = false; });
+            }
+            newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: false });
+          }
+        });
+        newSocket.on('participant:hardware_locked', ({ muterRole, type, locked }) => {
+          const myRole = roleRef.current;
+          if (muterRole === 'HOST' || (muterRole === 'COHOST' && myRole !== 'HOST')) {
+            if (type === 'audio') {
+              setIsAudioLocked(locked);
+              audioLockedRef.current = locked;
+              if (locked) {
+                setIsAudioOn(false);
+                if (streamRef.current) streamRef.current.getAudioTracks().forEach(t => { t.enabled = false; });
+                if (audioRef.current) audioRef.current = false;
+                newSocket.emit('meeting:status_update', { isAudioOn: false, isVideoOn: videoRef.current });
+              }
+            } else if (type === 'video') {
+              setIsVideoLocked(locked);
+              videoLockedRef.current = locked;
+              if (locked) {
+                setIsVideoOn(false);
+                if (streamRef.current) streamRef.current.getVideoTracks().forEach(t => { t.enabled = false; });
+                if (videoRef.current) videoRef.current = false;
+                newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: false });
+              }
+            }
+          }
+        });
+
         newSocket.on('chat:message', data => {
           setMessages(prev => [...prev, data]);
         });
@@ -287,12 +411,22 @@ export default function MeetingRoom() {
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   const toggleVideo = () => {
+    if (videoLockedRef.current) {
+      setAlertMessage('Camera is disabled by Host');
+      return;
+    }
     stream?.getVideoTracks().forEach(t => { t.enabled = !isVideoOn; });
     setIsVideoOn(v => !v);
+    if (socket) socket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: !videoRef.current });
   };
   const toggleAudio = () => {
+    if (audioLockedRef.current) {
+      setAlertMessage('Microphone is disabled by Host');
+      return;
+    }
     stream?.getAudioTracks().forEach(t => { t.enabled = !isAudioOn; });
     setIsAudioOn(a => !a);
+    if (socket) socket.emit('meeting:status_update', { isAudioOn: !audioRef.current, isVideoOn: videoRef.current });
   };
 
   const authFetch = (path, opts = {}) =>
@@ -533,8 +667,8 @@ export default function MeetingRoom() {
               <div className={styles.tileOverlay}>
                 <span className={styles.tileName}>{user.name} (You) ({participantRole})</span>
                 <div style={{ display: 'flex', gap: '0.25rem' }}>
-                  {!isAudioOn && <span style={{ fontSize: '0.65rem', background: 'rgba(239,68,68,0.8)', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>Muted</span>}
-                  {!isVideoOn && <span style={{ fontSize: '0.65rem', background: 'rgba(239,68,68,0.8)', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>No Video</span>}
+                  {!isAudioOn && <div style={{ background: 'rgba(0,0,0,0.5)', padding: '0.2rem', borderRadius: '50%', display: 'flex' }}><MicOff size={15} color='#ef4444' /></div>}
+                  {!isVideoOn && <div style={{ background: 'rgba(0,0,0,0.5)', padding: '0.2rem', borderRadius: '50%', display: 'flex' }}><VideoOff size={15} color='#ef4444' /></div>}
                 </div>
               </div>
             </div>
@@ -561,8 +695,9 @@ export default function MeetingRoom() {
             </button>
             <button
               onClick={toggleVideo}
-              title={isVideoOn ? 'Turn off camera' : 'Turn on camera'}
-              style={{ width: 52, height: 52, borderRadius: '50%', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s', background: isVideoOn ? 'rgba(255,255,255,0.12)' : '#ef4444', color: 'white' }}
+              
+              title={isVideoLocked ? 'Camera disabled by Host' : (isVideoOn ? 'Turn off camera' : 'Turn on camera')}
+              style={{ opacity: isVideoLocked ? 0.5 : 1, cursor: isVideoLocked ? 'not-allowed' : 'pointer', width: 52, height: 52, borderRadius: '50%', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s', background: isVideoOn ? 'rgba(255,255,255,0.12)' : '#ef4444', color: 'white' }}
             >
               {isVideoOn ? <Video size={21} /> : <VideoOff size={21} />}
             </button>
@@ -573,6 +708,50 @@ export default function MeetingRoom() {
             >
               <MessageSquare size={21} />
             </button>
+            {isHostOrCoHost && (
+              <div ref={moreMenuRef} style={{ position: 'relative' }}>
+                <button
+                  onClick={() => setShowMoreMenu(m => !m)}
+                  title="More Controls"
+                  style={{ width: 52, height: 52, borderRadius: '50%', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: showMoreMenu ? 'rgba(96,165,250,0.25)' : 'rgba(255,255,255,0.12)', color: 'white', transition: 'all 0.2s' }}
+                >
+                  <MoreVertical size={21} />
+                </button>
+                {showMoreMenu && (
+                  <div style={{ position: 'absolute', bottom: 62, left: '50%', transform: 'translateX(-50%)', background: 'linear-gradient(135deg,rgba(15,23,42,0.98),rgba(30,41,59,0.98))', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '14px', padding: '0.5rem', minWidth: 220, boxShadow: '0 15px 40px rgba(0,0,0,0.5)', backdropFilter: 'blur(16px)', zIndex: 100 }}>
+                    <button onClick={() => { if(socket) socket.emit('meeting:force_mute_all', { role: participantRole }); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.85rem', background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.06)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
+                      <MicOff size={16} /> Mute All
+                    </button>
+                    <button onClick={() => { if(socket) socket.emit('meeting:force_video_off_all', { role: participantRole }); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.85rem', background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.06)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
+                      <VideoOff size={16} /> Turn Off All Cameras
+                    </button>
+                    <button onClick={() => {
+                      const newLock = !roomAudioLocked;
+                      setRoomAudioLocked(newLock);
+                      if(socket) socket.emit('meeting:lock_hardware', { role: participantRole, type: 'audio', locked: newLock });
+                      setShowMoreMenu(false);
+                    }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.85rem', background: 'none', border: 'none', color: roomAudioLocked ? '#34d399' : '#ef4444', cursor: 'pointer', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.06)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
+                      <MicOff size={16} /> {roomAudioLocked ? 'Unlock All Mics' : 'Lock All Mics'}
+                    </button>
+                    <button onClick={() => {
+                      const newLock = !roomVideoLocked;
+                      setRoomVideoLocked(newLock);
+                      if(socket) socket.emit('meeting:lock_hardware', { role: participantRole, type: 'video', locked: newLock });
+                      setShowMoreMenu(false);
+                    }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.85rem', background: 'none', border: 'none', color: roomVideoLocked ? '#34d399' : '#ef4444', cursor: 'pointer', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.06)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
+                      <VideoOff size={16} /> {roomVideoLocked ? 'Unlock All Cameras' : 'Lock All Cameras'}
+                    </button>
+                    <div style={{ height: 1, background: 'rgba(255,255,255,0.07)', margin: '0.25rem 0' }} />
+                    <button onClick={() => { setShowLobby(l => !l); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.85rem', background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.06)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
+                      <Shield size={16} /> {waitingUsers.length > 0 ? `Lobby (${waitingUsers.length})` : 'Lobby'}
+                    </button>
+                    <button onClick={() => { setSidebarTab('MEMBERS'); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.85rem', background: 'none', border: 'none', color: '#a78bfa', cursor: 'pointer', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.06)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
+                      <Users size={16} /> Manage Members
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
             <button
               onClick={leaveMeeting}
               title="Leave meeting"
@@ -661,9 +840,18 @@ export default function MeetingRoom() {
                 {peers.map((peer, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.75rem', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.06)' }}>
                     <Avatar name={peer.name || `P${i + 1}`} size={34} color="#374151" />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 500, color: '#e2e8f0', fontSize: '0.88rem' }}>{peer.name || `Participant ${i + 1}`}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 500, color: '#e2e8f0', fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{peer.name || `Participant ${i + 1}`}</div>
                       <div style={{ fontSize: '0.72rem', color: peer.role === 'HOST' ? '#fbbf24' : peer.role === 'COHOST' ? '#a78bfa' : '#4b5563', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{peer.role || 'Connected'}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center', flexShrink: 0 }}>
+                      {(peer.isAudioOn ?? true) ? <Mic size={14} color="#6b7280" /> : <MicOff size={14} color="#ef4444" />}
+                      {(peer.isVideoOn ?? true) ? <Video size={14} color="#6b7280" /> : <VideoOff size={14} color="#ef4444" />}
+                      {isHost && peer.role !== 'HOST' && (
+                        <button onClick={() => handleToggleMeetingCoHost(peer.userId, peer.role === 'COHOST')} title={peer.role === 'COHOST' ? 'Remove Co-Host' : 'Make Co-Host'} style={{ background: 'none', border: 'none', color: peer.role === 'COHOST' ? '#c084fc' : '#6b7280', cursor: 'pointer', padding: '0.1rem', display: 'flex' }}>
+                          <Star size={14} fill={peer.role === 'COHOST' ? '#c084fc' : 'none'} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -674,99 +862,99 @@ export default function MeetingRoom() {
       </main>
 
       {/* === SETTINGS MODAL === */}
-      {showSettings && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'linear-gradient(135deg,rgba(15,23,42,0.98),rgba(30,41,59,0.98))', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '20px', padding: '2rem', width: 420, boxShadow: '0 30px 80px rgba(0,0,0,0.5)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.75rem' }}>
-              <h2 style={{ margin: 0, color: '#f1f5f9', fontSize: '1.15rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Settings size={18} color="#60a5fa" /> Settings
-              </h2>
-              <button onClick={() => setShowSettings(false)} style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1 }}>×</button>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.82rem', color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    <Globe size={12} style={{ verticalAlign: 'middle', marginRight: 5 }} />My spoken language (mic)
-                  </label>
-                  <select value={spokenLanguage} onChange={e => setSpokenLanguage(e.target.value)} style={{ width: '100%', padding: '0.65rem 0.9rem', background: 'rgba(0,0,0,0.3)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', fontSize: '0.9rem' }}>
-                    {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
-                  </select>
-                </div>
-                
-                {/* Speech to Speech */}
-                <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.07)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (user.ttsEnabled ?? true) ? '0.75rem' : '0' }}>
-                    <div>
-                      <p style={{ margin: 0, fontWeight: 600, color: '#f1f5f9', fontSize: '0.88rem' }}>Speech-to-Speech</p>
-                      <p style={{ margin: 0, color: '#6b7280', fontSize: '0.78rem' }}>Read out audio translations</p>
-                    </div>
-                    <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
-                      <input type="checkbox" checked={user.ttsEnabled ?? true} onChange={e => { useAuthStore.getState().user.ttsEnabled = e.target.checked; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ display: 'none' }} />
-                      <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.ttsEnabled ?? true) ? '#3b82f6' : 'rgba(255,255,255,0.1)', transition: 'background 0.2s', position: 'relative' }}>
-                        <div style={{ position: 'absolute', top: 2, left: (user.ttsEnabled ?? true) ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
-                      </div>
-                    </label>
-                  </div>
-                  {(user.ttsEnabled ?? true) && (
-                    <select value={user.ttsLang || 'original'} onChange={e => { useAuthStore.getState().user.ttsLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.65rem 0.9rem', background: 'rgba(0,0,0,0.3)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', fontSize: '0.9rem' }}>
-                      <option value="original">Original</option>
-                      {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
-                    </select>
-                  )}
-                </div>
-
-                {/* Message Chat Translation */}
-                <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.07)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (user.chatEnabled ?? true) ? '0.75rem' : '0' }}>
-                    <div>
-                      <p style={{ margin: 0, fontWeight: 600, color: '#f1f5f9', fontSize: '0.88rem' }}>Message Chat Translation</p>
-                    </div>
-                    <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
-                      <input type="checkbox" checked={user.chatEnabled ?? true} onChange={e => { useAuthStore.getState().user.chatEnabled = e.target.checked; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ display: 'none' }} />
-                      <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.chatEnabled ?? true) ? '#3b82f6' : 'rgba(255,255,255,0.1)', transition: 'background 0.2s', position: 'relative' }}>
-                        <div style={{ position: 'absolute', top: 2, left: (user.chatEnabled ?? true) ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
-                      </div>
-                    </label>
-                  </div>
-                  {(user.chatEnabled ?? true) && (
-                    <select value={user.chatLang || 'original'} onChange={e => { useAuthStore.getState().user.chatLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.65rem 0.9rem', background: 'rgba(0,0,0,0.3)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', fontSize: '0.9rem' }}>
-                      <option value="original">Original</option>
-                      {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
-                    </select>
-                  )}
-                </div>
-
-                {/* Speech to Caption */}
-                <div style={{ padding: '1rem', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.07)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (user.captionEnabled ?? true) ? '0.75rem' : '0' }}>
-                    <div>
-                      <p style={{ margin: 0, fontWeight: 600, color: '#f1f5f9', fontSize: '0.88rem' }}>Speech to Caption</p>
-                    </div>
-                    <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
-                      <input type="checkbox" checked={user.captionEnabled ?? true} onChange={e => { useAuthStore.getState().user.captionEnabled = e.target.checked; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ display: 'none' }} />
-                      <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.captionEnabled ?? true) ? '#3b82f6' : 'rgba(255,255,255,0.1)', transition: 'background 0.2s', position: 'relative' }}>
-                        <div style={{ position: 'absolute', top: 2, left: (user.captionEnabled ?? true) ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
-                      </div>
-                    </label>
-                  </div>
-                  {(user.captionEnabled ?? true) && (
-                    <select value={user.captionLang || 'original'} onChange={e => { useAuthStore.getState().user.captionLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.65rem 0.9rem', background: 'rgba(0,0,0,0.3)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', fontSize: '0.9rem' }}>
-                      <option value="original">Original</option>
-                      {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
-                    </select>
-                  )}
-                </div>
+        {showSettings && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ background: '#0c1527', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '24px', padding: '2rem', width: 440, boxShadow: '0 25px 50px -12px rgba(0,0,0,0.7)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
+                <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 700 }}>
+                  <Settings size={20} color="#3b82f6" /> Settings
+                </h2>
+                <button onClick={() => setShowSettings(false)} style={{ background: 'rgba(255,255,255,0.05)', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '1.25rem', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s' }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} onMouseLeave={e => e.currentTarget.style.background='rgba(255,255,255,0.05)'}>&times;</button>
               </div>
-
-              <button onClick={() => setShowSettings(false)} style={{ width: '100%', marginTop: '1.5rem', padding: '0.875rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 700, cursor: 'pointer', fontSize: '0.95rem' }}>
+  
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      <Globe size={12} style={{ verticalAlign: 'middle', marginRight: 5 }} />My spoken language (mic)
+                    </label>
+                    <select value={spokenLanguage} onChange={e => setSpokenLanguage(e.target.value)} style={{ width: '100%', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '0.9rem', outline: 'none' }}>
+                      {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                    </select>
+                  </div>
+                  
+                  {/* Speech to Speech */}
+                  <div style={{ padding: '1.25rem', background: 'rgba(255,255,255,0.03)', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (user.ttsEnabled ?? true) ? '1rem' : '0' }}>
+                      <div>
+                        <p style={{ margin: 0, fontWeight: 600, color: '#f8fafc', fontSize: '0.9rem' }}>Speech-to-Speech</p>
+                        <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem', marginTop: '0.2rem' }}>Read out audio translations</p>
+                      </div>
+                      <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={user.ttsEnabled ?? true} onChange={e => { useAuthStore.getState().user.ttsEnabled = e.target.checked; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ display: 'none' }} />
+                        <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.ttsEnabled ?? true) ? '#3b82f6' : 'rgba(255,255,255,0.1)', transition: 'background 0.2s', position: 'relative' }}>
+                          <div style={{ position: 'absolute', top: 2, left: (user.ttsEnabled ?? true) ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
+                        </div>
+                      </label>
+                    </div>
+                    {(user.ttsEnabled ?? true) && (
+                      <select value={user.ttsLang || 'original'} onChange={e => { useAuthStore.getState().user.ttsLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.2)', color: 'white', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', fontSize: '0.9rem', outline: 'none' }}>
+                        <option value="original">Original</option>
+                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                      </select>
+                    )}
+                  </div>
+  
+                  {/* Message Chat Translation */}
+                  <div style={{ padding: '1.25rem', background: 'rgba(255,255,255,0.03)', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (user.chatEnabled ?? true) ? '1rem' : '0' }}>
+                      <div>
+                        <p style={{ margin: 0, fontWeight: 600, color: '#f8fafc', fontSize: '0.9rem' }}>Message Chat Translation</p>
+                      </div>
+                      <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={user.chatEnabled ?? true} onChange={e => { useAuthStore.getState().user.chatEnabled = e.target.checked; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ display: 'none' }} />
+                        <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.chatEnabled ?? true) ? '#3b82f6' : 'rgba(255,255,255,0.1)', transition: 'background 0.2s', position: 'relative' }}>
+                          <div style={{ position: 'absolute', top: 2, left: (user.chatEnabled ?? true) ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
+                        </div>
+                      </label>
+                    </div>
+                    {(user.chatEnabled ?? true) && (
+                      <select value={user.chatLang || 'original'} onChange={e => { useAuthStore.getState().user.chatLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.2)', color: 'white', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', fontSize: '0.9rem', outline: 'none' }}>
+                        <option value="original">Original</option>
+                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                      </select>
+                    )}
+                  </div>
+  
+                  {/* Speech to Caption */}
+                  <div style={{ padding: '1.25rem', background: 'rgba(255,255,255,0.03)', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (user.captionEnabled ?? true) ? '1rem' : '0' }}>
+                      <div>
+                        <p style={{ margin: 0, fontWeight: 600, color: '#f8fafc', fontSize: '0.9rem' }}>Speech to Caption</p>
+                      </div>
+                      <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={user.captionEnabled ?? true} onChange={e => { useAuthStore.getState().user.captionEnabled = e.target.checked; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ display: 'none' }} />
+                        <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.captionEnabled ?? true) ? '#3b82f6' : 'rgba(255,255,255,0.1)', transition: 'background 0.2s', position: 'relative' }}>
+                          <div style={{ position: 'absolute', top: 2, left: (user.captionEnabled ?? true) ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
+                        </div>
+                      </label>
+                    </div>
+                    {(user.captionEnabled ?? true) && (
+                      <select value={user.captionLang || 'original'} onChange={e => { useAuthStore.getState().user.captionLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.2)', color: 'white', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', fontSize: '0.9rem', outline: 'none' }}>
+                        <option value="original">Original</option>
+                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                      </select>
+                    )}
+                  </div>
+              </div>
+  
+              <button onClick={() => setShowSettings(false)} style={{ width: '100%', marginTop: '2rem', padding: '1rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 700, cursor: 'pointer', fontSize: '1rem', transition: 'background 0.2s' }} onMouseEnter={e => e.currentTarget.style.background='#2563eb'} onMouseLeave={e => e.currentTarget.style.background='#3b82f6'}>
                 Done
               </button>
+            </div>
           </div>
-        </div>
-      )}
-
-      {/* === LOBBY TOAST NOTIFICATION === */}
+        )}
+  
+        {/* === LOBBY TOAST NOTIFICATION === */}
       {lobbyToast && (
         <div style={{
           position: 'fixed', bottom: '5.5rem', left: '50%', transform: 'translateX(-50%)',
@@ -817,3 +1005,8 @@ export default function MeetingRoom() {
     </div>
   );
 }
+
+
+
+
+
