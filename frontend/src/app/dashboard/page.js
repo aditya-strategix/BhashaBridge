@@ -131,6 +131,7 @@ function DashboardContent() {
   const [confirmModal, setConfirmModal] = useState(null); // { title, message, onConfirm }
   const [showAllMembersOrg, setShowAllMembersOrg] = useState(null); // org object
   const [transcriptModal, setTranscriptModal] = useState(null); // { loading, entries }
+  const [summaryModal, setSummaryModal] = useState(null); // { loading, text }
 
   // Copy feedback
   const [copiedCode, setCopiedCode] = useState(null);
@@ -288,6 +289,17 @@ function DashboardContent() {
     URL.revokeObjectURL(url);
   };
 
+  const handleExportSummary = () => {
+    if (!summaryModal || !summaryModal.text) return;
+    const blob = new Blob([summaryModal.text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Meeting_Summary_${summaryModal.link}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleExportTranscript = () => {
     if (!transcriptModal || !transcriptModal.entries || transcriptModal.entries.length === 0) return;
     const lines = transcriptModal.entries.map(t => {
@@ -302,6 +314,18 @@ function DashboardContent() {
     a.download = `Meeting_Transcript_${transcriptModal.link}.txt`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  
+  const handleViewSummary = async (meetingLink) => {
+    setSummaryModal({ loading: true, text: '', link: meetingLink });
+    try {
+      const res = await api.get(`/meetings/${meetingLink}/summary`);
+      setSummaryModal({ loading: false, text: res.data.summary || 'No summary available.', link: meetingLink });
+    } catch (err) {
+      setAlertMessage(err.response?.data?.error || 'Failed to load summary.');
+      setSummaryModal(null);
+    }
   };
 
   const handleViewTranscript = async (meetingLink) => {
@@ -548,7 +572,41 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* Transcript Modal */}
+      
+        {/* Summary Modal */}
+        {summaryModal && (
+          <div style={{ ...MODAL_STYLE.overlay }} onClick={() => setSummaryModal(null)}>
+            <div style={{ background: '#0a0a0a', padding: '2rem', borderRadius: '16px', border: '1px solid #262626', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', width: '90%', maxWidth: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid #262626' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '1.1rem' }}>✨ AI Meeting Summary</h2>
+                    {!summaryModal.loading && summaryModal.text && (
+                      <button onClick={handleExportSummary} style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)', padding: '0.4rem 0.8rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                        Export TXT
+                      </button>
+                    )}
+                  </div>
+                <button onClick={() => setSummaryModal(null)} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '1.5rem', lineHeight: 1 }}>&times;</button>
+              </div>
+              <div style={{ overflowY: 'auto', flex: 1 }}>
+                {summaryModal.loading ? (
+                  <div style={{ textAlign: 'center', padding: '3rem 0' }}>
+                    <div className="spinner" style={{ border: '3px solid rgba(255,255,255,0.1)', borderTop: '3px solid #10b981', borderRadius: '50%', width: '30px', height: '30px', animation: 'spin 1s linear infinite', margin: '0 auto 1rem' }}></div>
+                    <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+                    <p style={{ color: '#10b981', fontWeight: 600 }}>AI is generating the summary in your language... This may take up to 15 seconds.</p>
+                  </div>
+                ) : (
+                  <div style={{ whiteSpace: 'pre-wrap', color: '#e2e8f0', lineHeight: 1.6, fontSize: '0.95rem' }}>
+                    {summaryModal.text}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Transcript Modal */}
       {transcriptModal && (
         <div style={{ ...MODAL_STYLE.overlay }} onClick={() => setTranscriptModal(null)}>
           <div style={{ background: 'linear-gradient(135deg,rgba(30,41,59,0.98),rgba(15,23,42,0.98))', padding: '2rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', width: '90%', maxWidth: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
@@ -659,15 +717,19 @@ function DashboardContent() {
                   value={newTitle}
                   onChange={e => setNewTitle(e.target.value)}
                 />
-                <div style={{ margin: '0.75rem 0' }}>
-                  <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.82rem', color: '#9ca3af' }}>Organization (Optional)</label>
-                  <select className={styles.input} value={selectedOrgId} onChange={e => setSelectedOrgId(e.target.value)} style={{ background: 'rgba(0,0,0,0.2)' }}>
-                    <option value="">No Organization</option>
-                    {organizations.map(org => (
-                      <option key={org.id} value={org.id}>{org.name}</option>
-                    ))}
-                  </select>
-                </div>
+                {organizations.some(org => org.ownerId === user.id || org.coHosts?.some(c => c.id === user.id)) && (
+                  <div style={{ margin: '0.75rem 0' }}>
+                    <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.82rem', color: '#9ca3af' }}>Organization (Optional)</label>
+                    <select className={styles.input} value={selectedOrgId} onChange={e => setSelectedOrgId(e.target.value)} style={{ background: 'rgba(0,0,0,0.2)' }}>
+                      <option value="">No Organization</option>
+                      {organizations
+                        .filter(org => org.ownerId === user.id || org.coHosts?.some(c => c.id === user.id))
+                        .map(org => (
+                          <option key={org.id} value={org.id}>{org.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  )}
                 <div style={{ margin: '0.75rem 0' }}>
                   <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.82rem', color: '#9ca3af' }}>Schedule For (leave blank to start now)</label>
                   <input
@@ -916,6 +978,12 @@ function DashboardContent() {
                                   >
                                     📝 Transcript
                                   </button>
+                                    <button
+                                      onClick={(e) => { e.preventDefault(); handleViewSummary(m.meetingLink); }}
+                                      style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.2)', padding: '0.5rem 0.8rem', borderRadius: '8px', cursor: 'pointer', fontSize: '0.82rem', whiteSpace: 'nowrap', fontWeight: 600, marginLeft: '0.4rem' }}
+                                    >
+                                      ✨ Summary
+                                    </button>
                                   <Link
                                     href={`/meeting/${m.meetingLink}/report`}
                                     style={{ background: 'rgba(167,139,250,0.1)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)', padding: '0.5rem 0.8rem', borderRadius: '8px', cursor: 'pointer', fontSize: '0.82rem', whiteSpace: 'nowrap', fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}

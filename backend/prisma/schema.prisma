@@ -93,6 +93,8 @@ model Meeting {
   endTime        DateTime?
   createdAt      DateTime      @default(now())
 
+  summaryCache   Json?
+
   hiddenForUserIds String[] @default([])
   participants Participant[]
   chatMessages ChatMessage[]

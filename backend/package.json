@@ -23,6 +23,7 @@
     "google-translate-api-x": "^10.7.3",
     "jsonwebtoken": "^9.0.3",
     "prisma": "^5.22.0",
+    "redis": "^6.2.1",
     "resend": "^6.28.1",
     "socket.io": "^4.8.3",
     "zod": "^4.5.4"

@@ -1,24 +1,55 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const crypto = require('crypto');
+const AIService = require('../services/ai.service');
+
+const { createClient } = require('redis');
+
+let redisClient = null;
+const initRedis = async () => {
+  if (redisClient) return redisClient;
+  if (!process.env.VALKEY_URL) return null;
+  try {
+    const client = createClient({ url: process.env.VALKEY_URL });
+    client.on('error', (err) => console.log('Valkey Client Error:', err.message));
+    await client.connect();
+    redisClient = client;
+    console.log('Connected to Valkey successfully!');
+    return client;
+  } catch (err) {
+    console.error("Failed to connect to Valkey:", err.message);
+    return null;
+  }
+};
+
+
 
 exports.createMeeting = async (req, res) => {
   try {
     const { title, startTime, state, organizationId } = req.body;
     let meetingLink = crypto.randomBytes(4).toString('hex');
     
+
     // Check if org belongs to user
     let orgData = {};
     if (organizationId) {
       const org = await prisma.organization.findFirst({
-        where: { id: organizationId, users: { some: { id: req.user.userId } } }
+        where: { id: organizationId, users: { some: { id: req.user.userId } } },
+        include: { coHosts: true }
       });
       if (!org) return res.status(403).json({ error: 'Not a member of this organization' });
+      
+      const isCoHost = org.coHosts.some(c => c.id === req.user.userId);
+      if (org.ownerId !== req.user.userId && !isCoHost) {
+        return res.status(403).json({ error: 'Only Organization Hosts and Co-Hosts can create organization meetings' });
+      }
+
       orgData = { organizationId };
       if (org.accessCode) {
         meetingLink = `${org.accessCode}-${crypto.randomBytes(2).toString('hex')}`;
       }
     }
+
 
     let parsedStartTime = new Date();
     if (startTime) {
@@ -45,6 +76,115 @@ exports.createMeeting = async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 };
+
+exports.getSummary = async (req, res) => {
+  try {
+    const { link } = req.params;
+    let meeting = await prisma.meeting.findUnique({ where: { meetingLink: link } });
+    if (!meeting) {
+      const org = await prisma.organization.findUnique({ where: { accessCode: link } });
+      if (org) {
+        meeting = await prisma.meeting.findFirst({
+          where: { organizationId: org.id },
+          orderBy: { createdAt: 'desc' }
+        });
+      }
+    }
+
+    if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
+
+    
+      let isOrgAdmin = false;
+      if (meeting.organizationId) {
+        const org = await prisma.organization.findUnique({
+          where: { id: meeting.organizationId },
+          include: { coHosts: true }
+        });
+        if (org && (org.ownerId === req.user.userId || org.coHosts.some(c => c.id === req.user.userId))) {
+          isOrgAdmin = true;
+        }
+      }
+
+      const isHost = meeting.hostId === req.user.userId || isOrgAdmin;
+      const participant = await prisma.participant.findUnique({
+        where: { userId_meetingId: { userId: req.user.userId, meetingId: meeting.id } }
+      });
+
+      if (!isHost && !participant) {
+      return res.status(403).json({ error: 'You are not authorized to view this summary' });
+    }
+
+    // Fetch transcript
+    const captions = await prisma.caption.findMany({
+      where: { meetingId: meeting.id },
+      include: { speaker: { select: { name: true } } },
+      orderBy: { timestamp: 'asc' }
+    });
+
+    if (captions.length === 0) {
+      return res.json({ summary: "No transcript recorded for this meeting." });
+    }
+
+    // Combine transcript into plain text
+      const transcriptText = captions.map(c => `[${new Date(c.timestamp).toLocaleTimeString()}] ${c.speaker.name}: ${c.originalText}`).join('\n');
+
+      const targetLang = req.query.lang || req.user.language || req.user.preferredLanguage || 'en';
+      
+      // 1. Permanent Cache Check (PostgreSQL) for COMPLETED meetings
+      if (meeting.state === 'COMPLETED' && meeting.summaryCache) {
+        let cachedJson = {};
+        try {
+          cachedJson = typeof meeting.summaryCache === 'string' ? JSON.parse(meeting.summaryCache) : meeting.summaryCache;
+        } catch(e) {}
+        
+        if (cachedJson && cachedJson[targetLang]) {
+          console.log(`Served summary for meeting ${meeting.id} from PostgreSQL Permanent Cache!`);
+          return res.json({ summary: cachedJson[targetLang] });
+        }
+      }
+
+      // 2. TTL Cache Check (Valkey) for ONGOING meetings
+      const cacheKey = `summary:${meeting.id}:${targetLang}`;
+      const cache = await initRedis();
+
+      if (cache && meeting.state !== 'COMPLETED') {
+        const cachedSummary = await cache.get(cacheKey);
+        if (cachedSummary) {
+          console.log(`Served summary for meeting ${meeting.id} from Valkey TTL Cache!`);
+          return res.json({ summary: cachedSummary });
+        }
+      }
+
+      // Generate new summary via Gemini
+      const summary = await AIService.summarizeTranscript(transcriptText, targetLang);
+
+      // Save to appropriate Cache
+      if (meeting.state === 'COMPLETED') {
+        // Save to PostgreSQL permanently
+        let cachedJson = {};
+        if (meeting.summaryCache) {
+          try { cachedJson = typeof meeting.summaryCache === 'string' ? JSON.parse(meeting.summaryCache) : meeting.summaryCache; } catch(e) {}
+        }
+        cachedJson[targetLang] = summary;
+        await prisma.meeting.update({
+          where: { id: meeting.id },
+          data: { summaryCache: cachedJson }
+        });
+        console.log(`Saved summary to PostgreSQL Permanent Cache.`);
+      } else if (cache) {
+        // Save to Valkey with 5-minute TTL
+        const ttl = 300;
+        await cache.setEx(cacheKey, ttl, summary);
+        console.log(`Saved summary to Valkey Cache with ${ttl}s TTL.`);
+      }
+
+      res.json({ summary });
+  } catch (error) {
+    console.error('Summary error:', error);
+    res.status(500).json({ error: 'Server error: ' + error.message });
+  }
+};
+
 
 exports.getMeetings = async (req, res) => {
   try {
@@ -160,7 +300,22 @@ exports.endMeeting = async (req, res) => {
     const meeting = await prisma.meeting.findUnique({ where: { meetingLink: link } });
     
     if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
-    if (meeting.hostId !== req.user.userId) return res.status(403).json({ error: 'Only the host can end the meeting' });
+    
+      let isOrgAdmin = false;
+      if (meeting.organizationId) {
+        const org = await prisma.organization.findUnique({
+          where: { id: meeting.organizationId },
+          include: { coHosts: true }
+        });
+        if (org && (org.ownerId === req.user.userId || org.coHosts.some(c => c.id === req.user.userId))) {
+          isOrgAdmin = true;
+        }
+      }
+
+      if (meeting.hostId !== req.user.userId && !isOrgAdmin) {
+        return res.status(403).json({ error: 'Only the host or org admins can end the meeting' });
+      }
+
 
     const updated = await prisma.meeting.update({
       where: { id: meeting.id },
@@ -308,13 +463,24 @@ exports.getTranscript = async (req, res) => {
 
     if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
 
-    // Ensure the user is a participant or host
-    const isHost = meeting.hostId === req.user.userId;
-    const participant = await prisma.participant.findUnique({
-      where: { userId_meetingId: { userId: req.user.userId, meetingId: meeting.id } }
-    });
+    
+      let isOrgAdmin = false;
+      if (meeting.organizationId) {
+        const org = await prisma.organization.findUnique({
+          where: { id: meeting.organizationId },
+          include: { coHosts: true }
+        });
+        if (org && (org.ownerId === req.user.userId || org.coHosts.some(c => c.id === req.user.userId))) {
+          isOrgAdmin = true;
+        }
+      }
 
-    if (!isHost && !participant) {
+      const isHost = meeting.hostId === req.user.userId || isOrgAdmin;
+      const participant = await prisma.participant.findUnique({
+        where: { userId_meetingId: { userId: req.user.userId, meetingId: meeting.id } }
+      });
+
+      if (!isHost && !participant) {
       return res.status(403).json({ error: 'You are not authorized to view this transcript' });
     }
 

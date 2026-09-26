@@ -302,3 +302,25 @@ Once the handshake is complete, audio and video flow **directly between browsers
 - **Strict Heartbeat mechanism:** Configured with `pingInterval: 300000` (5 minutes) and `pingTimeout: 300000` (5 minutes). This balanced heartbeat ensures that hardware crashes, hard network drops, and power outages are detected within a maximum of 10 minutes, preventing massive attendance inflation without overloading the server with constant pings.
 - **Attendance Logging:** When the `disconnect` event fires (either gracefully or via the Heartbeat timeout), the server writes the exact `leftAt` timestamp to `ParticipantSession` in PostgreSQL, ensuring pixel-perfect attendance logging.
 - **Dangling Session Fallbacks:** The CSV export algorithm is smart enough to detect any anomalies. If a session somehow still drops without a `leftAt`, but the user rejoins later, the dropped session's duration is capped at 0m (marked as 'Dropped') to prevent inflation. If it is their absolute final session, they are credited until the `meeting.endTime`.
+
+
+### 5. AI Summarization & Dual Caching Architecture
+The AI Summarization pipeline utilizes Google Gemini (gemini-3.7-flash) with a multi-model 503 fallback cascade, governed by a two-tier caching architecture to protect API billing:
+
+#### Tier 1: Valkey TTL Cache (Ongoing Meetings)
+- **Engine:** Valkey (Redis fork) running on Docker (`localhost:6379`).
+- **Condition:** `meeting.state !== 'COMPLETED'`
+- **Behavior:** Summaries are temporarily cached in RAM with a strict **5-minute (300s) TTL**. Protects the API from concurrent "spam" clicks while ensuring the summary stays relatively fresh as the live transcript grows.
+
+#### Tier 2: PostgreSQL Permanent Cache (Completed Meetings)
+- **Engine:** PostgreSQL (`summaryCache Json?` field on the `Meeting` model).
+- **Condition:** `meeting.state === 'COMPLETED'`
+- **Behavior:** Because the transcript is permanently locked, the first generated summary is saved to the DB as a dictionary of target languages (e.g., `{"en": "...", "hi": "..."}`). Future requests load instantly from the DB, dropping the API cost for historical lookups to $0.
+
+### 6. Meeting Analytics Aggregation
+The Post-Meeting Analytics Engine calculates metrics asynchronously on-demand. To determine the `languagesUsed` array, it queries both the `ChatMessage` (Text) and `Caption` (Voice) database tables, executing a union array to produce a unique, deduped list of all source languages participants utilized during the session.
+
+### 7. Global Profile State & JWT Synchronization
+User preferences are synchronized across the system via a Dual-State pattern:
+1. **Frontend (Zustand):** `useAuthStore` manages immediate reactivity (e.g., updating the language dropdown).
+2. **Backend (PostgreSQL + JWT):** `PUT /api/auth/profile` permanently saves settings to the DB and issues a fresh JWT. The JWT payload explicitly maps the database's `preferredLanguage` to the token's `language` property, which all API endpoints subsequently read to dictate AI Summary caching and generation targets.

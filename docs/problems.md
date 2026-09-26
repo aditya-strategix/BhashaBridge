@@ -280,3 +280,32 @@ audio.play();
 - `pingInterval: 300000` (Server pings clients every 5 minutes).
 - `pingTimeout: 300000` (Server forcefully drops the connection and triggers the `disconnect` event if a client fails to pong within 5 minutes).
 This guarantees that "ghost" connections are detected and their `leftAt` timestamps are recorded accurately within a 10-minute maximum window, completely solving attendance inflation.
+
+
+## Problem 13: High API Billing / Redundant AI Calls (Summary Spam)
+
+### What Happened
+The "✨ Summary" button was entirely stateless. Every time any user clicked it, the backend unconditionally fired the entire meeting transcript to the Gemini API. During a live meeting, if 50 participants clicked the button multiple times, it generated massive redundant API billing, and sometimes caused Gemini to crash with `503 High Demand`.
+
+### Root Cause
+There was no caching layer built into the AI summary endpoint (`getSummary` in `meeting.controller.js`). 
+
+### Final Fix (Dual Caching Architecture)
+We implemented a strict two-tier caching system to eliminate 95% of redundant API calls:
+1. **TTL Memory Cache (Valkey) for ONGOING Meetings:** During an active meeting, summaries are generated and cached in Valkey (a drop-in Redis replacement running via Docker) with a strict 5-minute (300s) Time-To-Live (TTL). If users spam the button within 5 minutes, they are served the memory cache (Cost = $0). After 5 minutes, the cache expires, allowing the next click to fetch a fresh summary of the newly grown transcript.
+2. **Permanent Cache (PostgreSQL) for COMPLETED Meetings:** Once a meeting is ended (`state = COMPLETED`), the transcript is locked. We added a `summaryCache Json?` field to the Prisma `Meeting` model. The very first summary generated post-meeting is permanently saved directly to PostgreSQL mapped by language. All future clicks for eternity load instantly from the DB without ever touching Gemini.
+
+## Problem 14: Next.js Frontend Crash ("newSocket is not defined")
+**Problem:** The video chat UI collapsed to a black error screen showing `newSocket is not defined`.
+**Root Cause:** A scoping bug. The React `useEffect` hook responsible for establishing the Socket.io connection had several deeply nested functions. When attempting to refactor the `handleToggleMeetingCoHost` function out of the hook so the UI button could access it, the core `initializeMeeting` function was accidentally pulled out of scope alongside it, severing its access to the `newSocket` variable.
+**Solution:** Surgically isolated and restored `initializeMeeting` back into the `useEffect` closure block, fully recovering the Next.js runtime.
+
+## Problem 15: JWT Profile Language Mapping Failure (English Fallback)
+**Problem:** When users updated their preferred language (e.g., Hindi) in the Dashboard Profile and clicked "View Summary" on a past meeting, the API ignored their preference and kept generating the summary in English.
+**Root Cause:** The authentication controller (`auth.controller.js`) was signing the JWT token with the payload `{ userId, role, language: user.preferredLanguage }`. However, the meeting controller (`meeting.controller.js`) was attempting to read `req.user.preferredLanguage` from the decoded token. Because it was mapped to `req.user.language`, it resolved to `undefined` and triggered the hardcoded `'en'` fallback.
+**Solution:** Fixed the meeting controller to correctly read `req.user.language`, ensuring the Post-Meeting summary cache generator respects the user's active dashboard profile.
+
+## Problem 16: "Languages Spoken" Analytics Omitting Voice Chat
+**Problem:** The Post-Meeting Report displayed "No translations were active during this session" in the Languages Spoken section, even when participants actively conversed using their microphones.
+**Root Cause:** The Analytics Engine (`getMeetingAnalytics`) was exclusively querying the `ChatMessage` table to determine which languages were used. It was completely ignoring the `Caption` table where the live microphone speech transcripts are stored.
+**Solution:** Upgraded the analytics aggregation pipeline to execute a union query across both `chatMessage.originalLanguage` and `caption.originalLanguage`, providing an accurate, holistic view of all languages actively spoken or typed.

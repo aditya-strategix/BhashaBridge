@@ -30,5 +30,6 @@ router.post('/:link/reject', meetingController.rejectParticipant);
 router.post('/:link/cohost', meetingController.assignCoHost);
 router.delete('/:link/cohost/:userId', meetingController.removeCoHost);
 router.get('/:link/transcript', meetingController.getTranscript);
+router.get('/:link/summary', meetingController.getSummary);
 
 module.exports = router;

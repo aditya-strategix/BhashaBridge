@@ -82,7 +82,7 @@ export default function MeetingRoom() {
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [currentCaption, setCurrentCaption] = useState(null);
-  const [spokenLanguage, setSpokenLanguage] = useState('en');
+  const [spokenLanguage, setSpokenLanguage] = useState(useAuthStore.getState().user?.language || 'en');
   const [isDemoActive, setIsDemoActive] = useState(false);
   const [isTtsEnabled, setIsTtsEnabled] = useState(true);
   const [participantStatus, setParticipantStatus] = useState(null);
@@ -91,6 +91,7 @@ export default function MeetingRoom() {
   const [sidebarTab, setSidebarTab] = useState('CHAT');
   const [showSettings, setShowSettings] = useState(false);
   const [showLobby, setShowLobby] = useState(false);
+  const [summaryModal, setSummaryModal] = useState({ isOpen: false, text: '', loading: false });
   const [lobbyToast, setLobbyToast] = useState(null); // { name }
   const lobbyToastTimer = useRef(null);
 
@@ -168,23 +169,6 @@ export default function MeetingRoom() {
 
     let newSocket;
 
-      const handleToggleMeetingCoHost = async (targetUserId, isCoHost) => {
-    try {
-      const token = localStorage.getItem('token');
-      let res;
-      if (isCoHost) {
-        res = await fetch(`${API_URL}/meetings/${meetingId}/cohost/${targetUserId}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
-      } else {
-        res = await fetch(`${API_URL}/meetings/${meetingId}/cohost`, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: targetUserId }) });
-      }
-      if (!res.ok) {
-        const data = await res.json();
-        alert(data.error || 'Failed to toggle co-host');
-      }
-    } catch (err) {
-      alert('Failed to toggle co-host');
-    }
-  };
     const initializeMeeting = async () => {
       try {
         const token = localStorage.getItem('token');
@@ -456,6 +440,41 @@ export default function MeetingRoom() {
     router.push(`/meeting/${meetingId}/report`);
   };
 
+
+
+      const handleToggleMeetingCoHost = async (targetUserId, isCoHost) => {
+    try {
+      const token = localStorage.getItem('token');
+      let res;
+      if (isCoHost) {
+        res = await fetch(`${API_URL}/meetings/${meetingId}/cohost/${targetUserId}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
+      } else {
+        res = await fetch(`${API_URL}/meetings/${meetingId}/cohost`, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: targetUserId }) });
+      }
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || 'Failed to toggle co-host');
+      }
+    } catch (err) {
+      alert('Failed to toggle co-host');
+    }
+  };
+
+  const fetchLiveSummary = async () => {
+    setSummaryModal({ isOpen: true, text: '', loading: true });
+    try {
+      const res = await authFetch(`/meetings/${meetingId}/summary?lang=${spokenLanguage}`);
+      const data = await res.json();
+      if (res.ok) {
+        setSummaryModal({ isOpen: true, text: data.summary, loading: false });
+      } else {
+        setSummaryModal({ isOpen: true, text: `Error: ${data.error}`, loading: false });
+      }
+    } catch (err) {
+      setSummaryModal({ isOpen: true, text: 'Network error occurred.', loading: false });
+    }
+  };
+
   const sendMessage = (e) => {
     e.preventDefault();
     if (!chatInput.trim() || !socket) return;
@@ -643,7 +662,10 @@ export default function MeetingRoom() {
               Lobby ({waitingUsers.length})
             </button>
           )}
-          <button onClick={() => setShowSettings(true)} style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', padding: '0.45rem 0.9rem', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', fontWeight: 600 }}>
+          <button onClick={fetchLiveSummary} style={{ background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.4)', color: '#60a5fa', padding: '0.45rem 0.9rem', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', fontWeight: 600 }}>
+              ✨ Summary
+            </button>
+            <button onClick={() => setShowSettings(true)} style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', padding: '0.45rem 0.9rem', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', fontWeight: 600 }}>
             <Settings size={15} /> Settings
           </button>
           <button onClick={() => setIsDemoActive(!isDemoActive)} style={{ background: isDemoActive ? 'rgba(239,68,68,0.15)' : 'rgba(59,130,246,0.15)', border: `1px solid ${isDemoActive ? 'rgba(239,68,68,0.4)' : 'rgba(59,130,246,0.4)'}`, color: isDemoActive ? '#ef4444' : '#60a5fa', padding: '0.45rem 0.9rem', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', fontWeight: 600 }}>
@@ -861,7 +883,32 @@ export default function MeetingRoom() {
         </aside>
       </main>
 
-      {/* === SETTINGS MODAL === */}
+      {/* === SUMMARY MODAL === */}
+        {summaryModal.isOpen && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))}>
+            <div style={{ background: '#0c1527', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '24px', padding: '2rem', width: 600, maxWidth: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.7)' }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', flexShrink: 0 }}>
+                <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '1.35rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 700 }}>
+                  ✨ Live Summary
+                </h2>
+                <button onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))} style={{ background: 'rgba(255,255,255,0.05)', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '1.25rem', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>&times;</button>
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto', paddingRight: '0.5rem', color: '#e2e8f0', fontSize: '0.95rem', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                {summaryModal.loading ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '1rem', color: '#60a5fa' }}>
+                    <div style={{ width: 40, height: 40, borderRadius: '50%', border: '3px solid rgba(96,165,250,0.2)', borderTopColor: '#60a5fa', animation: 'spin 1s linear infinite' }} />
+                    <p style={{ margin: 0, fontWeight: 600 }}>Analyzing Live Transcript...</p>
+                  </div>
+                ) : summaryModal.text}
+              </div>
+              <button onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))} style={{ width: '100%', marginTop: '1.5rem', padding: '0.8rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 700, cursor: 'pointer', fontSize: '0.95rem', flexShrink: 0 }}>
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* === SETTINGS MODAL === */}
         {showSettings && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowSettings(false)}>
             <div style={{ background: '#0c1527', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '24px', padding: '2rem', width: 440, boxShadow: '0 25px 50px -12px rgba(0,0,0,0.7)' }} onClick={(e) => e.stopPropagation()}>
@@ -877,8 +924,23 @@ export default function MeetingRoom() {
                     <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       <Globe size={12} style={{ verticalAlign: 'middle', marginRight: 5 }} />My spoken language (mic)
                     </label>
-                    <select value={spokenLanguage} onChange={e => setSpokenLanguage(e.target.value)} style={{ width: '100%', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '0.9rem', outline: 'none' }}>
-                      {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                    <select value={spokenLanguage} onChange={e => {
+                        const val = e.target.value;
+                        setSpokenLanguage(val);
+                        if (useAuthStore.getState().user) {
+                          useAuthStore.getState().user.language = val;
+                        }
+                        if (socket) socket.emit("user:update_settings", useAuthStore.getState().user);
+                        const token = localStorage.getItem('token');
+                        if (token) {
+                          fetch(`${API_URL}/auth/profile`, {
+                            method: 'PUT',
+                            headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ preferredLanguage: val })
+                          }).catch(console.error);
+                        }
+                      }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '0.9rem', outline: 'none' }}>
+                      {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#0c1527', color: 'white' }}>{l.label}</option>)}
                     </select>
                   </div>
                   
@@ -898,8 +960,8 @@ export default function MeetingRoom() {
                     </div>
                     {(user.ttsEnabled ?? true) && (
                       <select value={user.ttsLang || 'original'} onChange={e => { useAuthStore.getState().user.ttsLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.2)', color: 'white', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', fontSize: '0.9rem', outline: 'none' }}>
-                        <option value="original">Original</option>
-                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                        <option value="original" style={{ background: '#0c1527', color: 'white' }}>Original</option>
+                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#0c1527', color: 'white' }}>{l.label}</option>)}
                       </select>
                     )}
                   </div>
@@ -919,8 +981,8 @@ export default function MeetingRoom() {
                     </div>
                     {(user.chatEnabled ?? true) && (
                       <select value={user.chatLang || 'original'} onChange={e => { useAuthStore.getState().user.chatLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.2)', color: 'white', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', fontSize: '0.9rem', outline: 'none' }}>
-                        <option value="original">Original</option>
-                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                        <option value="original" style={{ background: '#0c1527', color: 'white' }}>Original</option>
+                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#0c1527', color: 'white' }}>{l.label}</option>)}
                       </select>
                     )}
                   </div>
@@ -940,8 +1002,8 @@ export default function MeetingRoom() {
                     </div>
                     {(user.captionEnabled ?? true) && (
                       <select value={user.captionLang || 'original'} onChange={e => { useAuthStore.getState().user.captionLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.2)', color: 'white', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', fontSize: '0.9rem', outline: 'none' }}>
-                        <option value="original">Original</option>
-                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                        <option value="original" style={{ background: '#0c1527', color: 'white' }}>Original</option>
+                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#0c1527', color: 'white' }}>{l.label}</option>)}
                       </select>
                     )}
                   </div>

@@ -40,7 +40,11 @@ exports.getAnalytics = async (req, res) => {
       // Calculate simple analytics on the fly if not exists
       const participants = await prisma.participant.count({ where: { meetingId: meeting.id } });
       const messages = await prisma.chatMessage.findMany({ where: { meetingId: meeting.id } });
-      const languagesUsed = [...new Set(messages.map(m => m.originalLanguage))];
+      const captions = await prisma.caption.findMany({ where: { meetingId: meeting.id } });
+      const languagesUsed = [...new Set([
+        ...messages.map(m => m.originalLanguage),
+        ...captions.map(c => c.originalLanguage)
+      ])];
       
       const allSessions = await prisma.participantSession.findMany({
         where: { participant: { meetingId: meeting.id } }
