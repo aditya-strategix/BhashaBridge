@@ -226,8 +226,8 @@ function DashboardContent() {
 
   const handleDeleteMeeting = (meetingId) => {
     setConfirmModal({
-      title: 'Delete Meeting',
-      message: 'This will permanently delete all chats, transcripts, and analytics for this meeting.',
+        title: 'Remove Meeting',
+        message: 'This will remove the meeting from your history.',
       onConfirm: async () => {
         setConfirmModal(null);
         try {
@@ -241,6 +241,53 @@ function DashboardContent() {
   };
 
   
+  
+  const handleExportAttendance = (meeting) => {
+    if (!meeting.participants) return;
+    const rows = ['Name,Role,Total Time,Sessions Detail'];
+    meeting.participants.forEach(p => {
+      const name = p.user?.name || 'Unknown';
+      const role = p.role || 'PARTICIPANT';
+      let totalMs = 0;
+      const sessionDetails = [];
+      (p.sessions || []).forEach((s, index, arr) => {
+        const start = new Date(s.joinedAt).getTime();
+        let end, endTimeStr;
+        if (s.leftAt) {
+          end = new Date(s.leftAt).getTime();
+          endTimeStr = new Date(s.leftAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } else {
+          if (index === arr.length - 1) {
+            end = meeting.endTime ? new Date(meeting.endTime).getTime() : Date.now();
+            endTimeStr = meeting.endTime ? 'Meeting Ended' : 'Active';
+          } else {
+            end = start;
+            endTimeStr = 'Dropped';
+          }
+        }
+        
+        const durationMs = end - start;
+        totalMs += durationMs;
+        
+        const mins = Math.floor(durationMs / 60000);
+        const durationStr = mins < 1 ? '<1m' : `${mins}m`;
+        
+        const startTimeStr = new Date(s.joinedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        sessionDetails.push(`${index + 1}. ${startTimeStr} to ${endTimeStr} (${durationStr})`);
+      });
+      const mins = Math.floor(totalMs / 60000);
+      const timeStr = mins < 1 ? '<1m' : `${mins}m`;
+      rows.push(`"${name}","${role}","${timeStr}","${sessionDetails.join('\n')}"`);
+    });
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Attendance_${meeting.meetingLink}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleExportTranscript = () => {
     if (!transcriptModal || !transcriptModal.entries || transcriptModal.entries.length === 0) return;
     const lines = transcriptModal.entries.map(t => {
@@ -411,8 +458,8 @@ function DashboardContent() {
 
       {/* Scheduled Meeting Success */}
       {scheduledMeetingCode && (
-        <div style={MODAL_STYLE.overlay}>
-          <div style={{ ...MODAL_STYLE.box, textAlign: 'center' }}>
+        <div style={MODAL_STYLE.overlay} onClick={() => setScheduledMeetingCode(null)}>
+          <div style={{ ...MODAL_STYLE.box, textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ width: 60, height: 60, borderRadius: '50%', background: 'rgba(52,211,153,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem', color: '#34d399' }}>
               <CalendarCheck2 size={32} />
             </div>
@@ -444,8 +491,8 @@ function DashboardContent() {
 
       {/* Create Org Modal */}
       {showOrgModal && (
-        <div style={MODAL_STYLE.overlay}>
-          <div style={MODAL_STYLE.box}>
+        <div style={MODAL_STYLE.overlay} onClick={() => setShowOrgModal(false)}>
+          <div style={MODAL_STYLE.box} onClick={(e) => e.stopPropagation()}>
             <h2 style={{ margin: '0 0 1.5rem', color: '#f8fafc', textAlign: 'center' }}>Create Organization</h2>
             <form onSubmit={handleCreateOrg}>
               <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.85rem', color: '#9ca3af' }}>Organization Name</label>
@@ -469,8 +516,8 @@ function DashboardContent() {
 
       {/* Profile Modal */}
       {showProfileModal && (
-        <div style={MODAL_STYLE.overlay}>
-          <div style={MODAL_STYLE.box}>
+        <div style={MODAL_STYLE.overlay} onClick={() => setShowProfileModal(false)}>
+          <div style={MODAL_STYLE.box} onClick={(e) => e.stopPropagation()}>
             <h2 style={{ margin: '0 0 1.5rem', color: '#f8fafc', textAlign: 'center' }}>Edit Profile</h2>
             <form onSubmit={handleUpdateProfile}>
               <div style={{ marginBottom: '1rem' }}>
@@ -503,8 +550,8 @@ function DashboardContent() {
 
       {/* Transcript Modal */}
       {transcriptModal && (
-        <div style={{ ...MODAL_STYLE.overlay }}>
-          <div style={{ background: 'linear-gradient(135deg,rgba(30,41,59,0.98),rgba(15,23,42,0.98))', padding: '2rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', width: '90%', maxWidth: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ ...MODAL_STYLE.overlay }} onClick={() => setTranscriptModal(null)}>
+          <div style={{ background: 'linear-gradient(135deg,rgba(30,41,59,0.98),rgba(15,23,42,0.98))', padding: '2rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', width: '90%', maxWidth: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                 <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '1.1rem' }}>📝 Meeting Transcript</h2>
@@ -542,8 +589,8 @@ function DashboardContent() {
 
       {/* All Members Modal */}
       {showAllMembersOrg && (
-        <div style={MODAL_STYLE.overlay}>
-          <div style={{ background: 'linear-gradient(135deg,rgba(30,41,59,0.98),rgba(15,23,42,0.98))', padding: '2rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', width: '90%', maxWidth: '520px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+        <div style={MODAL_STYLE.overlay} onClick={() => setShowAllMembersOrg(null)}>
+          <div style={{ background: 'linear-gradient(135deg,rgba(30,41,59,0.98),rgba(15,23,42,0.98))', padding: '2rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', width: '90%', maxWidth: '520px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
               <div>
                 <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '1.1rem' }}>{showAllMembersOrg.name}</h2>
@@ -853,15 +900,13 @@ function DashboardContent() {
 
                             {/* Actions */}
                             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexShrink: 0 }}>
-                              {m.hostId === user.id && (
-                                <button
+                              <button
                                   onClick={() => handleDeleteMeeting(m.id)}
-                                  title="Delete Meeting"
+                                  title="Remove from History"
                                   style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)', padding: '0.5rem', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                                 >
                                   <Trash2 size={16} />
                                 </button>
-                              )}
 
                               {m.state === 'COMPLETED' ? (
                                 <div style={{ display: 'flex', gap: '0.4rem' }}>
@@ -891,26 +936,56 @@ function DashboardContent() {
                           </div>
 
                           {/* Attendance log (history only) */}
-                          {activeTab === 'history' && m.participants?.length > 0 && (
-                            <details style={{ fontSize: '0.82rem', color: '#9ca3af' }}>
-                              <summary style={{ cursor: 'pointer', color: '#a78bfa', marginBottom: '0.4rem' }}>
-                                <Users size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} />
-                                Attendance Log ({m.participants.length} participants)
-                              </summary>
-                              <div style={{ paddingLeft: '1rem', maxHeight: 140, overflowY: 'auto' }}>
-                                {m.participants.map(p => (
-                                  <div key={p.id} style={{ marginBottom: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <strong style={{ color: '#e5e7eb' }}>{p.user?.name}</strong>
-                                    <RoleBadge role={p.role} />
-                                    {p.sessions?.map(s => (
-                                      <span key={s.id} style={{ color: '#6b7280', fontSize: '0.75rem' }}>
-                                        {new Date(s.joinedAt).toLocaleTimeString()}{s.leftAt ? ` - ${new Date(s.leftAt).toLocaleTimeString()}` : ' (active)'}
-                                      </span>
-                                    ))}
+                            {activeTab === 'history' && m.participants?.length > 0 && (
+                              <details style={{ fontSize: '0.82rem', color: '#9ca3af', background: 'rgba(255,255,255,0.02)', padding: '0.5rem', borderRadius: '8px' }}>
+                                <summary style={{ cursor: 'pointer', color: '#a78bfa', marginBottom: '0.4rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                  <div>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4, verticalAlign: 'middle' }}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                                    Attendance Log ({m.participants.length} participants)
                                   </div>
-                                ))}
-                              </div>
-                            </details>
+                                </summary>
+                                <div style={{ marginTop: '0.5rem', marginBottom: '0.5rem' }}>
+                                  <button onClick={(e) => { e.preventDefault(); handleExportAttendance(m); }} style={{ background: 'rgba(167,139,250,0.1)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)', padding: '0.3rem 0.6rem', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                                    Export CSV
+                                  </button>
+                                </div>
+                                <div style={{ paddingLeft: '0.25rem', maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                  {m.participants.map(p => {
+                                    let totalMs = 0;
+                                    (p.sessions || []).forEach((s, index, arr) => {
+                                      const start = new Date(s.joinedAt).getTime();
+                                      let end;
+                                      if (s.leftAt) {
+                                        end = new Date(s.leftAt).getTime();
+                                      } else {
+                                        if (index === arr.length - 1) {
+                                          end = m.endTime ? new Date(m.endTime).getTime() : Date.now();
+                                        } else {
+                                          end = start;
+                                        }
+                                      }
+                                      totalMs += (end - start);
+                                    });
+                                    const mins = Math.floor(totalMs / 60000);
+                                    const timeStr = mins < 1 ? '< 1m' : (mins >= 60 ? `${Math.floor(mins/60)}h ${mins%60}m` : `${mins}m`);
+                                    return (
+                                      <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(0,0,0,0.2)', padding: '0.4rem 0.6rem', borderRadius: '6px', flexWrap: 'wrap' }}>
+                                        <strong style={{ color: '#e5e7eb', flexShrink: 0 }}>{p.user?.name || 'Unknown'}</strong>
+                                        <RoleBadge role={p.role} />
+                                        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                          <span style={{ color: '#9ca3af', fontSize: '0.75rem' }}>
+                                            Total Time: <span style={{ color: '#f1f5f9', fontWeight: 600 }}>{timeStr}</span>
+                                          </span>
+                                          <span style={{ color: '#64748b', fontSize: '0.7rem' }}>
+                                            ({p.sessions?.length || 0} session{(p.sessions?.length || 0) !== 1 ? 's' : ''})
+                                          </span>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </details>
                           )}
                         </div>
                       ))}

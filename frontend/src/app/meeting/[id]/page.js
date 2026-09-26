@@ -863,8 +863,8 @@ export default function MeetingRoom() {
 
       {/* === SETTINGS MODAL === */}
         {showSettings && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ background: '#0c1527', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '24px', padding: '2rem', width: 440, boxShadow: '0 25px 50px -12px rgba(0,0,0,0.7)' }}>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowSettings(false)}>
+            <div style={{ background: '#0c1527', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '24px', padding: '2rem', width: 440, boxShadow: '0 25px 50px -12px rgba(0,0,0,0.7)' }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
                 <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 700 }}>
                   <Settings size={20} color="#3b82f6" /> Settings

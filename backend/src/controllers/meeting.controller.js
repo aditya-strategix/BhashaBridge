@@ -50,12 +50,17 @@ exports.getMeetings = async (req, res) => {
   try {
     const meetings = await prisma.meeting.findMany({
       where: {
-        OR: [
-          { hostId: req.user.userId },
-          { participants: { some: { userId: req.user.userId } } },
-          { organization: { users: { some: { id: req.user.userId } } } }
-        ]
-      },
+          NOT: {
+            hiddenForUserIds: {
+              has: req.user.userId
+            }
+          },
+          OR: [
+            { hostId: req.user.userId },
+            { participants: { some: { userId: req.user.userId } } },
+            { organization: { users: { some: { id: req.user.userId } } } }
+          ]
+        },
       include: { 
         host: { select: { name: true } },
         participants: { 
@@ -173,30 +178,27 @@ exports.endMeeting = async (req, res) => {
   }
 };
 exports.deleteMeeting = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const meeting = await prisma.meeting.findUnique({ where: { id } });
-    
-    if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
-    if (meeting.hostId !== req.user.userId) return res.status(403).json({ error: 'Only the host can delete the meeting' });
-
-    // Delete all dependent records first
-    await prisma.$transaction([
-      prisma.participantSession.deleteMany({ where: { participant: { meetingId: id } } }),
-      prisma.participant.deleteMany({ where: { meetingId: id } }),
-      prisma.chatMessage.deleteMany({ where: { meetingId: id } }),
-      prisma.caption.deleteMany({ where: { meetingId: id } }),
-      prisma.meetingAnalytics.deleteMany({ where: { meetingId: id } }),
-      prisma.meetingReport.deleteMany({ where: { meetingId: id } }),
-      prisma.meeting.delete({ where: { id } })
-    ]);
-
-    res.json({ message: 'Meeting deleted successfully' });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Server error' });
-  }
-};
+    try {
+      const { id } = req.params;
+      const meeting = await prisma.meeting.findUnique({ where: { id } });
+      
+      if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
+      
+      await prisma.meeting.update({
+        where: { id },
+        data: {
+          hiddenForUserIds: {
+            push: req.user.userId
+          }
+        }
+      });
+  
+      res.json({ message: 'Meeting removed from your history' });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Server error' });
+    }
+  };
 
 exports.admitParticipant = async (req, res) => {
   try {

@@ -271,3 +271,12 @@ const url = `${API_URL}/tts?text=${encodeURIComponent(textToSpeak)}&lang=${targe
 const audio = new Audio(url);
 audio.play();
 ```
+
+
+## 4. Ghost Disconnects & Dangling WebSocket Sessions
+**Problem:** If a user loses internet connection abruptly (e.g., laptop dies, hard network drop), their browser cannot send a "disconnect" event to the server. The server leaves their session open indefinitely, resulting in a "dangling session" that artificially inflates their recorded Meeting Attendance time (sometimes by hundreds of minutes).
+
+**Solution:** Implemented a strict **Ping/Pong Heartbeat** configuration directly in the `socket.io` initialization on the backend.
+- `pingInterval: 300000` (Server pings clients every 5 minutes).
+- `pingTimeout: 300000` (Server forcefully drops the connection and triggers the `disconnect` event if a client fails to pong within 5 minutes).
+This guarantees that "ghost" connections are detected and their `leftAt` timestamps are recorded accurately within a 10-minute maximum window, completely solving attendance inflation.

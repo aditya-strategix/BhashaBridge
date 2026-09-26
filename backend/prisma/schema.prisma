@@ -93,6 +93,7 @@ model Meeting {
   endTime        DateTime?
   createdAt      DateTime      @default(now())
 
+  hiddenForUserIds String[] @default([])
   participants Participant[]
   chatMessages ChatMessage[]
   captions     Caption[]

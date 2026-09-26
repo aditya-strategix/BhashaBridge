@@ -9,6 +9,9 @@ function setupSocket(server) {
       origin: '*', // For development
       methods: ['GET', 'POST'],
     },
+    // Strict Heartbeat Timeout mechanism to prevent ghost disconnects & dangling sessions
+    pingInterval: 300000, // Server sends a ping every 5 minutes
+    pingTimeout: 300000,  // Server drops connection if no pong within 5 minutes
   });
 
   io.on('connection', (socket) => {
