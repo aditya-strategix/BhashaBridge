@@ -240,6 +240,23 @@ function DashboardContent() {
     });
   };
 
+  
+  const handleExportTranscript = () => {
+    if (!transcriptModal || !transcriptModal.entries || transcriptModal.entries.length === 0) return;
+    const lines = transcriptModal.entries.map(t => {
+      const time = new Date(t.timestamp).toLocaleTimeString();
+      const speaker = t.speaker?.name || 'Unknown';
+      return `[${time}] ${speaker}: ${t.originalText}`;
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Meeting_Transcript_${transcriptModal.link}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleViewTranscript = async (meetingLink) => {
     setTranscriptModal({ loading: true, entries: [], link: meetingLink });
     try {
@@ -489,7 +506,15 @@ function DashboardContent() {
         <div style={{ ...MODAL_STYLE.overlay }}>
           <div style={{ background: 'linear-gradient(135deg,rgba(30,41,59,0.98),rgba(15,23,42,0.98))', padding: '2rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', width: '90%', maxWidth: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-              <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '1.1rem' }}>📝 Meeting Transcript</h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '1.1rem' }}>📝 Meeting Transcript</h2>
+                {!transcriptModal.loading && transcriptModal.entries.length > 0 && (
+                  <button onClick={handleExportTranscript} style={{ background: 'rgba(59,130,246,0.1)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.3)', padding: '0.4rem 0.8rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    Export TXT
+                  </button>
+                )}
+              </div>
               <button onClick={() => setTranscriptModal(null)} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '1.5rem', lineHeight: 1 }}>×</button>
             </div>
             <div style={{ overflowY: 'auto', flex: 1 }}>
