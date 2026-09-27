@@ -1,112 +1,116 @@
-.authContainer {
+.editorialAuthContainer {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
+  background-color: var(--bg-ivory, #fffff0);
+  color: var(--cobalt, #0047AB);
+  font-family: var(--font-grotesk, sans-serif);
   padding: 2rem;
-  background: radial-gradient(circle at bottom, var(--secondary) 0%, var(--background) 100%);
 }
 
-.authCard {
+.editorialAuthWrapper {
   width: 100%;
-  max-width: 400px;
-  padding: 2.5rem;
+  max-width: 480px;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
 }
 
-.title {
-  font-size: 2rem;
-  font-weight: 700;
-  margin-bottom: 0.5rem;
-  text-align: center;
+.sharpTitle {
+  font-family: var(--font-serif, serif);
+  font-style: italic;
+  font-size: 4rem;
+  font-weight: 400;
+  margin: 0;
+  color: var(--vermilion, #E34234);
 }
 
-.subtitle {
-  color: #94a3b8;
-  text-align: center;
-  margin-bottom: 2rem;
+.thickRule {
+  height: 8px;
+  background-color: var(--cobalt, #0047AB);
+  margin-bottom: 3rem;
+}
+
+.thinRule {
+  height: 1px;
+  background-color: var(--cobalt, #0047AB);
+  margin: 2rem 0;
+}
+
+.editorialForm {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
 }
 
 .formGroup {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  margin-bottom: 1.5rem;
 }
 
-.label {
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: #cbd5e1;
+.editorialLabel {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 }
 
-.input {
-  padding: 0.75rem 1rem;
-  border-radius: var(--radius);
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid var(--border);
-  color: var(--foreground);
-  font-family: inherit;
-  font-size: 1rem;
-  transition: border-color 0.2s;
-}
-
-.input:focus {
-  outline: none;
-  border-color: var(--primary);
-}
-
-.select {
-  padding: 0.75rem 1rem;
-  border-radius: var(--radius);
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid var(--border);
-  color: var(--foreground);
-  font-family: inherit;
-  font-size: 1rem;
-}
-
-.btnPrimary {
-  width: 100%;
-  padding: 0.875rem;
-  border-radius: var(--radius);
-  background: var(--primary);
-  color: white;
+.editorialInput, .editorialSelect {
+  background: transparent;
   border: none;
-  font-weight: 600;
+  border-bottom: 2px solid var(--cobalt, #0047AB);
+  padding: 0.5rem 0;
+  font-family: var(--font-grotesk, sans-serif);
+  font-size: 1.5rem;
+  color: var(--cobalt, #0047AB);
+  border-radius: 0;
+}
+
+.editorialInput:focus, .editorialSelect:focus {
+  outline: none;
+  border-bottom-color: var(--vermilion, #E34234);
+}
+
+.editorialBtn {
+  background: var(--cobalt, #0047AB);
+  color: var(--bg-ivory, #fffff0);
+  border: none;
+  padding: 1rem;
+  font-family: var(--font-mono, monospace);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
   font-size: 1rem;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background 0.3s;
   margin-top: 1rem;
 }
 
-.btnPrimary:hover {
-  background: var(--primary-hover);
+.editorialBtn:hover {
+  background: var(--vermilion, #E34234);
 }
 
-.linkText {
-  display: block;
-  text-align: center;
-  margin-top: 1.5rem;
-  color: #94a3b8;
-  font-size: 0.9rem;
-}
-
-.link {
-  color: var(--primary);
+.editorialLink {
+  font-family: var(--font-mono, monospace);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--cobalt, #0047AB);
   text-decoration: none;
-  font-weight: 500;
+  text-align: right;
+  font-size: 0.85rem;
 }
 
-.link:hover {
-  text-decoration: underline;
+.editorialLink:hover {
+  color: var(--vermilion, #E34234);
 }
 
-.error {
-  color: var(--danger);
-  background: rgba(239, 68, 68, 0.1);
-  padding: 0.75rem;
-  border-radius: var(--radius);
-  font-size: 0.9rem;
-  margin-bottom: 1rem;
-  border: 1px solid rgba(239, 68, 68, 0.2);
+.editorialError {
+  font-family: var(--font-mono, monospace);
+  color: var(--vermilion, #E34234);
+  border: 1px solid var(--vermilion, #E34234);
+  padding: 1rem;
+  margin-bottom: 2rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
 }

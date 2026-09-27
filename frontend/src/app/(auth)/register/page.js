@@ -35,48 +35,48 @@ export default function Register() {
   ];
 
   return (
-    <div className={styles.authContainer}>
-      <div className={`${styles.authCard} glass animate-fade-in`}>
-        <h1 className={styles.title}>Create Account</h1>
-        <p className={styles.subtitle}>Join BhashaBridge today</p>
+    <div className={styles.editorialAuthContainer}>
+      <div className={styles.editorialAuthWrapper}>
+        <h1 className={styles.sharpTitle}>Join</h1>
+        <div className={styles.thickRule}></div>
 
-        {error && <div className={styles.error}>{error}</div>}
+        {error && <div className={styles.editorialError}>{error}</div>}
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} className={styles.editorialForm}>
           <div className={styles.formGroup}>
-            <label className={styles.label}>Full Name</label>
+            <label className={styles.editorialLabel}>Name</label>
             <input 
               type="text" 
-              className={styles.input} 
+              className={styles.editorialInput} 
               value={name}
               onChange={(e) => setName(e.target.value)}
               required 
             />
           </div>
           <div className={styles.formGroup}>
-            <label className={styles.label}>Email Address</label>
+            <label className={styles.editorialLabel}>Email</label>
             <input 
               type="email" 
-              className={styles.input} 
+              className={styles.editorialInput} 
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required 
             />
           </div>
           <div className={styles.formGroup}>
-            <label className={styles.label}>Password</label>
+            <label className={styles.editorialLabel}>Password</label>
             <input 
               type="password" 
-              className={styles.input} 
+              className={styles.editorialInput} 
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required 
             />
           </div>
           <div className={styles.formGroup}>
-            <label className={styles.label}>Preferred Language</label>
+            <label className={styles.editorialLabel}>Language</label>
             <select 
-              className={styles.select}
+              className={styles.editorialSelect}
               value={language}
               onChange={(e) => setLanguage(e.target.value)}
             >
@@ -85,14 +85,15 @@ export default function Register() {
               ))}
             </select>
           </div>
-          <button type="submit" className={styles.btnPrimary} disabled={isLoading}>
-            {isLoading ? 'Creating Account...' : 'Register'}
+          <button type="submit" className={styles.editorialBtn} disabled={isLoading}>
+            {isLoading ? 'Processing...' : 'Register'}
           </button>
         </form>
 
-        <span className={styles.linkText}>
-          Already have an account? <Link href={`/login${typeof window !== 'undefined' && window.location.search ? window.location.search : ''}`} className={styles.link}>Sign In</Link>
-        </span>
+        <div className={styles.thinRule}></div>
+        <Link href={`/login${typeof window !== 'undefined' && window.location.search ? window.location.search : ''}`} className={styles.editorialLink}>
+          Or Access
+        </Link>
       </div>
     </div>
   );

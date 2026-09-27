@@ -1,7 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { CheckCircle, XCircle } from 'lucide-react';
 import api from '../../../services/api';
 import useAuthStore from '../../../stores/authStore';
 
@@ -47,46 +46,51 @@ export default function InvitePage({ params }) {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center' }}>
-        <p>Loading invitation...</p>
+      <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-ivory, #FAF9F6)' }}>
+        <p style={{ fontFamily: 'var(--font-mono, monospace)', textTransform: 'uppercase' }}>[ RETRIEVING DOSSIER ]</p>
       </div>
     );
   }
 
   return (
-    <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', background: '#0f172a', padding: '1rem' }}>
-      <div className="glass" style={{ maxWidth: '450px', width: '100%', padding: '2.5rem', borderRadius: '16px', textAlign: 'center' }}>
+    <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-ivory, #FAF9F6)', padding: '2rem', color: '#000', fontFamily: 'var(--font-grotesk, sans-serif)' }}>
+      <div style={{ maxWidth: '600px', width: '100%', textAlign: 'center' }}>
         {error ? (
           <>
-            <XCircle size={48} color="#ef4444" style={{ margin: '0 auto 1rem' }} />
-            <h2 style={{ color: '#f8fafc', marginBottom: '1rem' }}>Invitation Error</h2>
-            <p style={{ color: '#94a3b8', marginBottom: '2rem' }}>{error}</p>
-            <button onClick={() => router.push('/')} style={{ background: '#3b82f6', color: 'white', padding: '0.75rem 1.5rem', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}>
-              Go to Homepage
+            <div style={{ fontFamily: 'var(--font-mono, monospace)', color: 'var(--vermilion, #E34234)', fontSize: '1rem', textTransform: 'uppercase', marginBottom: '2rem' }}>[ FATAL ANOMALY ]</div>
+            <h2 style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '2.5rem', fontWeight: 'normal', margin: '0 0 1rem' }}>Entry Denied</h2>
+            <p style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '0.9rem', marginBottom: '3rem' }}>{error}</p>
+            <button onClick={() => router.push('/')} style={{ fontFamily: 'var(--font-mono, monospace)', background: 'transparent', color: '#000', padding: '0.75rem 2rem', border: '1px solid #000', cursor: 'pointer', textTransform: 'uppercase' }}>
+              Abandon Attempt
             </button>
           </>
         ) : (
           <>
-            <CheckCircle size={48} color="#10b981" style={{ margin: '0 auto 1rem' }} />
-            <h2 style={{ color: '#f8fafc', marginBottom: '0.5rem' }}>You&apos;ve been invited!</h2>
-            <p style={{ color: '#94a3b8', marginBottom: '2rem' }}>
-              <strong>{invite?.organization?.owner?.name}</strong> has invited you to join 
-              <br/>
-              <strong style={{ color: '#60a5fa', fontSize: '1.2rem', display: 'block', marginTop: '0.5rem' }}>
+            <div style={{ fontFamily: 'var(--font-mono, monospace)', color: 'var(--cobalt, #0047AB)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '1rem' }}>BhashaBridge Summons</div>
+            <h1 style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '3rem', fontWeight: 'normal', lineHeight: 1.2, margin: '0 0 2rem' }}>
+              An invocation to commune.
+            </h1>
+            
+            <div style={{ borderTop: '1px solid #000', borderBottom: '1px solid #000', padding: '2rem 0', marginBottom: '3rem' }}>
+              <p style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '0.85rem', margin: '0 0 1rem', textTransform: 'uppercase' }}>
+                Initiator: <span style={{ color: 'var(--cobalt, #0047AB)' }}>{invite?.organization?.owner?.name}</span>
+              </p>
+              <div style={{ fontFamily: 'var(--font-grotesk, sans-serif)', fontSize: '1.5rem', fontWeight: 'bold' }}>
                 {invite?.organization?.name}
-              </strong>
-            </p>
+              </div>
+            </div>
 
             <button 
               onClick={handleAccept} 
               disabled={accepting}
               style={{ 
-                width: '100%', background: '#3b82f6', color: 'white', padding: '0.875rem', 
-                border: 'none', borderRadius: '8px', cursor: accepting ? 'not-allowed' : 'pointer', 
-                fontWeight: 600, fontSize: '1rem', transition: 'background 0.2s', opacity: accepting ? 0.7 : 1
+                fontFamily: 'var(--font-mono, monospace)',
+                background: '#000', color: 'var(--bg-ivory, #FAF9F6)', padding: '1rem 3rem', 
+                border: '1px solid #000', cursor: accepting ? 'not-allowed' : 'pointer', 
+                textTransform: 'uppercase', fontSize: '0.9rem', opacity: accepting ? 0.7 : 1
               }}
             >
-              {accepting ? 'Accepting...' : (user ? 'Accept Invitation' : 'Login to Accept')}
+              {accepting ? '[ ASSIMILATING ]' : (user ? 'Accept Summons' : 'Identify to Accept')}
             </button>
           </>
         )}

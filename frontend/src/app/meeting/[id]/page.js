@@ -48,18 +48,18 @@ const VideoPeer = ({ peer, name, isAudioOn = true, isVideoOn = true }) => {
     peer.on('stream', stream => { if (ref.current) ref.current.srcObject = stream; });
   }, [peer]);
   return (
-    <div className={styles.videoTile}>
+    <div className={`${styles.videoTile} ${isAudioOn ? styles.activeSpeaker : ''}`}>
       <video playsInline autoPlay ref={ref} className={styles.video} />
       {!isVideoOn && (
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0c1527' }}>
-          <Avatar name={name ? name.split(' (')[0] : 'P'} size={60} color="#3b82f6" />
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
+          <Avatar name={name ? name.split(' (')[0] : 'P'} size={60} color="var(--cobalt, #3b82f6)" />
         </div>
       )}
       <div className={styles.tileOverlay}>
         <span className={styles.tileName}>{name || 'Participant'}</span>
-        <div style={{ display: 'flex', gap: '0.25rem' }}>
-          {!isAudioOn && <div style={{ background: 'rgba(0,0,0,0.5)', padding: '0.2rem', borderRadius: '50%', display: 'flex' }}><MicOff size={15} color='#ef4444' /></div>}
-          {!isVideoOn && <div style={{ background: 'rgba(0,0,0,0.5)', padding: '0.2rem', borderRadius: '50%', display: 'flex' }}><VideoOff size={15} color='#ef4444' /></div>}
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {!isAudioOn && <MicOff size={16} color="var(--vermilion, #ef4444)" />}
+          {!isVideoOn && <VideoOff size={16} color="var(--vermilion, #ef4444)" />}
         </div>
       </div>
     </div>
@@ -88,7 +88,7 @@ export default function MeetingRoom() {
   const [participantStatus, setParticipantStatus] = useState(null);
   const [participantRole, setParticipantRole] = useState(null);
   const [waitingUsers, setWaitingUsers] = useState([]);
-  const [sidebarTab, setSidebarTab] = useState('CHAT');
+  const [sidebarTab, setSidebarTab] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showLobby, setShowLobby] = useState(false);
   const [summaryModal, setSummaryModal] = useState({ isOpen: false, text: '', loading: false });
@@ -516,7 +516,7 @@ export default function MeetingRoom() {
         <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(239,68,68,0.15)', border: '2px solid rgba(239,68,68,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <UserX size={36} color="#ef4444" />
         </div>
-        <h2 style={{ color: '#f8fafc', margin: 0, fontSize: '1.5rem' }}>Access Denied</h2>
+        <h2 style={{ color: 'var(--text-primary)', margin: 0, fontSize: '1.5rem' }}>Access Denied</h2>
         <p style={{ color: '#9ca3af', margin: 0 }}>The host declined your request to join this meeting.</p>
         <button onClick={() => router.push('/dashboard')} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '0.75rem 2rem', borderRadius: '10px', fontWeight: 600, cursor: 'pointer', fontSize: '0.95rem' }}>
           Back to Dashboard
@@ -571,22 +571,22 @@ export default function MeetingRoom() {
               </div>
             </div>
 
-            <h1 style={{ margin: '0 0 0.75rem', color: '#f8fafc', fontSize: '1.75rem', fontWeight: 700, lineHeight: 1.2 }}>
+            <h1 style={{ margin: '0 0 0.75rem', color: 'var(--text-primary)', fontSize: '1.75rem', fontWeight: 700, lineHeight: 1.2 }}>
               Waiting for host to let you in
             </h1>
-            <p style={{ margin: '0 0 2.5rem', color: '#64748b', fontSize: '0.95rem', lineHeight: 1.6 }}>
+            <p style={{ margin: '0 0 2.5rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '0.95rem', lineHeight: 1.6 }}>
               The host will admit you shortly. You will join automatically once admitted.
             </p>
 
             {/* Status indicator */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.9rem 1.2rem', background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)', borderRadius: '12px', marginBottom: '1.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.9rem 1.2rem', background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)', borderRadius: '0', marginBottom: '1.5rem' }}>
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#60a5fa', animation: 'pulse 2s infinite' }} />
               <span style={{ color: '#93c5fd', fontSize: '0.88rem' }}>Waiting in lobby — meeting: <strong>{meetingId}</strong></span>
             </div>
 
             <button
               onClick={() => router.push('/dashboard')}
-              style={{ width: '100%', padding: '0.875rem', background: 'rgba(239,68,68,0.08)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '12px', fontWeight: 600, cursor: 'pointer', fontSize: '0.95rem', transition: 'all 0.2s' }}
+              style={{ width: '100%', padding: '0.875rem', background: 'rgba(239,68,68,0.08)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0', fontWeight: 600, cursor: 'pointer', fontSize: '0.95rem', transition: 'all 0.2s' }}
               onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.14)'; }}
               onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.08)'; }}
             >
@@ -606,26 +606,26 @@ export default function MeetingRoom() {
       {isHostOrCoHost && waitingUsers.length > 0 && showLobby && (
         <div style={{
           position: 'fixed', top: '5rem', right: '370px', zIndex: 500,
-          width: 300, background: 'linear-gradient(135deg,rgba(15,23,42,0.97),rgba(30,41,59,0.97))',
-          border: '1px solid rgba(239,68,68,0.3)', borderRadius: '16px',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.5)', backdropFilter: 'blur(16px)', overflow: 'hidden'
+          width: 300, background: 'rgba(0,0,0,0.8)',
+          border: '1px solid var(--vermilion, #ff4500)', borderRadius: '0',
+          backdropFilter: 'blur(20px)', overflow: 'hidden', fontFamily: 'var(--font-grotesk)'
         }}>
-          <div style={{ padding: '1rem', borderBottom: '1px solid rgba(255,255,255,0.07)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ padding: '1rem', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444', animation: 'pulse 1.5s infinite' }} />
-              <span style={{ fontWeight: 700, color: '#f1f5f9', fontSize: '0.9rem' }}>Lobby ({waitingUsers.length})</span>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--vermilion, #ff4500)', animation: 'pulse 1.5s infinite' }} />
+              <span style={{ fontWeight: 400, color: 'white', fontSize: '0.9rem' }}>Lobby ({waitingUsers.length})</span>
             </div>
-            <button onClick={() => setShowLobby(false)} style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: '1.1rem' }}>×</button>
+            <button onClick={() => setShowLobby(false)} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '1.1rem' }}>×</button>
           </div>
           <div style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: 300, overflowY: 'auto' }}>
             {waitingUsers.map(w => (
-              <div key={w.userId} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.06)' }}>
+              <div key={w.userId} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem', background: 'transparent', borderRadius: 0, borderBottom: '1px solid var(--text-primary)' }}>
                 <Avatar name={w.name} size={34} color="#4b5563" />
-                <span style={{ flex: 1, color: '#e2e8f0', fontSize: '0.85rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
-                <button onClick={() => handleAdmit(w.userId)} title="Admit" style={{ width: 30, height: 30, borderRadius: '8px', background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', color: '#34d399', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ flex: 1, color: 'var(--text-primary)', fontSize: '0.85rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
+                <button onClick={() => handleAdmit(w.userId)} title="Admit" style={{ width: 30, height: 30, borderRadius: '0', background: 'var(--cobalt)', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <UserCheck size={15} />
                 </button>
-                <button onClick={() => handleReject(w.userId)} title="Reject" style={{ width: 30, height: 30, borderRadius: '8px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <button onClick={() => handleReject(w.userId)} title="Reject" style={{ width: 30, height: 30, borderRadius: '0', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <UserX size={15} />
                 </button>
               </div>
@@ -635,41 +635,41 @@ export default function MeetingRoom() {
       )}
 
       {/* === HEADER === */}
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1.5rem', background: 'rgba(15,23,42,0.9)', borderBottom: '1px solid rgba(255,255,255,0.07)', backdropFilter: 'blur(12px)', zIndex: 10 }}>
+      <header className={styles.header}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#34d399', boxShadow: '0 0 6px #34d399' }} />
-            <span style={{ fontWeight: 700, color: '#f1f5f9', fontSize: '0.95rem' }}>BhashaBridge</span>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--vermilion, #ff4500)' }} />
+            <span className={styles.headerTitle}>BhashaBridge</span>
           </div>
-          <div style={{ height: 20, width: 1, background: 'rgba(255,255,255,0.1)' }} />
-          <code style={{ color: '#60a5fa', fontSize: '0.82rem', background: 'rgba(96,165,250,0.08)', padding: '0.25rem 0.6rem', borderRadius: '6px', border: '1px solid rgba(96,165,250,0.15)' }}>
+          <div style={{ height: 16, width: 1, background: 'rgba(255,255,255,0.2)' }} />
+          <code className={styles.headerBadge}>
             {meetingId}
           </code>
           {participantRole && (
-            <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '0.2rem 0.5rem', borderRadius: '999px', textTransform: 'uppercase', background: participantRole === 'HOST' ? 'rgba(245,158,11,0.15)' : participantRole === 'COHOST' ? 'rgba(167,139,250,0.15)' : 'rgba(96,165,250,0.1)', color: participantRole === 'HOST' ? '#fbbf24' : participantRole === 'COHOST' ? '#a78bfa' : '#60a5fa', border: `1px solid ${participantRole === 'HOST' ? 'rgba(245,158,11,0.3)' : participantRole === 'COHOST' ? 'rgba(167,139,250,0.3)' : 'rgba(96,165,250,0.2)'}` }}>
+            <span className={styles.headerBadge} style={{ color: participantRole === 'HOST' ? 'var(--vermilion, #ff4500)' : 'var(--cobalt, #a3c4f3)' }}>
               {participantRole}
             </span>
           )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           {isHostOrCoHost && waitingUsers.length > 0 && (
             <button
               onClick={() => setShowLobby(l => !l)}
-              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: showLobby ? 'rgba(239,68,68,0.15)' : 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171', padding: '0.45rem 0.9rem', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '0.82rem' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: 'var(--vermilion, #ff4500)', cursor: 'pointer', fontFamily: 'var(--font-grotesk)', fontSize: '0.9rem' }}
             >
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444', animation: 'pulse 1s infinite' }} />
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--vermilion, #ff4500)', animation: 'pulse 1s infinite' }} />
               Lobby ({waitingUsers.length})
             </button>
           )}
-          <button onClick={fetchLiveSummary} style={{ background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.4)', color: '#60a5fa', padding: '0.45rem 0.9rem', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', fontWeight: 600 }}>
-              ✨ Summary
-            </button>
-            <button onClick={() => setShowSettings(true)} style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', padding: '0.45rem 0.9rem', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', fontWeight: 600 }}>
-            <Settings size={15} /> Settings
+          <button onClick={fetchLiveSummary} style={{ background: 'transparent', border: 'none', color: 'var(--cobalt, #a3c4f3)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.9rem' }}>
+            ✨ Summary
           </button>
-          <button onClick={() => setIsDemoActive(!isDemoActive)} style={{ background: isDemoActive ? 'rgba(239,68,68,0.15)' : 'rgba(59,130,246,0.15)', border: `1px solid ${isDemoActive ? 'rgba(239,68,68,0.4)' : 'rgba(59,130,246,0.4)'}`, color: isDemoActive ? '#ef4444' : '#60a5fa', padding: '0.45rem 0.9rem', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', fontWeight: 600 }}>
-            {isDemoActive ? 'Stop Demo Speech' : 'Start Demo Speech'}
+          <button onClick={() => setShowSettings(true)} style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.9rem' }}>
+            <Settings size={16} /> Settings
+          </button>
+          <button onClick={() => setIsDemoActive(!isDemoActive)} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '999px', color: isDemoActive ? 'var(--vermilion, #ff4500)' : 'white', padding: '0.4rem 1rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.8rem', textTransform: 'uppercase' }}>
+            {isDemoActive ? 'Stop Demo' : 'Start Demo'}
           </button>
         </div>
       </header>
@@ -677,25 +677,25 @@ export default function MeetingRoom() {
       <main className={styles.main}>
         {/* === VIDEO AREA === */}
         <div className={styles.videoSection}>
-          <div className={styles.videoGrid}>
+          <div className={styles.videoGrid} data-count={peers.length + 1}>
             {/* Self tile */}
-            <div className={styles.videoTile}>
+            <div className={`${styles.videoTile} ${isAudioOn ? styles.activeSpeaker : ''}`}>
               <video muted ref={userVideo} autoPlay playsInline className={styles.video} />
               {!isVideoOn && (
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0c1527' }}>
-                  <Avatar name={user.name} size={60} color="#3b82f6" />
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
+                  <Avatar name={user.name} size={60} color="var(--cobalt, #3b82f6)" />
                 </div>
               )}
               <div className={styles.tileOverlay}>
-                <span className={styles.tileName}>{user.name} (You) ({participantRole})</span>
-                <div style={{ display: 'flex', gap: '0.25rem' }}>
-                  {!isAudioOn && <div style={{ background: 'rgba(0,0,0,0.5)', padding: '0.2rem', borderRadius: '50%', display: 'flex' }}><MicOff size={15} color='#ef4444' /></div>}
-                  {!isVideoOn && <div style={{ background: 'rgba(0,0,0,0.5)', padding: '0.2rem', borderRadius: '50%', display: 'flex' }}><VideoOff size={15} color='#ef4444' /></div>}
+                <span className={styles.tileName}>{user.name} (You)</span>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  {!isAudioOn && <MicOff size={16} color="var(--vermilion, #ef4444)" />}
+                  {!isVideoOn && <VideoOff size={16} color="var(--vermilion, #ef4444)" />}
                 </div>
               </div>
             </div>
             {peers.map((peer, i) => (
-              <VideoPeer key={i} peer={peer.peer} name={`${peer.name || `Participant ${i + 1}`} (${peer.role || 'Participant'})`} />
+              <VideoPeer key={i} peer={peer.peer} name={`${peer.name || `Participant ${i + 1}`}`} isAudioOn={peer.isAudioOn} isVideoOn={peer.isVideoOn} />
             ))}
           </div>
 
@@ -707,44 +707,43 @@ export default function MeetingRoom() {
           )}
 
           {/* Controls bar */}
-          <div style={{ display: 'flex', justifyContent: 'center', padding: '1rem', gap: '0.75rem' }}>
+          <div style={{ position: 'absolute', bottom: '2rem', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '1rem', padding: '0.75rem 1.5rem', background: 'var(--bg-ivory)', borderRadius: '0', border: 'var(--border-thick)', boxShadow: '8px 8px 0 rgba(10,10,10,1)', zIndex: 150 }}>
             <button
               onClick={toggleAudio}
               title={isAudioOn ? 'Mute' : 'Unmute'}
-              style={{ width: 52, height: 52, borderRadius: '50%', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s', background: isAudioOn ? 'rgba(255,255,255,0.12)' : '#ef4444', color: 'white' }}
+              style={{ width: 48, height: 48, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.3s', background: isAudioOn ? 'transparent' : 'var(--vermilion, #ff4500)', color: 'white' }}
             >
-              {isAudioOn ? <Mic size={21} /> : <MicOff size={21} />}
+              {isAudioOn ? <Mic size={20} /> : <MicOff size={20} />}
             </button>
             <button
               onClick={toggleVideo}
-              
               title={isVideoLocked ? 'Camera disabled by Host' : (isVideoOn ? 'Turn off camera' : 'Turn on camera')}
-              style={{ opacity: isVideoLocked ? 0.5 : 1, cursor: isVideoLocked ? 'not-allowed' : 'pointer', width: 52, height: 52, borderRadius: '50%', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s', background: isVideoOn ? 'rgba(255,255,255,0.12)' : '#ef4444', color: 'white' }}
+              style={{ opacity: isVideoLocked ? 0.5 : 1, cursor: isVideoLocked ? 'not-allowed' : 'pointer', width: 48, height: 48, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.3s', background: isVideoOn ? 'transparent' : 'var(--vermilion, #ff4500)', color: 'white' }}
             >
-              {isVideoOn ? <Video size={21} /> : <VideoOff size={21} />}
+              {isVideoOn ? <Video size={20} /> : <VideoOff size={20} />}
             </button>
             <button
-              onClick={() => setSidebarTab(t => t === 'CHAT' ? 'MEMBERS' : 'CHAT')}
+              onClick={() => setSidebarTab(t => t === 'CHAT' ? null : 'CHAT')}
               title="Chat / Members"
-              style={{ width: 52, height: 52, borderRadius: '50%', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.12)', color: 'white' }}
+              style={{ width: 48, height: 48, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: sidebarTab === 'CHAT' ? 'rgba(255,255,255,0.2)' : 'transparent', color: 'white' }}
             >
-              <MessageSquare size={21} />
+              <MessageSquare size={20} />
             </button>
             {isHostOrCoHost && (
               <div ref={moreMenuRef} style={{ position: 'relative' }}>
                 <button
                   onClick={() => setShowMoreMenu(m => !m)}
                   title="More Controls"
-                  style={{ width: 52, height: 52, borderRadius: '50%', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: showMoreMenu ? 'rgba(96,165,250,0.25)' : 'rgba(255,255,255,0.12)', color: 'white', transition: 'all 0.2s' }}
+                  style={{ width: 48, height: 48, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: showMoreMenu ? 'rgba(255,255,255,0.2)' : 'transparent', color: 'white', transition: 'all 0.3s' }}
                 >
-                  <MoreVertical size={21} />
+                  <MoreVertical size={20} />
                 </button>
                 {showMoreMenu && (
-                  <div style={{ position: 'absolute', bottom: 62, left: '50%', transform: 'translateX(-50%)', background: 'linear-gradient(135deg,rgba(15,23,42,0.98),rgba(30,41,59,0.98))', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '14px', padding: '0.5rem', minWidth: 220, boxShadow: '0 15px 40px rgba(0,0,0,0.5)', backdropFilter: 'blur(16px)', zIndex: 100 }}>
-                    <button onClick={() => { if(socket) socket.emit('meeting:force_mute_all', { role: participantRole }); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.85rem', background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.06)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
+                  <div style={{ position: 'absolute', bottom: 60, left: '50%', transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '0', padding: '0.5rem', minWidth: 220, backdropFilter: 'blur(20px)', zIndex: 100, fontFamily: 'var(--font-grotesk)' }}>
+                    <button onClick={() => { if(socket) socket.emit('meeting:force_mute_all', { role: participantRole }); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: 'var(--vermilion, #ff4500)', cursor: 'pointer', fontSize: '0.9rem' }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
                       <MicOff size={16} /> Mute All
                     </button>
-                    <button onClick={() => { if(socket) socket.emit('meeting:force_video_off_all', { role: participantRole }); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.85rem', background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.06)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
+                    <button onClick={() => { if(socket) socket.emit('meeting:force_video_off_all', { role: participantRole }); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: 'var(--vermilion, #ff4500)', cursor: 'pointer', fontSize: '0.9rem' }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
                       <VideoOff size={16} /> Turn Off All Cameras
                     </button>
                     <button onClick={() => {
@@ -752,7 +751,7 @@ export default function MeetingRoom() {
                       setRoomAudioLocked(newLock);
                       if(socket) socket.emit('meeting:lock_hardware', { role: participantRole, type: 'audio', locked: newLock });
                       setShowMoreMenu(false);
-                    }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.85rem', background: 'none', border: 'none', color: roomAudioLocked ? '#34d399' : '#ef4444', cursor: 'pointer', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.06)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
+                    }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: roomAudioLocked ? 'var(--cobalt, #a3c4f3)' : 'var(--vermilion, #ff4500)', cursor: 'pointer', fontSize: '0.9rem' }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
                       <MicOff size={16} /> {roomAudioLocked ? 'Unlock All Mics' : 'Lock All Mics'}
                     </button>
                     <button onClick={() => {
@@ -760,14 +759,14 @@ export default function MeetingRoom() {
                       setRoomVideoLocked(newLock);
                       if(socket) socket.emit('meeting:lock_hardware', { role: participantRole, type: 'video', locked: newLock });
                       setShowMoreMenu(false);
-                    }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.85rem', background: 'none', border: 'none', color: roomVideoLocked ? '#34d399' : '#ef4444', cursor: 'pointer', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.06)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
+                    }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: roomVideoLocked ? 'var(--cobalt, #a3c4f3)' : 'var(--vermilion, #ff4500)', cursor: 'pointer', fontSize: '0.9rem' }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
                       <VideoOff size={16} /> {roomVideoLocked ? 'Unlock All Cameras' : 'Lock All Cameras'}
                     </button>
-                    <div style={{ height: 1, background: 'rgba(255,255,255,0.07)', margin: '0.25rem 0' }} />
-                    <button onClick={() => { setShowLobby(l => !l); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.85rem', background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.06)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
+                    <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '0' }} />
+                    <button onClick={() => { setShowLobby(l => !l); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '0.9rem' }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
                       <Shield size={16} /> {waitingUsers.length > 0 ? `Lobby (${waitingUsers.length})` : 'Lobby'}
                     </button>
-                    <button onClick={() => { setSidebarTab('MEMBERS'); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.85rem', background: 'none', border: 'none', color: '#a78bfa', cursor: 'pointer', borderRadius: '8px', fontSize: '0.82rem', fontWeight: 500 }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.06)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
+                    <button onClick={() => { setSidebarTab(t => t === 'MEMBERS' ? null : 'MEMBERS'); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '0.9rem' }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
                       <Users size={16} /> Manage Members
                     </button>
                   </div>
@@ -777,21 +776,21 @@ export default function MeetingRoom() {
             <button
               onClick={leaveMeeting}
               title="Leave meeting"
-              style={{ width: 52, height: 52, borderRadius: '50%', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#ef4444', color: 'white', boxShadow: '0 0 20px rgba(239,68,68,0.4)' }}
+              style={{ width: 48, height: 48, borderRadius: '0', border: 'var(--border-thin)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--vermilion, #ff4500)', color: 'white' }}
             >
-              <PhoneOff size={21} />
+              <PhoneOff size={20} />
             </button>
           </div>
         </div>
 
         {/* === SIDEBAR === */}
-        <aside className={styles.chatSection}>
+        <aside className={`${styles.chatSection} ${sidebarTab ? styles.chatSectionOpen : ''}`}>
           {/* Sidebar tabs */}
-          <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+          <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
             {['CHAT', 'MEMBERS'].map(tab => (
-              <button key={tab} onClick={() => setSidebarTab(tab)} style={{ flex: 1, padding: '0.9rem 0.5rem', background: 'none', border: 'none', cursor: 'pointer', color: sidebarTab === tab ? '#60a5fa' : '#6b7280', fontWeight: sidebarTab === tab ? 700 : 400, borderBottom: sidebarTab === tab ? '2px solid #60a5fa' : '2px solid transparent', fontSize: '0.88rem', transition: 'all 0.15s', position: 'relative' }}>
-                {tab === 'CHAT' ? <><MessageSquare size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} />Chat</>
-                  : <><Users size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} />Members ({peers.length + 1}){waitingUsers.length > 0 && isHostOrCoHost && <span style={{ position: 'absolute', top: 8, right: 8, width: 8, height: 8, borderRadius: '50%', background: '#ef4444' }} />}</>}
+              <button key={tab} onClick={() => setSidebarTab(tab)} style={{ flex: 1, padding: '1rem', background: 'none', border: 'none', cursor: 'pointer', color: sidebarTab === tab ? 'white' : 'rgba(255,255,255,0.5)', fontFamily: 'var(--font-grotesk)', borderBottom: sidebarTab === tab ? '2px solid white' : '2px solid transparent', fontSize: '0.9rem', transition: 'all 0.2s', position: 'relative' }}>
+                {tab === 'CHAT' ? <><MessageSquare size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Chat</>
+                  : <><Users size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Members ({peers.length + 1}){waitingUsers.length > 0 && isHostOrCoHost && <span style={{ position: 'absolute', top: 12, right: 12, width: 8, height: 8, borderRadius: '50%', background: 'var(--vermilion, #ff4500)' }} />}</>}
               </button>
             ))}
           </div>
@@ -827,7 +826,7 @@ export default function MeetingRoom() {
             <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem' }}>
               {/* Waiting room section for host */}
               {isHostOrCoHost && waitingUsers.length > 0 && (
-                <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '12px' }}>
+                <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0' }}>
                   <p style={{ margin: '0 0 0.75rem', fontSize: '0.78rem', fontWeight: 700, color: '#f87171', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#ef4444', animation: 'pulse 1s infinite' }} />
                     Waiting Room ({waitingUsers.length})
@@ -836,8 +835,8 @@ export default function MeetingRoom() {
                     {waitingUsers.map(w => (
                       <div key={w.userId} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.6rem', background: 'rgba(255,255,255,0.04)', borderRadius: '10px' }}>
                         <Avatar name={w.name} size={32} color="#374151" />
-                        <span style={{ flex: 1, color: '#e2e8f0', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
-                        <button onClick={() => handleAdmit(w.userId)} style={{ width: 28, height: 28, borderRadius: '6px', background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', color: '#34d399', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span style={{ flex: 1, color: 'var(--text-primary)', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
+                        <button onClick={() => handleAdmit(w.userId)} style={{ width: 28, height: 28, borderRadius: '6px', background: 'var(--cobalt)', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           <UserCheck size={14} />
                         </button>
                         <button onClick={() => handleReject(w.userId)} style={{ width: 28, height: 28, borderRadius: '6px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -860,10 +859,10 @@ export default function MeetingRoom() {
                   </div>
                 </div>
                 {peers.map((peer, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.75rem', background: 'rgba(255,255,255,0.04)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.75rem', background: 'transparent', borderRadius: 0, borderBottom: '1px solid var(--text-primary)' }}>
                     <Avatar name={peer.name || `P${i + 1}`} size={34} color="#374151" />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 500, color: '#e2e8f0', fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{peer.name || `Participant ${i + 1}`}</div>
+                      <div style={{ fontWeight: 500, color: 'var(--text-primary)', fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{peer.name || `Participant ${i + 1}`}</div>
                       <div style={{ fontSize: '0.72rem', color: peer.role === 'HOST' ? '#fbbf24' : peer.role === 'COHOST' ? '#a78bfa' : '#4b5563', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{peer.role || 'Connected'}</div>
                     </div>
                     <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center', flexShrink: 0 }}>
@@ -885,23 +884,23 @@ export default function MeetingRoom() {
 
       {/* === SUMMARY MODAL === */}
         {summaryModal.isOpen && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))}>
-            <div style={{ background: '#0c1527', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '24px', padding: '2rem', width: 600, maxWidth: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.7)' }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))}>
+            <div style={{ background: '#000', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '0', padding: '2rem', width: 600, maxWidth: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-grotesk)' }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', flexShrink: 0 }}>
-                <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '1.35rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 700 }}>
+                <h2 style={{ margin: 0, color: 'white', fontSize: '1.35rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 400 }}>
                   ✨ Live Summary
                 </h2>
-                <button onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))} style={{ background: 'rgba(255,255,255,0.05)', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '1.25rem', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>&times;</button>
+                <button onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))} style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>&times;</button>
               </div>
-              <div style={{ flex: 1, overflowY: 'auto', paddingRight: '0.5rem', color: '#e2e8f0', fontSize: '0.95rem', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+              <div style={{ flex: 1, overflowY: 'auto', paddingRight: '0.5rem', color: 'white', fontSize: '1rem', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
                 {summaryModal.loading ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '1rem', color: '#60a5fa' }}>
-                    <div style={{ width: 40, height: 40, borderRadius: '50%', border: '3px solid rgba(96,165,250,0.2)', borderTopColor: '#60a5fa', animation: 'spin 1s linear infinite' }} />
-                    <p style={{ margin: 0, fontWeight: 600 }}>Analyzing Live Transcript...</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '1rem', color: 'var(--cobalt, #a3c4f3)' }}>
+                    <div style={{ width: 40, height: 40, borderRadius: '50%', border: '3px solid rgba(163,196,243,0.2)', borderTopColor: 'var(--cobalt, #a3c4f3)', animation: 'spin 1s linear infinite' }} />
+                    <p style={{ margin: 0, fontWeight: 400 }}>Analyzing Live Transcript...</p>
                   </div>
                 ) : summaryModal.text}
               </div>
-              <button onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))} style={{ width: '100%', marginTop: '1.5rem', padding: '0.8rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 700, cursor: 'pointer', fontSize: '0.95rem', flexShrink: 0 }}>
+              <button onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))} style={{ width: '100%', marginTop: '1.5rem', padding: '0.8rem', background: 'transparent', color: 'var(--cobalt, #a3c4f3)', border: '1px solid var(--cobalt, #a3c4f3)', borderRadius: '0', fontFamily: 'var(--font-grotesk)', cursor: 'pointer', fontSize: '1rem', flexShrink: 0 }}>
                 Close
               </button>
             </div>
@@ -910,13 +909,13 @@ export default function MeetingRoom() {
 
         {/* === SETTINGS MODAL === */}
         {showSettings && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowSettings(false)}>
-            <div style={{ background: '#0c1527', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '24px', padding: '2rem', width: 440, boxShadow: '0 25px 50px -12px rgba(0,0,0,0.7)' }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowSettings(false)}>
+            <div style={{ background: '#000', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '0', padding: '2rem', width: 440, fontFamily: 'var(--font-grotesk)' }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
-                <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 700 }}>
-                  <Settings size={20} color="#3b82f6" /> Settings
+                <h2 style={{ margin: 0, color: 'white', fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 400 }}>
+                  <Settings size={20} color="white" /> Settings
                 </h2>
-                <button onClick={() => setShowSettings(false)} style={{ background: 'rgba(255,255,255,0.05)', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '1.25rem', width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s' }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} onMouseLeave={e => e.currentTarget.style.background='rgba(255,255,255,0.05)'}>&times;</button>
+                <button onClick={() => setShowSettings(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>&times;</button>
               </div>
   
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -939,7 +938,7 @@ export default function MeetingRoom() {
                             body: JSON.stringify({ preferredLanguage: val })
                           }).catch(console.error);
                         }
-                      }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', fontSize: '0.9rem', outline: 'none' }}>
+                      }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '0', fontSize: '0.9rem', outline: 'none' }}>
                       {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#0c1527', color: 'white' }}>{l.label}</option>)}
                     </select>
                   </div>
@@ -948,8 +947,8 @@ export default function MeetingRoom() {
                   <div style={{ padding: '1.25rem', background: 'rgba(255,255,255,0.03)', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (user.ttsEnabled ?? true) ? '1rem' : '0' }}>
                       <div>
-                        <p style={{ margin: 0, fontWeight: 600, color: '#f8fafc', fontSize: '0.9rem' }}>Speech-to-Speech</p>
-                        <p style={{ margin: 0, color: '#64748b', fontSize: '0.8rem', marginTop: '0.2rem' }}>Read out audio translations</p>
+                        <p style={{ margin: 0, fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.9rem' }}>Speech-to-Speech</p>
+                        <p style={{ margin: 0, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', marginTop: '0.2rem' }}>Read out audio translations</p>
                       </div>
                       <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
                         <input type="checkbox" checked={user.ttsEnabled ?? true} onChange={e => { useAuthStore.getState().user.ttsEnabled = e.target.checked; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ display: 'none' }} />
@@ -970,7 +969,7 @@ export default function MeetingRoom() {
                   <div style={{ padding: '1.25rem', background: 'rgba(255,255,255,0.03)', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (user.chatEnabled ?? true) ? '1rem' : '0' }}>
                       <div>
-                        <p style={{ margin: 0, fontWeight: 600, color: '#f8fafc', fontSize: '0.9rem' }}>Message Chat Translation</p>
+                        <p style={{ margin: 0, fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.9rem' }}>Message Chat Translation</p>
                       </div>
                       <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
                         <input type="checkbox" checked={user.chatEnabled ?? true} onChange={e => { useAuthStore.getState().user.chatEnabled = e.target.checked; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ display: 'none' }} />
@@ -991,7 +990,7 @@ export default function MeetingRoom() {
                   <div style={{ padding: '1.25rem', background: 'rgba(255,255,255,0.03)', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (user.captionEnabled ?? true) ? '1rem' : '0' }}>
                       <div>
-                        <p style={{ margin: 0, fontWeight: 600, color: '#f8fafc', fontSize: '0.9rem' }}>Speech to Caption</p>
+                        <p style={{ margin: 0, fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.9rem' }}>Speech to Caption</p>
                       </div>
                       <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
                         <input type="checkbox" checked={user.captionEnabled ?? true} onChange={e => { useAuthStore.getState().user.captionEnabled = e.target.checked; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ display: 'none' }} />
@@ -1009,46 +1008,46 @@ export default function MeetingRoom() {
                   </div>
               </div>
   
-              <button onClick={() => setShowSettings(false)} style={{ width: '100%', marginTop: '2rem', padding: '1rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 700, cursor: 'pointer', fontSize: '1rem', transition: 'background 0.2s' }} onMouseEnter={e => e.currentTarget.style.background='#2563eb'} onMouseLeave={e => e.currentTarget.style.background='#3b82f6'}>
+              <button onClick={() => setShowSettings(false)} style={{ width: '100%', marginTop: '2rem', padding: '1rem', background: 'transparent', color: 'var(--cobalt, #a3c4f3)', border: '1px solid var(--cobalt, #a3c4f3)', borderRadius: '0', fontWeight: 400, cursor: 'pointer', fontSize: '1rem', fontFamily: 'var(--font-grotesk)' }}>
                 Done
               </button>
             </div>
           </div>
         )}
   
-        {/* === LOBBY TOAST NOTIFICATION === */}
+      {/* === LOBBY TOAST NOTIFICATION === */}
       {lobbyToast && (
         <div style={{
           position: 'fixed', bottom: '5.5rem', left: '50%', transform: 'translateX(-50%)',
           zIndex: 9998,
-          background: 'linear-gradient(135deg, rgba(15,23,42,0.97), rgba(30,41,59,0.97))',
-          border: '1px solid rgba(239,68,68,0.4)',
-          borderRadius: '14px',
+          background: 'rgba(0,0,0,0.8)',
+          border: '1px solid var(--vermilion, #ff4500)',
+          borderRadius: '0',
           padding: '0.9rem 1.4rem',
           display: 'flex', alignItems: 'center', gap: '0.8rem',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(239,68,68,0.15)',
-          backdropFilter: 'blur(12px)',
+          backdropFilter: 'blur(20px)',
           minWidth: 280, maxWidth: 380,
-          animation: 'slideUp 0.3s ease'
+          animation: 'slideUp 0.3s ease',
+          fontFamily: 'var(--font-grotesk)'
         }}>
-          <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#ef4444', flexShrink: 0, animation: 'pulse 1s infinite' }} />
+          <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--vermilion, #ff4500)', flexShrink: 0, animation: 'pulse 1s infinite' }} />
           <div style={{ flex: 1 }}>
-            <p style={{ margin: 0, fontWeight: 700, color: '#f1f5f9', fontSize: '0.9rem' }}>
+            <p style={{ margin: 0, fontWeight: 400, color: 'white', fontSize: '0.9rem' }}>
               Someone is waiting
             </p>
-            <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.8rem', marginTop: '0.15rem' }}>
-              <span style={{ color: '#60a5fa', fontWeight: 600 }}>{lobbyToast.name}</span> is in the lobby
+            <p style={{ margin: 0, color: 'var(--text-primary)', fontSize: '0.8rem', marginTop: '0.15rem' }}>
+              <span style={{ color: 'var(--cobalt, #a3c4f3)' }}>{lobbyToast.name}</span> is in the lobby
             </p>
           </div>
           <button
             onClick={() => { setShowLobby(true); setLobbyToast(null); }}
-            style={{ background: '#ef4444', border: 'none', color: 'white', padding: '0.4rem 0.85rem', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+            style={{ background: 'transparent', border: '1px solid var(--vermilion, #ff4500)', color: 'var(--vermilion, #ff4500)', padding: '0.4rem 0.85rem', borderRadius: '0', cursor: 'pointer', fontFamily: 'var(--font-grotesk)', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
           >
             Let In
           </button>
           <button
             onClick={() => setLobbyToast(null)}
-            style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: '1.1rem', padding: '0.1rem', flexShrink: 0 }}
+            style={{ background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '1.1rem', padding: '0.1rem', flexShrink: 0 }}
           >
             ×
           </button>
@@ -1058,9 +1057,9 @@ export default function MeetingRoom() {
       {/* === ALERT MODAL === */}
       {alertMessage && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'linear-gradient(135deg,rgba(30,41,59,0.98),rgba(15,23,42,0.98))', padding: '2rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)', maxWidth: 380, width: '90%', textAlign: 'center' }}>
-            <p style={{ margin: '0 0 1.5rem', color: '#cbd5e1', lineHeight: 1.6 }}>{alertMessage}</p>
-            <button onClick={() => setAlertMessage(null)} style={{ width: '100%', padding: '0.875rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'pointer' }}>OK</button>
+          <div style={{ background: 'var(--bg-ivory)', padding: '3rem', borderRadius: '0', border: 'var(--border-thick)', boxShadow: '8px 8px 0 rgba(10,10,10,1)', maxWidth: 380, width: '90%', textAlign: 'center' }}>
+            <p style={{ margin: '0 0 1.5rem', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', lineHeight: 1.6 }}>{alertMessage}</p>
+            <button onClick={() => setAlertMessage(null)} style={{ width: '100%', padding: '0.875rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '0', fontWeight: 700, cursor: 'pointer' }}>OK</button>
           </div>
         </div>
       )}

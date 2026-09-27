@@ -1,44 +1,49 @@
 import Link from 'next/link';
 import styles from './page.module.css';
-import { Globe2, MessageSquareText, Video } from 'lucide-react';
 
 export default function Home() {
   return (
-    <div className={`${styles.container} animate-fade-in`}>
-      <main className={styles.hero}>
-        <h1 className={styles.title}>Speak Your Language. <br /> Connect the World.</h1>
-        <p className={styles.subtitle}>
-          BhashaBridge brings real-time, live-translated multilingual communication 
-          to your audio and video meetings. Break language barriers instantly.
-        </p>
-        
-        <div className={styles.ctaContainer}>
-          <Link href="/login">
-            <button className={styles.btnPrimary}>Get Started</button>
-          </Link>
-          <Link href="/register">
-            <button className={styles.btnSecondary}>Create Account</button>
-          </Link>
+    <div className={styles.editorialContainer}>
+      <main className={styles.editorialMain}>
+        <div className={styles.statementWrapper}>
+          <h1 className={styles.massiveTitle}>Say it.</h1>
+          <h1 className={`${styles.massiveTitle} ${styles.italicSerif}`}>Feel understood.</h1>
         </div>
 
-        <div className={styles.features}>
-          <div className={`${styles.featureCard} glass`}>
-            <Video className={styles.featureIcon} />
-            <h3 className={styles.featureTitle}>HD Video Meetings</h3>
-            <p className={styles.featureDesc}>Peer-to-peer fast and secure video conferencing built for remote teams.</p>
-          </div>
-          <div className={`${styles.featureCard} glass`}>
-            <Globe2 className={styles.featureIcon} />
-            <h3 className={styles.featureTitle}>Live Translation</h3>
-            <p className={styles.featureDesc}>Automatic audio transcription and real-time captions in your preferred language.</p>
-          </div>
-          <div className={`${styles.featureCard} glass`}>
-            <MessageSquareText className={styles.featureIcon} />
-            <h3 className={styles.featureTitle}>Translated Chat</h3>
-            <p className={styles.featureDesc}>Type in your native tongue. Messages are instantly translated for everyone else.</p>
-          </div>
+        <div className={styles.visualFlow}>
+          <div className={styles.flowStep}>PERSON</div>
+          <div className={styles.flowRule}></div>
+          <div className={styles.flowStep}>SPEECH</div>
+          <div className={styles.flowRule}></div>
+          <div className={styles.flowStep}>TRANSLATION</div>
+          <div className={styles.flowRule}></div>
+          <div className={styles.flowStep}>CONNECTION</div>
+        </div>
+        
+        <div className={styles.descriptionBlock}>
+          <p className={styles.bodyText}>
+            BhashaBridge acts as an instantaneous, seamless interpreter for your video and audio communication.
+          </p>
+        </div>
+
+        <div className={styles.editorialActions}>
+          <Link href="/login" className={styles.actionLink}>
+            ENTER
+          </Link>
+          <div className={styles.thinRule}></div>
+          <Link href="/register" className={styles.actionLink}>
+            JOIN
+          </Link>
         </div>
       </main>
+      
+      <div className={styles.floatingWord1}>Speak</div>
+      <div className={styles.floatingWord2}>Listen</div>
+      <div className={styles.floatingWord3}>Connect</div>
+      
+      <svg className={styles.speechWave} viewBox="0 0 100 20" preserveAspectRatio="none">
+        <path d="M0,10 Q25,0 50,10 T100,10" fill="none" stroke="var(--cobalt)" strokeWidth="0.2"/>
+      </svg>
     </div>
   );
 }

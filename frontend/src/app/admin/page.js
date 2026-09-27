@@ -10,6 +10,8 @@ export default function AdminDashboard() {
   const router = useRouter();
   const [health, setHealth] = useState(null);
   const [orgUsers, setOrgUsers] = useState([]);
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [alertMessage, setAlertMessage] = useState(null);
 
   useEffect(() => {
     initialize();
@@ -38,8 +40,6 @@ export default function AdminDashboard() {
 
     fetchAdminData();
   }, [user, router]);
-
-  const [newUserEmail, setNewUserEmail] = useState('');
 
   const fetchUsers = async () => {
     try {
@@ -80,120 +80,124 @@ export default function AdminDashboard() {
     }
   };
 
-  const [alertMessage, setAlertMessage] = useState(null);
-
   if (!user || (user.role !== 'ORG_ADMIN' && user.role !== 'PLATFORM_ADMIN')) return null;
 
   return (
-    <div style={{padding: '2rem', maxWidth: '1000px', margin: '0 auto'}}>
-      <h1>Admin Dashboard</h1>
-      <p style={{marginBottom: '2rem'}}>Logged in as: {user.name} ({user.role})</p>
+    <div style={{ backgroundColor: 'var(--bg-ivory, #FAF9F6)', minHeight: '100vh', padding: '4rem 2rem', fontFamily: 'var(--font-grotesk, sans-serif)', color: '#000' }}>
+      <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+        <header style={{ borderBottom: '2px solid #000', paddingBottom: '2rem', marginBottom: '4rem' }}>
+          <h1 style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '3rem', margin: 0, fontWeight: 'normal', color: 'var(--cobalt, #0047AB)' }}>BhashaBridge Directory</h1>
+          <p style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '0.85rem', marginTop: '1rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            OPERATOR: {user.name} // ACCESS_LEVEL: {user.role}
+          </p>
+        </header>
 
-      {user.role === 'PLATFORM_ADMIN' && health && (
-        <div style={{background: 'rgba(255,255,255,0.05)', padding: '2rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '2rem'}}>
-          <h2>Platform Health</h2>
-          <ul style={{listStyle: 'none', padding: 0, lineHeight: 1.8}}>
-            <li><strong>Status:</strong> {health.status}</li>
-            <li><strong>Active Meetings:</strong> {health.activeMeetings}</li>
-            <li><strong>Uptime (sec):</strong> {health.uptime}</li>
-          </ul>
-        </div>
-      )}
+        {user.role === 'PLATFORM_ADMIN' && health && (
+          <section style={{ marginBottom: '4rem', borderBottom: '1px solid #000', paddingBottom: '4rem' }}>
+            <h2 style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '1rem', textTransform: 'uppercase', marginBottom: '2rem' }}>[ SYSTEM STATUS ]</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '2rem' }}>
+              <div style={{ borderLeft: '1px solid #000', paddingLeft: '1rem' }}>
+                <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--cobalt, #0047AB)' }}>Status</div>
+                <div style={{ fontSize: '2rem' }}>{health.status}</div>
+              </div>
+              <div style={{ borderLeft: '1px solid #000', paddingLeft: '1rem' }}>
+                <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--cobalt, #0047AB)' }}>Active Nodes</div>
+                <div style={{ fontSize: '2rem' }}>{health.activeMeetings}</div>
+              </div>
+              <div style={{ borderLeft: '1px solid #000', paddingLeft: '1rem' }}>
+                <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--cobalt, #0047AB)' }}>Uptime</div>
+                <div style={{ fontSize: '2rem' }}>{health.uptime}s</div>
+              </div>
+            </div>
+          </section>
+        )}
 
-      <div style={{background: 'rgba(255,255,255,0.05)', padding: '2rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)'}}>
-        <h2>Organization Users</h2>
-        
-        <form onSubmit={handleAddUser} style={{marginBottom: '1rem', display: 'flex', gap: '0.5rem'}}>
-          <input 
-            type="email" 
-            placeholder="User Email" 
-            value={newUserEmail} 
-            onChange={(e) => setNewUserEmail(e.target.value)} 
-            style={{padding: '0.5rem', borderRadius: '4px', border: 'none', flex: 1}}
-          />
-          <button type="submit" style={{padding: '0.5rem 1rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer'}}>Add User</button>
-        </form>
+        <section>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '2rem', paddingBottom: '1rem', borderBottom: '1px solid #000' }}>
+            <h2 style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '1rem', textTransform: 'uppercase', margin: 0 }}>[ ORGANIZATION INDEX ]</h2>
+            <form onSubmit={handleAddUser} style={{ display: 'flex' }}>
+              <input 
+                type="email" 
+                placeholder="PROSPECT_EMAIL" 
+                value={newUserEmail} 
+                onChange={(e) => setNewUserEmail(e.target.value)} 
+                style={{ fontFamily: 'var(--font-mono, monospace)', padding: '0.5rem', border: '1px solid #000', background: 'transparent', outline: 'none', width: '250px' }}
+              />
+              <button type="submit" style={{ fontFamily: 'var(--font-mono, monospace)', padding: '0.5rem 1rem', background: '#000', color: 'var(--bg-ivory, #FAF9F6)', border: '1px solid #000', cursor: 'pointer', textTransform: 'uppercase' }}>
+                Induct
+              </button>
+            </form>
+          </div>
 
-        {orgUsers.length === 0 ? (
-          <p>No users found in your organization.</p>
-        ) : (
-          <table style={{width: '100%', textAlign: 'left', borderCollapse: 'collapse', marginTop: '1rem'}}>
-            <thead>
-              <tr style={{borderBottom: '1px solid rgba(255,255,255,0.1)'}}>
-                <th style={{padding: '0.5rem'}}>Name</th>
-                <th style={{padding: '0.5rem'}}>Email</th>
-                <th style={{padding: '0.5rem'}}>Role</th>
-                <th style={{padding: '0.5rem'}}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
+          {orgUsers.length === 0 ? (
+            <p style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '1.2rem', color: '#666' }}>The registry is currently vacant.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1fr 1fr', gap: '1rem', paddingBottom: '1rem', borderBottom: '1px solid #000', fontFamily: 'var(--font-mono, monospace)', fontSize: '0.8rem', textTransform: 'uppercase' }}>
+                <div>Identifier</div>
+                <div>Contact Route</div>
+                <div>Clearance</div>
+                <div style={{ textAlign: 'right' }}>Directives</div>
+              </div>
               {orgUsers.map(u => (
-                <tr key={u.id} style={{borderBottom: '1px solid rgba(255,255,255,0.1)'}}>
-                  <td style={{padding: '0.5rem'}}>{u.name}</td>
-                  <td style={{padding: '0.5rem'}}>{u.email}</td>
-                  <td style={{padding: '0.5rem'}}>
+                <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1fr 1fr', gap: '1rem', padding: '1rem 0', borderBottom: '1px solid #000', alignItems: 'center' }}>
+                  <div style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '1.2rem' }}>{u.name}</div>
+                  <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '0.9rem' }}>{u.email}</div>
+                  <div>
                     <select 
                       value={u.role} 
                       onChange={(e) => handleRoleChange(u.id, e.target.value)}
-                      style={{padding: '0.2rem', background: '#1f2937', color: 'white', border: 'none'}}
+                      style={{ fontFamily: 'var(--font-mono, monospace)', padding: '0.25rem', background: 'transparent', border: '1px solid #000', cursor: 'pointer', textTransform: 'uppercase' }}
                     >
                       <option value="PARTICIPANT">PARTICIPANT</option>
                       <option value="HOST">HOST</option>
                       <option value="ORG_ADMIN">ORG_ADMIN</option>
                     </select>
-                  </td>
-                  <td style={{padding: '0.5rem'}}>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
                     <button 
                       onClick={() => handleRemoveUser(u.id)}
-                      style={{background: 'red', color: 'white', border: 'none', padding: '0.2rem 0.5rem', borderRadius: '4px', cursor: 'pointer'}}
+                      style={{ fontFamily: 'var(--font-mono, monospace)', background: 'transparent', color: 'var(--vermilion, #E34234)', border: '1px solid var(--vermilion, #E34234)', padding: '0.25rem 0.5rem', cursor: 'pointer', textTransform: 'uppercase', fontSize: '0.8rem' }}
                     >
-                      Remove
+                      Expel
                     </button>
-                  </td>
-                </tr>
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </table>
+            </div>
+          )}
+        </section>
+
+        <div style={{ marginTop: '4rem' }}>
+          <button onClick={() => router.push('/dashboard')} style={{ fontFamily: 'var(--font-mono, monospace)', padding: '0.5rem 1rem', background: 'transparent', border: '1px solid #000', color: '#000', cursor: 'pointer', textTransform: 'uppercase' }}>
+            Return to Dashboard
+          </button>
+        </div>
+
+        {alertMessage && (
+          <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'var(--bg-ivory, #FAF9F6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999
+          }}>
+            <div style={{
+              border: '2px solid #000', padding: '3rem', maxWidth: '500px', width: '90%', textAlign: 'center'
+            }}>
+              <h3 style={{ fontFamily: 'var(--font-mono, monospace)', textTransform: 'uppercase', margin: '0 0 1rem', color: 'var(--vermilion, #E34234)' }}>[ EXCEPTION ]</h3>
+              <p style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '1.2rem', margin: '0 0 2rem' }}>
+                {alertMessage}
+              </p>
+              <button 
+                onClick={() => setAlertMessage(null)}
+                style={{
+                  padding: '0.5rem 2rem', background: '#000', color: 'var(--bg-ivory, #FAF9F6)', border: '1px solid #000', fontFamily: 'var(--font-mono, monospace)', textTransform: 'uppercase', cursor: 'pointer'
+                }}
+              >
+                Acknowledge
+              </button>
+            </div>
+          </div>
         )}
       </div>
-      
-      <div style={{marginTop: '2rem'}}>
-        <button onClick={() => router.push('/dashboard')} style={{padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '4px', color: 'white', cursor: 'pointer'}}>
-          ← Back to Main Dashboard
-        </button>
-      </div>
-
-      {/* Alert Modal */}
-      {alertMessage && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999
-        }}>
-          <div className="glass" style={{
-            background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95))',
-            padding: '2rem', borderRadius: '16px', border: '1px solid rgba(255, 255, 255, 0.1)',
-            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 40px rgba(96, 165, 250, 0.2)',
-            maxWidth: '400px', width: '90%', textAlign: 'center', animation: 'scaleUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
-          }}>
-            <h3 style={{ margin: '0 0 1rem', color: '#f8fafc', fontSize: '1.25rem' }}>Notification</h3>
-            <p style={{ margin: '0 0 1.5rem', color: '#94a3b8', fontSize: '0.95rem', lineHeight: 1.5 }}>
-              {alertMessage}
-            </p>
-            <button 
-              onClick={() => setAlertMessage(null)}
-              style={{
-                width: '100%', padding: '0.875rem', background: '#3b82f6',
-                color: 'white', border: 'none', borderRadius: '8px', fontSize: '1rem', fontWeight: 600,
-                cursor: 'pointer', transition: 'transform 0.1s'
-              }}
-            >
-              OK
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
-

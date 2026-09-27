@@ -23,42 +23,43 @@ export default function Login() {
   };
 
   return (
-    <div className={styles.authContainer}>
-      <div className={`${styles.authCard} glass animate-fade-in`}>
-        <h1 className={styles.title}>Welcome Back</h1>
-        <p className={styles.subtitle}>Sign in to your BhashaBridge account</p>
+    <div className={styles.editorialAuthContainer}>
+      <div className={styles.editorialAuthWrapper}>
+        <h1 className={styles.sharpTitle}>Access</h1>
+        <div className={styles.thickRule}></div>
 
-        {error && <div className={styles.error}>{error}</div>}
+        {error && <div className={styles.editorialError}>{error}</div>}
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} className={styles.editorialForm}>
           <div className={styles.formGroup}>
-            <label className={styles.label}>Email Address</label>
+            <label className={styles.editorialLabel}>Email</label>
             <input 
               type="email" 
-              className={styles.input} 
+              className={styles.editorialInput} 
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required 
             />
           </div>
           <div className={styles.formGroup}>
-            <label className={styles.label}>Password</label>
+            <label className={styles.editorialLabel}>Password</label>
             <input 
               type="password" 
-              className={styles.input} 
+              className={styles.editorialInput} 
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required 
             />
           </div>
-          <button type="submit" className={styles.btnPrimary} disabled={isLoading}>
-            {isLoading ? 'Signing In...' : 'Sign In'}
+          <button type="submit" className={styles.editorialBtn} disabled={isLoading}>
+            {isLoading ? 'Processing...' : 'Enter'}
           </button>
         </form>
 
-        <span className={styles.linkText}>
-          Don&apos;t have an account? <Link href={`/register${typeof window !== 'undefined' && window.location.search ? window.location.search : ''}`} className={styles.link}>Register</Link>
-        </span>
+        <div className={styles.thinRule}></div>
+        <Link href={`/register${typeof window !== 'undefined' && window.location.search ? window.location.search : ''}`} className={styles.editorialLink}>
+          Or Register
+        </Link>
       </div>
     </div>
   );

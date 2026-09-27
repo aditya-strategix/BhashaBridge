@@ -14,15 +14,15 @@ import NotificationBell from '../../components/NotificationBell';
 
 // ------- constants -------
 const STATE_CFG = {
-  ONGOING:   { label: 'Live',      bg: 'rgba(52,211,153,0.15)',  color: '#34d399' },
-  SCHEDULED: { label: 'Scheduled', bg: 'rgba(96,165,250,0.15)',  color: '#60a5fa' },
-  COMPLETED: { label: 'Ended',     bg: 'rgba(156,163,175,0.15)', color: '#9ca3af' },
+  ONGOING:   { label: 'Live',      bg: '#111',  color: '#FDFBF7' },
+  SCHEDULED: { label: 'Scheduled', bg: 'transparent',  color: '#111' },
+  COMPLETED: { label: 'Ended',     bg: 'transparent', color: '#111' },
 };
 
 const ROLE_CFG = {
-  HOST:        { label: 'Host',        color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
-  COHOST:      { label: 'Co-Host',     color: '#a78bfa', bg: 'rgba(167,139,250,0.15)' },
-  PARTICIPANT: { label: 'Participant', color: '#60a5fa', bg: 'rgba(96,165,250,0.15)' },
+  HOST:        { label: 'Host',        color: '#E34234', bg: 'transparent' },
+  COHOST:      { label: 'Co-Host',     color: '#0047AB', bg: 'transparent' },
+  PARTICIPANT: { label: 'Participant', color: '#111', bg: 'transparent' },
 };
 
 // ------- tiny components -------
@@ -31,11 +31,12 @@ function StateBadge({ state }) {
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+      fontFamily: 'var(--font-mono, monospace)',
       fontSize: '0.7rem', fontWeight: 700, padding: '0.2rem 0.6rem',
-      borderRadius: '999px', textTransform: 'uppercase', letterSpacing: '0.05em',
-      background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.color}44`,
+      textTransform: 'uppercase', letterSpacing: '0.05em',
+      background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.color}`,
     }}>
-      <span style={{ width: 6, height: 6, borderRadius: '50%', background: cfg.color, display: 'inline-block' }} />
+      <span style={{ width: 6, height: 6, background: cfg.color, display: 'inline-block' }} />
       {cfg.label}
     </span>
   );
@@ -45,9 +46,10 @@ function RoleBadge({ role }) {
   const cfg = ROLE_CFG[role] || ROLE_CFG.PARTICIPANT;
   return (
     <span style={{
+      fontFamily: 'var(--font-mono, monospace)',
       fontSize: '0.65rem', fontWeight: 700, padding: '0.15rem 0.5rem',
-      borderRadius: '999px', textTransform: 'uppercase',
-      background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.color}44`,
+      textTransform: 'uppercase',
+      background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.color}`,
     }}>
       {cfg.label}
     </span>
@@ -62,10 +64,10 @@ const MODAL_STYLE = {
     display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
   },
   box: {
-    background: 'linear-gradient(135deg,rgba(30,41,59,0.98),rgba(15,23,42,0.98))',
-    padding: '2rem', borderRadius: '16px',
-    border: '1px solid rgba(255,255,255,0.1)',
-    boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5),0 0 40px rgba(96,165,250,0.15)',
+    background: '#FDFBF7', border: '4px solid #111', borderRadius: '0',
+    padding: '2rem', borderRadius: '0',
+    border: '2px solid #111',
+    boxShadow: '10px 10px 0 #111',
     maxWidth: '420px', width: '90%',
   },
 };
@@ -74,9 +76,9 @@ function AlertModal({ message, onClose }) {
   return (
     <div style={MODAL_STYLE.overlay}>
       <div style={MODAL_STYLE.box}>
-        <h3 style={{ margin: '0 0 1rem', color: '#f8fafc', fontSize: '1.1rem' }}>Notice</h3>
-        <p style={{ margin: '0 0 1.5rem', color: '#cbd5e1', lineHeight: 1.6 }}>{message}</p>
-        <button onClick={onClose} style={{ width: '100%', padding: '0.875rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', fontSize: '1rem' }}>OK</button>
+        <h3 style={{ margin: '0 0 1rem', color: '#111', fontSize: '1.1rem' }}>Notice</h3>
+        <p style={{ margin: '0 0 1.5rem', color: '#444', lineHeight: 1.6 }}>{message}</p>
+        <button onClick={onClose} style={{ width: '100%', padding: '0.875rem', background: '#111', color: '#FDFBF7', border: 'none', borderRadius: '0', fontWeight: 600, cursor: 'pointer', fontSize: '1rem' }}>OK</button>
       </div>
     </div>
   );
@@ -86,11 +88,11 @@ function ConfirmModal({ title, message, onConfirm, onClose }) {
   return (
     <div style={MODAL_STYLE.overlay}>
       <div style={MODAL_STYLE.box}>
-        <h3 style={{ margin: '0 0 1rem', color: '#f8fafc', fontSize: '1.1rem' }}>{title || 'Are you sure?'}</h3>
-        <p style={{ margin: '0 0 1.5rem', color: '#cbd5e1', lineHeight: 1.6 }}>{message}</p>
+        <h3 style={{ margin: '0 0 1rem', color: '#111', fontSize: '1.1rem' }}>{title || 'Are you sure?'}</h3>
+        <p style={{ margin: '0 0 1.5rem', color: '#444', lineHeight: 1.6 }}>{message}</p>
         <div style={{ display: 'flex', gap: '1rem' }}>
-          <button onClick={onClose} style={{ flex: 1, padding: '0.875rem', background: 'transparent', color: '#9ca3af', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
-          <button onClick={onConfirm} style={{ flex: 1, padding: '0.875rem', background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}>Confirm</button>
+          <button onClick={onClose} style={{ flex: 1, padding: '0.875rem', background: 'transparent', color: '#555', border: '2px solid #111', borderRadius: '0', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+          <button onClick={onConfirm} style={{ flex: 1, padding: '0.875rem', background: '#ef4444', color: '#FDFBF7', border: 'none', borderRadius: '0', fontWeight: 600, cursor: 'pointer' }}>Confirm</button>
         </div>
       </div>
     </div>
@@ -487,15 +489,15 @@ function DashboardContent() {
             <div style={{ width: 60, height: 60, borderRadius: '50%', background: 'rgba(52,211,153,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem', color: '#34d399' }}>
               <CalendarCheck2 size={32} />
             </div>
-            <h2 style={{ margin: '0 0 0.5rem', color: '#f8fafc' }}>Meeting Scheduled!</h2>
-            <p style={{ margin: '0 0 1.5rem', color: '#94a3b8', lineHeight: 1.5 }}>Share this code with participants so they can join.</p>
-            <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: '8px', border: '1px dashed rgba(255,255,255,0.2)', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+            <h2 style={{ margin: '0 0 0.5rem', color: '#111' }}>Meeting Scheduled!</h2>
+            <p style={{ margin: '0 0 1.5rem', color: '#666', lineHeight: 1.5 }}>Share this code with participants so they can join.</p>
+            <div style={{ background: 'rgba(0,0,0,0.05)', padding: '1rem', borderRadius: '0', border: '1px dashed rgba(255,255,255,0.2)', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
               <code style={{ fontSize: '1.2rem', color: '#60a5fa', fontWeight: 700, letterSpacing: '2px' }}>{scheduledMeetingCode}</code>
               <button onClick={() => copyCode(scheduledMeetingCode)} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: copiedCode === scheduledMeetingCode ? '#34d399' : 'white', padding: '0.4rem 0.8rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                 {copiedCode === scheduledMeetingCode ? <><Check size={13} /> Copied!</> : <><Copy size={13} /> Copy</>}
               </button>
             </div>
-            <button onClick={() => setScheduledMeetingCode(null)} style={{ width: '100%', padding: '0.875rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}>Done</button>
+            <button onClick={() => setScheduledMeetingCode(null)} style={{ width: '100%', padding: '0.875rem', background: '#111', color: '#FDFBF7', border: 'none', borderRadius: '0', fontWeight: 600, cursor: 'pointer' }}>Done</button>
           </div>
         </div>
       )}
@@ -517,9 +519,9 @@ function DashboardContent() {
       {showOrgModal && (
         <div style={MODAL_STYLE.overlay} onClick={() => setShowOrgModal(false)}>
           <div style={MODAL_STYLE.box} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ margin: '0 0 1.5rem', color: '#f8fafc', textAlign: 'center' }}>Create Organization</h2>
+            <h2 style={{ margin: '0 0 1.5rem', color: '#111', textAlign: 'center' }}>Create Organization</h2>
             <form onSubmit={handleCreateOrg}>
-              <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.85rem', color: '#9ca3af' }}>Organization Name</label>
+              <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.85rem', color: '#555' }}>Organization Name</label>
               <input
                 type="text"
                 placeholder="e.g. My Dream Team"
@@ -527,11 +529,11 @@ function DashboardContent() {
                 value={newOrgName}
                 onChange={e => setNewOrgName(e.target.value)}
                 required
-                style={{ width: '100%', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem' }}
+                style={{ width: '100%', background: 'transparent', border: '2px solid #111', marginBottom: '1.5rem' }}
               />
               <div style={{ display: 'flex', gap: '1rem' }}>
-                <button type="button" onClick={() => setShowOrgModal(false)} style={{ flex: 1, padding: '0.875rem', background: 'transparent', color: '#9ca3af', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
-                <button type="submit" style={{ flex: 1, padding: '0.875rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}>Create</button>
+                <button type="button" onClick={() => setShowOrgModal(false)} style={{ flex: 1, padding: '0.875rem', background: 'transparent', color: '#555', border: '2px solid #111', borderRadius: '0', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                <button type="submit" style={{ flex: 1, padding: '0.875rem', background: '#111', color: '#FDFBF7', border: 'none', borderRadius: '0', fontWeight: 600, cursor: 'pointer' }}>Create</button>
               </div>
             </form>
           </div>
@@ -542,15 +544,15 @@ function DashboardContent() {
       {showProfileModal && (
         <div style={MODAL_STYLE.overlay} onClick={() => setShowProfileModal(false)}>
           <div style={MODAL_STYLE.box} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ margin: '0 0 1.5rem', color: '#f8fafc', textAlign: 'center' }}>Edit Profile</h2>
+            <h2 style={{ margin: '0 0 1.5rem', color: '#111', textAlign: 'center' }}>Edit Profile</h2>
             <form onSubmit={handleUpdateProfile}>
               <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.85rem', color: '#9ca3af' }}>Display Name</label>
-                <input type="text" className={styles.input} value={editName} onChange={e => setEditName(e.target.value)} style={{ width: '100%', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)' }} />
+                <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.85rem', color: '#555' }}>Display Name</label>
+                <input type="text" className={styles.input} value={editName} onChange={e => setEditName(e.target.value)} style={{ width: '100%', background: 'transparent', border: '2px solid #111' }} />
               </div>
               <div style={{ marginBottom: '1.5rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.85rem', color: '#9ca3af' }}>Preferred Language</label>
-                <select className={styles.input} value={editLanguage} onChange={e => setEditLanguage(e.target.value)} style={{ width: '100%', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.85rem', color: '#555' }}>Preferred Language</label>
+                <select className={styles.input} value={editLanguage} onChange={e => setEditLanguage(e.target.value)} style={{ width: '100%', background: 'transparent', border: '2px solid #111' }}>
                   <option value="en">English</option>
                   <option value="hi">Hindi</option>
                   <option value="es">Spanish</option>
@@ -564,8 +566,8 @@ function DashboardContent() {
                 </select>
               </div>
               <div style={{ display: 'flex', gap: '1rem' }}>
-                <button type="button" onClick={() => setShowProfileModal(false)} style={{ flex: 1, padding: '0.875rem', background: 'transparent', color: '#9ca3af', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
-                <button type="submit" style={{ flex: 1, padding: '0.875rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}>Save</button>
+                <button type="button" onClick={() => setShowProfileModal(false)} style={{ flex: 1, padding: '0.875rem', background: 'transparent', color: '#555', border: '2px solid #111', borderRadius: '0', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                <button type="submit" style={{ flex: 1, padding: '0.875rem', background: '#111', color: '#FDFBF7', border: 'none', borderRadius: '0', fontWeight: 600, cursor: 'pointer' }}>Save</button>
               </div>
             </form>
           </div>
@@ -576,10 +578,10 @@ function DashboardContent() {
         {/* Summary Modal */}
         {summaryModal && (
           <div style={{ ...MODAL_STYLE.overlay }} onClick={() => setSummaryModal(null)}>
-            <div style={{ background: '#0a0a0a', padding: '2rem', borderRadius: '16px', border: '1px solid #262626', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', width: '90%', maxWidth: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ background: '#FDFBF7', border: '4px solid #111', padding: '2rem', borderRadius: '0', border: '1px solid #262626', boxShadow: '10px 10px 0 #111', width: '90%', maxWidth: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid #262626' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '1.1rem' }}>✨ AI Meeting Summary</h2>
+                    <h2 style={{ margin: 0, color: '#111', fontSize: '1.1rem' }}>✨ AI Meeting Summary</h2>
                     {!summaryModal.loading && summaryModal.text && (
                       <button onClick={handleExportSummary} style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)', padding: '0.4rem 0.8rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
@@ -587,7 +589,7 @@ function DashboardContent() {
                       </button>
                     )}
                   </div>
-                <button onClick={() => setSummaryModal(null)} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '1.5rem', lineHeight: 1 }}>&times;</button>
+                <button onClick={() => setSummaryModal(null)} style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: '1.5rem', lineHeight: 1 }}>&times;</button>
               </div>
               <div style={{ overflowY: 'auto', flex: 1 }}>
                 {summaryModal.loading ? (
@@ -597,7 +599,7 @@ function DashboardContent() {
                     <p style={{ color: '#10b981', fontWeight: 600 }}>AI is generating the summary in your language... This may take up to 15 seconds.</p>
                   </div>
                 ) : (
-                  <div style={{ whiteSpace: 'pre-wrap', color: '#e2e8f0', lineHeight: 1.6, fontSize: '0.95rem' }}>
+                  <div style={{ whiteSpace: 'pre-wrap', color: '#111', lineHeight: 1.6, fontSize: '0.95rem' }}>
                     {summaryModal.text}
                   </div>
                 )}
@@ -609,10 +611,10 @@ function DashboardContent() {
         {/* Transcript Modal */}
       {transcriptModal && (
         <div style={{ ...MODAL_STYLE.overlay }} onClick={() => setTranscriptModal(null)}>
-          <div style={{ background: 'linear-gradient(135deg,rgba(30,41,59,0.98),rgba(15,23,42,0.98))', padding: '2rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', width: '90%', maxWidth: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ background: '#FDFBF7', border: '4px solid #111', borderRadius: '0', padding: '2rem', borderRadius: '0', border: '2px solid #111', boxShadow: '10px 10px 0 #111', width: '90%', maxWidth: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '2px solid #111' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '1.1rem' }}>📝 Meeting Transcript</h2>
+                <h2 style={{ margin: 0, color: '#111', fontSize: '1.1rem' }}>📝 Meeting Transcript</h2>
                 {!transcriptModal.loading && transcriptModal.entries.length > 0 && (
                   <button onClick={handleExportTranscript} style={{ background: 'rgba(59,130,246,0.1)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.3)', padding: '0.4rem 0.8rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
@@ -620,22 +622,22 @@ function DashboardContent() {
                   </button>
                 )}
               </div>
-              <button onClick={() => setTranscriptModal(null)} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '1.5rem', lineHeight: 1 }}>×</button>
+              <button onClick={() => setTranscriptModal(null)} style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: '1.5rem', lineHeight: 1 }}>×</button>
             </div>
             <div style={{ overflowY: 'auto', flex: 1 }}>
               {transcriptModal.loading ? (
-                <p style={{ color: '#9ca3af', textAlign: 'center', padding: '2rem 0' }}>Loading transcript...</p>
+                <p style={{ color: '#555', textAlign: 'center', padding: '2rem 0' }}>Loading transcript...</p>
               ) : transcriptModal.entries.length === 0 ? (
-                <p style={{ color: '#9ca3af', textAlign: 'center', padding: '2rem 0' }}>No transcript recorded for this meeting.</p>
+                <p style={{ color: '#555', textAlign: 'center', padding: '2rem 0' }}>No transcript recorded for this meeting.</p>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   {transcriptModal.entries.map(t => (
-                    <div key={t.id} style={{ background: 'rgba(255,255,255,0.03)', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div key={t.id} style={{ background: 'transparent', padding: '0.75rem 1rem', borderRadius: '0', border: '1px solid rgba(255,255,255,0.06)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
                         <span style={{ fontWeight: 600, color: '#60a5fa', fontSize: '0.88rem' }}>{t.speaker?.name || 'Unknown'}</span>
-                        <span style={{ color: '#6b7280', fontSize: '0.72rem' }}>{new Date(t.timestamp).toLocaleTimeString()}</span>
+                        <span style={{ color: '#777', fontSize: '0.72rem' }}>{new Date(t.timestamp).toLocaleTimeString()}</span>
                       </div>
-                      <p style={{ margin: 0, color: '#e2e8f0', lineHeight: 1.5, fontSize: '0.92rem' }}>{t.originalText}</p>
+                      <p style={{ margin: 0, color: '#111', lineHeight: 1.5, fontSize: '0.92rem' }}>{t.originalText}</p>
                     </div>
                   ))}
                 </div>
@@ -648,23 +650,23 @@ function DashboardContent() {
       {/* All Members Modal */}
       {showAllMembersOrg && (
         <div style={MODAL_STYLE.overlay} onClick={() => setShowAllMembersOrg(null)}>
-          <div style={{ background: 'linear-gradient(135deg,rgba(30,41,59,0.98),rgba(15,23,42,0.98))', padding: '2rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', width: '90%', maxWidth: '520px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ background: '#FDFBF7', border: '4px solid #111', borderRadius: '0', padding: '2rem', borderRadius: '0', border: '2px solid #111', boxShadow: '10px 10px 0 #111', width: '90%', maxWidth: '520px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '2px solid #111' }}>
               <div>
-                <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '1.1rem' }}>{showAllMembersOrg.name}</h2>
-                <p style={{ margin: '0.25rem 0 0', color: '#9ca3af', fontSize: '0.8rem' }}>{showAllMembersOrg.users?.length} member{showAllMembersOrg.users?.length !== 1 ? 's' : ''}</p>
+                <h2 style={{ margin: 0, color: '#111', fontSize: '1.1rem' }}>{showAllMembersOrg.name}</h2>
+                <p style={{ margin: '0.25rem 0 0', color: '#555', fontSize: '0.8rem' }}>{showAllMembersOrg.users?.length} member{showAllMembersOrg.users?.length !== 1 ? 's' : ''}</p>
               </div>
-              <button onClick={() => setShowAllMembersOrg(null)} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '1.5rem', lineHeight: 1 }}>×</button>
+              <button onClick={() => setShowAllMembersOrg(null)} style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: '1.5rem', lineHeight: 1 }}>×</button>
             </div>
             <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
               {showAllMembersOrg.users?.map(u => (
-                <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', gap: '1rem' }}>
+                <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'transparent', borderRadius: '0', gap: '1rem' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      <span style={{ fontWeight: 500, color: '#f1f5f9', fontSize: '0.9rem' }}>{u.name}</span>
+                      <span style={{ fontWeight: 500, color: '#111', fontSize: '0.9rem' }}>{u.name}</span>
                       <RoleBadge role={u.id === showAllMembersOrg.ownerId ? 'HOST' : (showAllMembersOrg.coHosts?.some(c => c.id === u.id) ? 'COHOST' : 'PARTICIPANT')} />
                     </div>
-                    <p style={{ margin: '0.2rem 0 0', color: '#9ca3af', fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</p>
+                    <p style={{ margin: '0.2rem 0 0', color: '#555', fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</p>
                   </div>
                   {showAllMembersOrg.ownerId === user.id && u.id !== user.id && (
                     <button onClick={() => handleRemoveMember(showAllMembersOrg.id, u.id, u.name)} style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.25)', padding: '0.3rem 0.7rem', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer', flexShrink: 0 }}>
@@ -683,15 +685,15 @@ function DashboardContent() {
 
         {/* Header */}
         <header className={styles.header}>
-          <h1 className={styles.title}>Dashboard</h1>
+          <h1 className={styles.title}>BhashaBridge</h1>
           <div className={styles.userInfo}>
-            <span className={styles.userName}>{user.name} <span style={{ color: '#9ca3af', fontWeight: 400 }}>({user.language})</span></span>
+            <span className={styles.userName}>{user.name} <span style={{ color: '#111', fontWeight: 400, textTransform: 'none' }}>({user.language})</span></span>
             {(user.role === 'ORG_ADMIN' || user.role === 'PLATFORM_ADMIN') && (
-              <Link href="/admin" style={{ color: '#a78bfa', textDecoration: 'none', fontWeight: 600 }}>Admin Panel</Link>
+              <Link href="/admin" style={{ color: 'var(--cobalt)', textDecoration: 'none', fontWeight: 600 }}>Admin Panel</Link>
             )}
             <button
               onClick={() => { setEditName(user.name); setEditLanguage(user.language); setShowProfileModal(true); }}
-              style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', padding: '0.4rem 0.8rem', borderRadius: '6px', cursor: 'pointer' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', background: 'transparent', border: '1px solid #111', color: '#111', padding: '0.4rem 0.8rem', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
             >
               <UserIcon size={14} /> Profile
             </button>
@@ -707,20 +709,20 @@ function DashboardContent() {
           <div className={styles.leftCol}>
 
             {/* New Meeting */}
-            <div className={`${styles.card} glass`} style={{ marginBottom: '1.5rem' }}>
-              <h2 className={styles.cardTitle}><PlusCircle size={18} /> New Meeting</h2>
+            <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
+              <h2 className={styles.cardTitle}>New Conversation</h2>
               <form onSubmit={handleCreateMeeting}>
                 <input
                   type="text"
-                  placeholder="Meeting Title (optional)"
+                  placeholder="Topic (optional)"
                   className={styles.input}
                   value={newTitle}
                   onChange={e => setNewTitle(e.target.value)}
                 />
                 {organizations.some(org => org.ownerId === user.id || org.coHosts?.some(c => c.id === user.id)) && (
                   <div style={{ margin: '0.75rem 0' }}>
-                    <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.82rem', color: '#9ca3af' }}>Organization (Optional)</label>
-                    <select className={styles.input} value={selectedOrgId} onChange={e => setSelectedOrgId(e.target.value)} style={{ background: 'rgba(0,0,0,0.2)' }}>
+                    <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.82rem', color: '#111', fontFamily: 'var(--font-mono)' }}>Organization (Optional)</label>
+                    <select className={styles.input} value={selectedOrgId} onChange={e => setSelectedOrgId(e.target.value)}>
                       <option value="">No Organization</option>
                       {organizations
                         .filter(org => org.ownerId === user.id || org.coHosts?.some(c => c.id === user.id))
@@ -731,7 +733,7 @@ function DashboardContent() {
                   </div>
                   )}
                 <div style={{ margin: '0.75rem 0' }}>
-                  <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.82rem', color: '#9ca3af' }}>Schedule For (leave blank to start now)</label>
+                  <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.82rem', color: '#111', fontFamily: 'var(--font-mono)' }}>Schedule For (leave blank to start now)</label>
                   <input
                     type="datetime-local"
                     className={styles.input}
@@ -741,48 +743,47 @@ function DashboardContent() {
                   />
                 </div>
                 <button type="submit" className={styles.btnPrimary} disabled={isCreating}>
-                  {isCreating ? 'Creating…' : scheduledTime ? '📅 Schedule Meeting' : '🚀 Start Now'}
+                  {isCreating ? 'CREATING…' : scheduledTime ? 'SCHEDULE' : 'LAUNCH'}
                 </button>
               </form>
             </div>
 
             {/* Join by Code */}
-            <div className={`${styles.card} glass`}>
-              <h2 className={styles.cardTitle}><LinkIcon size={18} /> Join by Code</h2>
+            <div className={styles.card}>
+              <h2 className={styles.cardTitle}>Join</h2>
               <form onSubmit={handleJoinMeeting}>
                 <input
                   type="text"
-                  placeholder="Paste meeting or org access code"
+                  placeholder="Paste code here"
                   className={styles.input}
                   value={joinLink}
                   onChange={e => setJoinLink(e.target.value)}
                 />
-                <button type="submit" className={styles.btnPrimary}>Join Meeting</button>
+                <button type="submit" className={styles.btnPrimary}>JOIN</button>
               </form>
             </div>
           </div>
 
           {/* ===== RIGHT COLUMN ===== */}
           <div className={styles.rightCol}>
-            <div className={`${styles.card} glass`} style={{ minHeight: '100%' }}>
+            <div className={styles.card} style={{ minHeight: '100%' }}>
 
               {/* Tabs */}
-              <div style={{ display: 'flex', marginBottom: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+              <div style={{ display: 'flex', marginBottom: '2.5rem', borderBottom: '2px solid #111' }}>
                 {['upcoming', 'history', 'organizations'].map(tab => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
                     style={{
-                      flex: 1, padding: '0.9rem 0.5rem', background: 'none', border: 'none', cursor: 'pointer',
-                      color: activeTab === tab ? '#60a5fa' : '#9ca3af',
-                      fontWeight: activeTab === tab ? 700 : 400,
-                      borderBottom: activeTab === tab ? '2px solid #60a5fa' : '2px solid transparent',
-                      fontSize: '0.9rem', transition: 'all 0.15s',
+                      flex: 1, padding: '1rem', background: 'none', border: 'none', cursor: 'pointer',
+                      color: activeTab === tab ? 'var(--cobalt)' : 'rgba(0,0,0,0.4)',
+                      fontWeight: 700,
+                      borderBottom: activeTab === tab ? '4px solid var(--cobalt)' : '4px solid transparent',
+                      fontSize: '1rem', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', transition: 'all 0.15s',
+                      marginBottom: '-3px'
                     }}
                   >
-                    {tab === 'upcoming' ? <><Video size={13} style={{ marginRight: 5, verticalAlign: 'middle' }} />Upcoming</>
-                      : tab === 'history' ? '📋 History'
-                      : '🏢 Organizations'}
+                    {tab === 'upcoming' ? 'Upcoming' : tab === 'history' ? 'History' : 'Organizations'}
                   </button>
                 ))}
               </div>
@@ -791,8 +792,8 @@ function DashboardContent() {
               {activeTab === 'organizations' && (
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-                    <h3 style={{ margin: 0, color: '#f1f5f9' }}>My Organizations</h3>
-                    <button onClick={() => setShowOrgModal(true)} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '0.5rem 1rem', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}>
+                    <h3 style={{ margin: 0, color: '#111' }}>My Organizations</h3>
+                    <button onClick={() => setShowOrgModal(true)} style={{ background: '#111', color: '#FDFBF7', border: 'none', padding: '0.5rem 1rem', borderRadius: '0', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}>
                       + Create Org
                     </button>
                   </div>
@@ -806,16 +807,16 @@ function DashboardContent() {
                       {organizations.map(org => {
                         const isOwner = org.ownerId === user.id;
                         return (
-                          <div key={org.id} style={{ padding: '1.25rem', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.07)' }}>
+                          <div key={org.id} style={{ padding: '1.25rem', background: 'transparent', borderRadius: '0', border: '2px solid #111' }}>
 
                             {/* Org header */}
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', marginBottom: '1rem' }}>
                               <div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-                                  <h4 style={{ margin: 0, color: '#f1f5f9' }}>{org.name}</h4>
+                                  <h4 style={{ margin: 0, color: '#111' }}>{org.name}</h4>
                                   {isOwner && <RoleBadge role="HOST" />}
                                 </div>
-                                <p style={{ margin: '0.3rem 0 0', fontSize: '0.82rem', color: '#9ca3af' }}>
+                                <p style={{ margin: '0.3rem 0 0', fontSize: '0.82rem', color: '#555' }}>
                                   Hosted by {isOwner ? 'You' : org.owner?.name}
                                 </p>
                               </div>
@@ -824,7 +825,7 @@ function DashboardContent() {
                               {isOwner ? (
                                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem', justifyContent: 'flex-end' }}>
-                                    <span style={{ fontSize: '0.8rem', color: '#9ca3af' }}>Code:</span>
+                                    <span style={{ fontSize: '0.8rem', color: '#555' }}>Code:</span>
                                     <code style={{ color: '#60a5fa', fontWeight: 700, fontSize: '0.9rem' }}>{org.accessCode}</code>
                                     <button
                                       onClick={() => copyCode(org.accessCode)}
@@ -835,7 +836,7 @@ function DashboardContent() {
                                     </button>
                                   </div>
                                   <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
-                                    <button onClick={() => handleRegenerateCode(org.id)} style={{ background: 'rgba(255,255,255,0.07)', color: '#e5e7eb', border: '1px solid rgba(255,255,255,0.1)', padding: '0.3rem 0.7rem', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer' }}>
+                                    <button onClick={() => handleRegenerateCode(org.id)} style={{ background: 'rgba(255,255,255,0.07)', color: '#111', border: '2px solid #111', padding: '0.3rem 0.7rem', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer' }}>
                                       Regenerate
                                     </button>
                                     <button onClick={() => handleDeleteOrg(org.id, org.name)} style={{ background: 'rgba(239,68,68,0.08)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)', padding: '0.3rem 0.7rem', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer' }}>
@@ -851,8 +852,8 @@ function DashboardContent() {
                             </div>
 
                             {/* Members preview */}
-                            <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '0.75rem', marginBottom: '0.75rem' }}>
-                              <p style={{ margin: '0 0 0.6rem', fontSize: '0.8rem', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                            <div style={{ borderTop: '2px solid #111', paddingTop: '0.75rem', marginBottom: '0.75rem' }}>
+                              <p style={{ margin: '0 0 0.6rem', fontSize: '0.8rem', color: '#777', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                                 Members ({org.users?.length || 0})
                               </p>
                               <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -869,7 +870,7 @@ function DashboardContent() {
                                   </div>
                                 ))}
                                 {(org.users?.length || 0) > 5 && (
-                                  <button onClick={() => setShowAllMembersOrg(org)} style={{ background: 'rgba(255,255,255,0.05)', color: '#9ca3af', border: '1px solid rgba(255,255,255,0.1)', padding: '0.2rem 0.6rem', borderRadius: '999px', fontSize: '0.75rem', cursor: 'pointer' }}>
+                                  <button onClick={() => setShowAllMembersOrg(org)} style={{ background: 'rgba(255,255,255,0.05)', color: '#555', border: '2px solid #111', padding: '0.2rem 0.6rem', borderRadius: '999px', fontSize: '0.75rem', cursor: 'pointer' }}>
                                     +{org.users.length - 5} more
                                   </button>
                                 )}
@@ -879,7 +880,7 @@ function DashboardContent() {
                             {/* Pending invitations */}
                             {isOwner && org.invitations?.length > 0 && (
                               <div style={{ borderTop: '1px dashed rgba(255,255,255,0.07)', paddingTop: '0.75rem', marginBottom: '0.75rem' }}>
-                                <p style={{ margin: '0 0 0.5rem', fontSize: '0.8rem', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                <p style={{ margin: '0 0 0.5rem', fontSize: '0.8rem', color: '#777', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                                   Pending Invitations ({org.invitations.length})
                                 </p>
                                 <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
@@ -903,9 +904,9 @@ function DashboardContent() {
                                   placeholder="Email addresses separated by comma"
                                   ref={el => { if (el) inviteEmailRefs.current[org.id] = el; }}
                                   className={styles.input}
-                                  style={{ flex: 1, margin: 0, padding: '0.65rem 0.9rem', background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.1)', fontSize: '0.85rem' }}
+                                  style={{ flex: 1, margin: 0, padding: '0.65rem 0.9rem', background: 'rgba(0,0,0,0.25)', border: '2px solid #111', fontSize: '0.85rem' }}
                                 />
-                                <button type="submit" style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '0.65rem 1.2rem', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', fontSize: '0.85rem' }}>
+                                <button type="submit" style={{ background: '#111', color: '#FDFBF7', border: 'none', padding: '0.65rem 1.2rem', borderRadius: '0', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', fontSize: '0.85rem' }}>
                                   Invite
                                 </button>
                               </form>
@@ -936,23 +937,23 @@ function DashboardContent() {
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '0.3rem' }}>
-                                <h4 style={{ margin: 0, fontSize: '1rem', color: '#f1f5f9' }}>{m.title}</h4>
+                                <h4 style={{ margin: 0, fontSize: '1rem', color: '#111' }}>{m.title}</h4>
                                 <StateBadge state={m.state} />
                               </div>
-                              <p style={{ margin: '0.15rem 0', fontSize: '0.83rem', color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                              <p style={{ margin: '0.15rem 0', fontSize: '0.83rem', color: '#444', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                                 <span>
-                                  Code: <code style={{ background: 'rgba(255,255,255,0.08)', padding: '0.1rem 0.4rem', borderRadius: 4 }}>{m.meetingLink}</code>
+                                  Code: <code style={{ background: 'rgba(0,0,0,0.05)', padding: '0.1rem 0.4rem', borderRadius: 4 }}>{m.meetingLink}</code>
                                 </span>
                                 <button
                                   onClick={() => copyCode(m.meetingLink)}
-                                  style={{ background: 'none', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 4, color: copiedCode === m.meetingLink ? '#34d399' : '#9ca3af', cursor: 'pointer', fontSize: '0.72rem', padding: '0.1rem 0.5rem' }}
+                                  style={{ background: 'none', border: '1px solid #111', borderRadius: 4, color: copiedCode === m.meetingLink ? '#34d399' : '#9ca3af', cursor: 'pointer', fontSize: '0.72rem', padding: '0.1rem 0.5rem' }}
                                 >
                                   {copiedCode === m.meetingLink ? '✓ Copied!' : 'Copy'}
                                 </button>
-                                <span style={{ color: '#6b7280' }}>•</span>
+                                <span style={{ color: '#777' }}>•</span>
                                 <span>Host: <strong>{m.hostId === user.id ? 'You' : m.host?.name}</strong></span>
                               </p>
-                              <p style={{ margin: 0, fontSize: '0.78rem', color: '#9ca3af', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                              <p style={{ margin: 0, fontSize: '0.78rem', color: '#555', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                                 <Clock size={12} />
                                 {m.state === 'SCHEDULED' && m.startTime
                                   ? `Scheduled for ${new Date(m.startTime).toLocaleString()}`
@@ -965,7 +966,7 @@ function DashboardContent() {
                               <button
                                   onClick={() => handleDeleteMeeting(m.id)}
                                   title="Remove from History"
-                                  style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)', padding: '0.5rem', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                                  style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)', padding: '0.5rem', borderRadius: '0', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                                 >
                                   <Trash2 size={16} />
                                 </button>
@@ -974,19 +975,19 @@ function DashboardContent() {
                                 <div style={{ display: 'flex', gap: '0.4rem' }}>
                                   <button
                                     onClick={() => handleViewTranscript(m.meetingLink)}
-                                    style={{ background: 'rgba(96,165,250,0.1)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.2)', padding: '0.5rem 0.8rem', borderRadius: '8px', cursor: 'pointer', fontSize: '0.82rem', whiteSpace: 'nowrap', fontWeight: 600 }}
+                                    style={{ background: 'rgba(96,165,250,0.1)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.2)', padding: '0.5rem 0.8rem', borderRadius: '0', cursor: 'pointer', fontSize: '0.82rem', whiteSpace: 'nowrap', fontWeight: 600 }}
                                   >
                                     📝 Transcript
                                   </button>
                                     <button
                                       onClick={(e) => { e.preventDefault(); handleViewSummary(m.meetingLink); }}
-                                      style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.2)', padding: '0.5rem 0.8rem', borderRadius: '8px', cursor: 'pointer', fontSize: '0.82rem', whiteSpace: 'nowrap', fontWeight: 600, marginLeft: '0.4rem' }}
+                                      style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.2)', padding: '0.5rem 0.8rem', borderRadius: '0', cursor: 'pointer', fontSize: '0.82rem', whiteSpace: 'nowrap', fontWeight: 600, marginLeft: '0.4rem' }}
                                     >
                                       ✨ Summary
                                     </button>
                                   <Link
                                     href={`/meeting/${m.meetingLink}/report`}
-                                    style={{ background: 'rgba(167,139,250,0.1)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)', padding: '0.5rem 0.8rem', borderRadius: '8px', cursor: 'pointer', fontSize: '0.82rem', whiteSpace: 'nowrap', fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
+                                    style={{ background: 'rgba(167,139,250,0.1)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)', padding: '0.5rem 0.8rem', borderRadius: '0', cursor: 'pointer', fontSize: '0.82rem', whiteSpace: 'nowrap', fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
                                   >
                                     📊 Report
                                   </Link>
@@ -1005,7 +1006,7 @@ function DashboardContent() {
 
                           {/* Attendance log (history only) */}
                             {activeTab === 'history' && m.participants?.length > 0 && (
-                              <details style={{ fontSize: '0.82rem', color: '#9ca3af', background: 'rgba(255,255,255,0.02)', padding: '0.5rem', borderRadius: '8px' }}>
+                              <details style={{ fontSize: '0.82rem', color: '#555', background: 'rgba(255,255,255,0.02)', padding: '0.5rem', borderRadius: '0' }}>
                                 <summary style={{ cursor: 'pointer', color: '#a78bfa', marginBottom: '0.4rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                                   <div>
                                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4, verticalAlign: 'middle' }}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
@@ -1038,12 +1039,12 @@ function DashboardContent() {
                                     const mins = Math.floor(totalMs / 60000);
                                     const timeStr = mins < 1 ? '< 1m' : (mins >= 60 ? `${Math.floor(mins/60)}h ${mins%60}m` : `${mins}m`);
                                     return (
-                                      <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(0,0,0,0.2)', padding: '0.4rem 0.6rem', borderRadius: '6px', flexWrap: 'wrap' }}>
-                                        <strong style={{ color: '#e5e7eb', flexShrink: 0 }}>{p.user?.name || 'Unknown'}</strong>
+                                      <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', padding: '0.4rem 0.6rem', borderRadius: '6px', flexWrap: 'wrap' }}>
+                                        <strong style={{ color: '#111', flexShrink: 0 }}>{p.user?.name || 'Unknown'}</strong>
                                         <RoleBadge role={p.role} />
                                         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                                          <span style={{ color: '#9ca3af', fontSize: '0.75rem' }}>
-                                            Total Time: <span style={{ color: '#f1f5f9', fontWeight: 600 }}>{timeStr}</span>
+                                          <span style={{ color: '#555', fontSize: '0.75rem' }}>
+                                            Total Time: <span style={{ color: '#111', fontWeight: 600 }}>{timeStr}</span>
                                           </span>
                                           <span style={{ color: '#64748b', fontSize: '0.7rem' }}>
                                             ({p.sessions?.length || 0} session{(p.sessions?.length || 0) !== 1 ? 's' : ''})
@@ -1060,10 +1061,10 @@ function DashboardContent() {
 
                       {/* Show more / less for history */}
                       {activeTab === 'history' && historyMeetings.length > 3 && (
-                        <div style={{ textAlign: 'center', marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                        <div style={{ textAlign: 'center', marginTop: '1rem', paddingTop: '1rem', borderTop: '2px solid #111' }}>
                           <button
                             onClick={() => setShowAllHistory(!showAllHistory)}
-                            style={{ background: 'none', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, color: '#9ca3af', cursor: 'pointer', padding: '0.5rem 1.5rem', fontSize: '0.85rem' }}
+                            style={{ background: 'none', border: '1px solid #111', borderRadius: 8, color: '#555', cursor: 'pointer', padding: '0.5rem 1.5rem', fontSize: '0.85rem' }}
                           >
                             {showAllHistory ? '▲ Show Less' : `▼ View All ${historyMeetings.length} Meetings`}
                           </button>

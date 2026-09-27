@@ -155,10 +155,10 @@ export default function NotificationBell() {
           <div style={{
             position: 'fixed', top: '1.5rem', right: '1.5rem', zIndex: 99999,
             width: 320,
-            background: 'linear-gradient(145deg, rgba(15,23,42,0.97), rgba(30,41,59,0.97))',
-            border: `1px solid ${cfg.accentBorder}`,
-            borderRadius: '16px',
-            boxShadow: `0 20px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.06)`,
+            background: 'linear-gradient(145deg, #FDFBF7, #FDFBF7)',
+            border: '2px solid #111',
+            borderRadius: '0',
+            boxShadow: '4px 4px 0 #111',
             backdropFilter: 'blur(20px)',
             animation: 'slideInRight 0.35s cubic-bezier(0.175,0.885,0.32,1.275)',
             overflow: 'hidden',
@@ -167,8 +167,8 @@ export default function NotificationBell() {
             <div style={{ display: 'flex', gap: '0.9rem', alignItems: 'flex-start', padding: '1rem 1rem 0.85rem' }}>
               {/* Icon */}
               <div style={{
-                width: 38, height: 38, borderRadius: '10px', flexShrink: 0,
-                background: cfg.iconBg, border: `1px solid ${cfg.accentBorder}`,
+                width: 38, height: 38, borderRadius: '0', flexShrink: 0,
+                background: cfg.iconBg, border: '2px solid #111',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 color: cfg.accent,
               }}>
@@ -177,10 +177,10 @@ export default function NotificationBell() {
 
               {/* Text */}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ margin: '0 0 0.2rem', fontWeight: 700, color: '#f1f5f9', fontSize: '0.9rem', letterSpacing: '0.01em' }}>
+                <p style={{ margin: '0 0 0.2rem', fontWeight: 700, color: '#111', fontSize: '0.9rem', letterSpacing: '0.01em' }}>
                   {cfg.title}
                 </p>
-                <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.82rem', lineHeight: 1.45 }}>
+                <p style={{ margin: 0, color: '#666', fontSize: '0.82rem', lineHeight: 1.45 }}>
                   {toast.message}
                 </p>
               </div>
@@ -221,7 +221,7 @@ export default function NotificationBell() {
           style={{
             position: 'relative', background: open ? 'rgba(96,165,250,0.15)' : 'rgba(255,255,255,0.07)',
             border: `1px solid ${open ? 'rgba(96,165,250,0.4)' : 'rgba(255,255,255,0.1)'}`,
-            color: open ? '#60a5fa' : '#e2e8f0', padding: '0.45rem 0.55rem', borderRadius: '8px',
+            color: open ? '#60a5fa' : '#e2e8f0', padding: '0.45rem 0.55rem', borderRadius: '0',
             cursor: 'pointer', display: 'flex', alignItems: 'center', transition: 'all 0.2s'
           }}
           title="Invitations"
@@ -245,17 +245,17 @@ export default function NotificationBell() {
           <div style={{
             position: 'absolute', right: 0, top: 'calc(100% + 10px)',
             width: 360, maxHeight: 480, overflowY: 'auto',
-            background: 'linear-gradient(135deg, rgba(15,23,42,0.98), rgba(30,41,59,0.98))',
-            border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: '16px', zIndex: 9998,
-            boxShadow: '0 20px 60px -10px rgba(0,0,0,0.7), 0 0 0 1px rgba(96,165,250,0.05)',
+            background: 'linear-gradient(135deg, #FDFBF7, #FDFBF7)',
+            border: '2px solid #111',
+            borderRadius: '0', zIndex: 9998,
+            boxShadow: '4px 4px 0 #111',
             backdropFilter: 'blur(20px)',
           }}>
             {/* Header */}
-            <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ padding: '1rem 1.25rem', borderBottom: '2px solid #111', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <Bell size={16} style={{ color: '#60a5fa' }} />
-                <span style={{ fontWeight: 700, color: '#f1f5f9', fontSize: '0.95rem' }}>Organization Invitations</span>
+                <span style={{ fontWeight: 700, color: '#111', fontSize: '0.95rem' }}>Organization Invitations</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 {count > 0 && (
@@ -263,7 +263,7 @@ export default function NotificationBell() {
                     {count} pending
                   </span>
                 )}
-                <button onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', padding: 0, display: 'flex' }}>
+                <button onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', color: '#777', cursor: 'pointer', padding: 0, display: 'flex' }}>
                   <X size={16} />
                 </button>
               </div>
@@ -271,7 +271,7 @@ export default function NotificationBell() {
 
             {/* Body */}
             {count === 0 ? (
-              <div style={{ padding: '2.5rem 1.25rem', textAlign: 'center', color: '#6b7280' }}>
+              <div style={{ padding: '2.5rem 1.25rem', textAlign: 'center', color: '#777' }}>
                 <Bell size={32} style={{ margin: '0 auto 0.75rem', opacity: 0.4 }} />
                 <p style={{ margin: 0, fontSize: '0.9rem' }}>No pending invitations</p>
               </div>
@@ -282,23 +282,23 @@ export default function NotificationBell() {
                   const isLoading = !!state;
                   return (
                     <div key={inv.token} style={{
-                      padding: '1rem', borderRadius: '12px', marginBottom: '0.35rem',
-                      background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
+                      padding: '1rem', borderRadius: '0', marginBottom: '0.35rem',
+                      background: '#fff', border: '1px solid #111',
                       transition: 'background 0.15s',
                     }}>
                       {/* Org info */}
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', marginBottom: '0.85rem' }}>
-                        <div style={{ width: 40, height: 40, borderRadius: '10px', background: 'rgba(96,165,250,0.12)', border: '1px solid rgba(96,165,250,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <div style={{ width: 40, height: 40, borderRadius: '0', background: 'rgba(96,165,250,0.12)', border: '1px solid rgba(96,165,250,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                           <Building2 size={18} style={{ color: '#60a5fa' }} />
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <p style={{ margin: 0, fontWeight: 700, color: '#f1f5f9', fontSize: '0.92rem', marginBottom: '0.2rem' }}>
+                          <p style={{ margin: 0, fontWeight: 700, color: '#111', fontSize: '0.92rem', marginBottom: '0.2rem' }}>
                             {inv.organization?.name || inv.organizationName}
                           </p>
-                          <p style={{ margin: 0, color: '#9ca3af', fontSize: '0.8rem' }}>
-                            Invited by <strong style={{ color: '#cbd5e1' }}>{inv.organization?.owner?.name || inv.invitedBy}</strong>
+                          <p style={{ margin: 0, color: '#555', fontSize: '0.8rem' }}>
+                            Invited by <strong style={{ color: '#444' }}>{inv.organization?.owner?.name || inv.invitedBy}</strong>
                           </p>
-                          <p style={{ margin: '0.25rem 0 0', color: '#6b7280', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                          <p style={{ margin: '0.25rem 0 0', color: '#777', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                             <Clock size={11} /> {timeAgo(inv.createdAt)}
                           </p>
                         </div>
@@ -310,7 +310,7 @@ export default function NotificationBell() {
                           onClick={() => handleAccept(inv.token)}
                           disabled={isLoading}
                           style={{
-                            flex: 1, padding: '0.55rem', borderRadius: '8px',
+                            flex: 1, padding: '0.55rem', borderRadius: '0',
                             background: isLoading ? 'rgba(16,185,129,0.07)' : 'rgba(16,185,129,0.15)',
                             border: '1px solid rgba(16,185,129,0.3)',
                             color: '#34d399', fontWeight: 700, cursor: isLoading ? 'not-allowed' : 'pointer',
@@ -324,7 +324,7 @@ export default function NotificationBell() {
                           onClick={() => handleDecline(inv.token)}
                           disabled={isLoading}
                           style={{
-                            flex: 1, padding: '0.55rem', borderRadius: '8px',
+                            flex: 1, padding: '0.55rem', borderRadius: '0',
                             background: isLoading ? 'rgba(239,68,68,0.04)' : 'rgba(239,68,68,0.08)',
                             border: '1px solid rgba(239,68,68,0.2)',
                             color: '#f87171', fontWeight: 700, cursor: isLoading ? 'not-allowed' : 'pointer',
@@ -342,7 +342,7 @@ export default function NotificationBell() {
             )}
 
             {/* Footer hint */}
-            <div style={{ padding: '0.75rem 1.25rem', borderTop: '1px solid rgba(255,255,255,0.06)', textAlign: 'center' }}>
+            <div style={{ padding: '0.75rem 1.25rem', borderTop: '2px solid #111', textAlign: 'center' }}>
               <p style={{ margin: 0, fontSize: '0.72rem', color: '#4b5563' }}>Invitations expire after 7 days</p>
             </div>
           </div>
