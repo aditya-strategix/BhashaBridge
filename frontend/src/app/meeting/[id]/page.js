@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import useAuthStore from '../../../stores/authStore';
 import styles from './meeting.module.css';
+import './theme.css';
 
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
@@ -28,21 +29,21 @@ const LANG_OPTIONS = [
 ];
 
 // -------- Avatar initial --------
-function Avatar({ name, size = 36, color = '#3b82f6' }) {
+function Avatar({ name, size = 36, color = '#0022FF', avatarUrl }) {
   return (
     <div style={{
       width: size, height: size, borderRadius: '50%',
       background: color, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontWeight: 700, fontSize: size * 0.38, color: 'white', flexShrink: 0,
-      border: '2px solid rgba(255,255,255,0.15)',
+      fontWeight: 700, fontSize: size * 0.38, color: '#F7F5F0', flexShrink: 0,
+      border: '2px solid #0A0A0A',
     }}>
-      {(name || '?').charAt(0).toUpperCase()}
+      {avatarUrl ? <img src={avatarUrl} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : (name || '?').charAt(0).toUpperCase()}
     </div>
   );
 }
 
 // -------- Video peer tile --------
-const VideoPeer = ({ peer, name, isAudioOn = true, isVideoOn = true }) => {
+const VideoPeer = ({ peer, name, isAudioOn = true, isVideoOn = true, avatarUrl }) => {
   const ref = useRef();
   useEffect(() => {
     peer.on('stream', stream => { if (ref.current) ref.current.srcObject = stream; });
@@ -51,15 +52,15 @@ const VideoPeer = ({ peer, name, isAudioOn = true, isVideoOn = true }) => {
     <div className={`${styles.videoTile} ${isAudioOn ? styles.activeSpeaker : ''}`}>
       <video playsInline autoPlay ref={ref} className={styles.video} />
       {!isVideoOn && (
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
-          <Avatar name={name ? name.split(' (')[0] : 'P'} size={60} color="var(--cobalt, #3b82f6)" />
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F7F5F0' }}>
+          <Avatar name={name ? name.split(' (')[0] : 'P'} size={60} color="#0022FF" avatarUrl={avatarUrl} />
         </div>
       )}
       <div className={styles.tileOverlay}>
         <span className={styles.tileName}>{name || 'Participant'}</span>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          {!isAudioOn && <MicOff size={16} color="var(--vermilion, #ef4444)" />}
-          {!isVideoOn && <VideoOff size={16} color="var(--vermilion, #ef4444)" />}
+          {!isAudioOn && <MicOff size={16} color="var(--vermilion, #FF3311)" />}
+          {!isVideoOn && <VideoOff size={16} color="var(--vermilion, #FF3311)" />}
         </div>
       </div>
     </div>
@@ -68,6 +69,7 @@ const VideoPeer = ({ peer, name, isAudioOn = true, isVideoOn = true }) => {
 
 // -------- Main Component --------
 export default function MeetingRoom() {
+
   const params = useParams();
   const { id: meetingId } = params;
   const router = useRouter();
@@ -148,7 +150,7 @@ export default function MeetingRoom() {
   const createPeer = (userToSignal, callerID, stream, currentSocket, userName, userRole) => {
     const peer = new Peer({ initiator: true, trickle: false, stream, config: iceServers });
     peer.on('signal', signal => {
-      currentSocket.emit('audio:signal', { targetSocketId: userToSignal, callerId: callerID, signal, name: userName, role: userRole, userId: user.id });
+      currentSocket.emit('audio:signal', { targetSocketId: userToSignal, callerId: callerID, signal, name: userName, role: userRole, userId: user.id, avatar: user.avatar });
     });
     return peer;
   };
@@ -156,7 +158,7 @@ export default function MeetingRoom() {
   const addPeer = (incomingSignal, callerID, stream, currentSocket, userName, userRole) => {
     const peer = new Peer({ initiator: false, trickle: false, stream, config: iceServers });
     peer.on('signal', signal => {
-      currentSocket.emit('audio:signal', { signal, targetSocketId: callerID, callerId: currentSocket.id, name: userName, role: userRole, userId: user.id });
+      currentSocket.emit('audio:signal', { signal, targetSocketId: callerID, callerId: currentSocket.id, name: userName, role: userRole, userId: user.id, avatar: user.avatar });
     });
     peer.signal(incomingSignal);
     return peer;
@@ -181,6 +183,7 @@ export default function MeetingRoom() {
         const data = await res.json();
         setParticipantStatus(data.participantStatus);
         setParticipantRole(data.participantRole);
+        if (data.waitingUsers) setWaitingUsers(data.waitingUsers);
 
         let currentStream;
         try {
@@ -214,8 +217,8 @@ export default function MeetingRoom() {
               setPeers(prev => prev.map(p => p.userId === userId ? { ...p, role } : p));
             }
           });
-          newSocket.on('waiting:request', ({ userId, name }) => {
-          setWaitingUsers(prev => prev.some(u => u.userId === userId) ? prev : [...prev, { userId, name }]);
+          newSocket.on('waiting:request', ({ userId, name, avatar }) => {
+          setWaitingUsers(prev => prev.some(u => u.userId === userId) ? prev : [...prev, { userId, name, avatar }]);
           // Auto-show lobby panel for host
           setShowLobby(true);
         });
@@ -232,10 +235,10 @@ export default function MeetingRoom() {
           if (userId === user.id) setParticipantStatus('REJECTED');
           else setWaitingUsers(prev => prev.filter(u => u.userId !== userId));
         });
-        newSocket.on('participant:joined', ({ userId, socketId, name, role }) => {
+        newSocket.on('participant:joined', ({ userId, socketId, name, role, avatar }) => {
           newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current });
           const peer = createPeer(socketId, newSocket.id, currentStream, newSocket, user.name, data.participantRole);
-          peersRef.current.push({ peerID: socketId, userId, peer, name, role });
+          peersRef.current.push({ peerID: socketId, userId, peer, name, role, avatar });
           setPeers([...peersRef.current]);
         });
         newSocket.on('participant:left', ({ socketId }) => {
@@ -250,7 +253,7 @@ export default function MeetingRoom() {
             item.peer.signal(payload.signal);
           } else {
             const peer = addPeer(payload.signal, payload.callerId, currentStream, newSocket, user.name, data.participantRole);
-            peersRef.current.push({ peerID: payload.callerId, userId: payload.userId, peer, name: payload.name, role: payload.role });
+            peersRef.current.push({ peerID: payload.callerId, userId: payload.userId, peer, name: payload.name, role: payload.role, avatar: payload.avatar });
             setPeers([...peersRef.current]);
           }
         });
@@ -512,13 +515,13 @@ export default function MeetingRoom() {
   // ======= REJECTED SCREEN =======
   if (participantStatus === 'REJECTED') {
     return (
-      <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', background: 'radial-gradient(ellipse at center, #1a0a0a 0%, #0f172a 100%)', gap: '1.5rem' }}>
-        <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(239,68,68,0.15)', border: '2px solid rgba(239,68,68,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <UserX size={36} color="#ef4444" />
+      <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', background: '#F7F5F0', gap: '1.5rem', border: '2px solid #0A0A0A', margin: '2rem' }}>
+        <div style={{ width: 80, height: 80, borderRadius: '0', background: '#0A0A0A', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '8px 8px 0 #FF3311' }}>
+          <UserX size={36} color="#F7F5F0" />
         </div>
-        <h2 style={{ color: 'var(--text-primary)', margin: 0, fontSize: '1.5rem' }}>Access Denied</h2>
-        <p style={{ color: '#9ca3af', margin: 0 }}>The host declined your request to join this meeting.</p>
-        <button onClick={() => router.push('/dashboard')} style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '0.75rem 2rem', borderRadius: '10px', fontWeight: 600, cursor: 'pointer', fontSize: '0.95rem' }}>
+        <h2 style={{ color: '#0A0A0A', margin: 0, fontSize: '3rem', fontFamily: 'var(--font-serif)', fontStyle: 'italic', letterSpacing: '-0.02em' }}>Access Denied</h2>
+        <p style={{ color: '#5A5A5A', margin: 0, fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>The host declined your request to join this meeting.</p>
+        <button onClick={() => router.push('/dashboard')} style={{ background: '#0022FF', color: 'white', border: 'none', padding: '1rem 2rem', borderRadius: '0', fontWeight: 600, cursor: 'pointer', fontSize: '1rem', marginTop: '1rem', boxShadow: '4px 4px 0 rgba(10,10,10,1)', fontFamily: 'var(--font-grotesk)' }}>
           Back to Dashboard
         </button>
       </div>
@@ -528,31 +531,29 @@ export default function MeetingRoom() {
   // ======= WAITING ROOM =======
   if (participantStatus === 'WAITING') {
     return (
-      <div style={{ display: 'flex', height: '100vh', background: 'radial-gradient(ellipse at 30% 20%, rgba(59,130,246,0.08) 0%, #0f172a 60%)', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', height: '100vh', background: '#F7F5F0', overflow: 'hidden' }}>
 
-        {/* Left — camera preview */}
+        {/* Left - camera preview */}
         <div style={{ flex: '0 0 55%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3rem' }}>
           <div style={{ width: '100%', maxWidth: 560, position: 'relative' }}>
             {/* Video card */}
-            <div style={{ position: 'relative', borderRadius: '20px', overflow: 'hidden', background: '#0a0f1e', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 40px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(59,130,246,0.1)', aspectRatio: '16/9' }}>
+            <div style={{ position: 'relative', borderRadius: '0', overflow: 'hidden', background: '#000', border: '2px solid #0A0A0A', boxShadow: '12px 12px 0 rgba(10,10,10,1)', aspectRatio: '16/9' }}>
               <video playsInline muted ref={userVideo} autoPlay style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               {!isVideoOn && (
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0a0f1e' }}>
-                  <Avatar name={user.name} size={72} color="#3b82f6" />
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
+                  <Avatar name={user.name} size={72} color="#0022FF" avatarUrl={user.avatar} />
                 </div>
               )}
-              {/* Gradient overlay at bottom */}
-              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '40%', background: 'linear-gradient(to top, rgba(0,0,0,0.7), transparent)' }} />
               {/* Name badge */}
-              <div style={{ position: 'absolute', bottom: 16, left: 16, fontSize: '0.88rem', fontWeight: 600, color: 'white', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', padding: '0.3rem 0.7rem', borderRadius: '999px', border: '1px solid rgba(255,255,255,0.15)' }}>
+              <div style={{ position: 'absolute', bottom: 16, left: 16, fontSize: '0.88rem', fontWeight: 600, color: '#F7F5F0', background: '#0A0A0A', padding: '0.3rem 0.7rem', borderRadius: '0', border: 'none', fontFamily: 'var(--font-mono)' }}>
                 {user.name} (You)
               </div>
               {/* Controls overlay */}
               <div style={{ position: 'absolute', bottom: 16, right: 16, display: 'flex', gap: '0.6rem' }}>
-                <button onClick={toggleAudio} style={{ width: 42, height: 42, borderRadius: '50%', border: 'none', background: isAudioOn ? 'rgba(255,255,255,0.15)' : '#ef4444', backdropFilter: 'blur(8px)', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}>
+                <button onClick={toggleAudio} style={{ width: 42, height: 42, borderRadius: '0', border: 'none', background: isAudioOn ? '#F7F5F0' : '#FF3311', color: isAudioOn ? '#0A0A0A' : 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
                   {isAudioOn ? <Mic size={18} /> : <MicOff size={18} />}
                 </button>
-                <button onClick={toggleVideo} style={{ width: 42, height: 42, borderRadius: '50%', border: 'none', background: isVideoOn ? 'rgba(255,255,255,0.15)' : '#ef4444', backdropFilter: 'blur(8px)', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}>
+                <button onClick={toggleVideo} style={{ width: 42, height: 42, borderRadius: '0', border: 'none', background: isVideoOn ? '#F7F5F0' : '#FF3311', color: isVideoOn ? '#0A0A0A' : 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
                   {isVideoOn ? <Video size={18} /> : <VideoOff size={18} />}
                 </button>
               </div>
@@ -560,35 +561,28 @@ export default function MeetingRoom() {
           </div>
         </div>
 
-        {/* Right — waiting info */}
-        <div style={{ flex: '0 0 45%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3rem', borderLeft: '1px solid rgba(255,255,255,0.05)' }}>
+        {/* Right - waiting info */}
+        <div style={{ flex: '0 0 45%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3rem', borderLeft: '2px solid #0A0A0A' }}>
           <div style={{ maxWidth: 380, width: '100%' }}>
-            {/* Pulsing icon */}
-            <div style={{ position: 'relative', width: 72, height: 72, marginBottom: '2rem' }}>
-              <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'rgba(59,130,246,0.2)', animation: 'ping 1.5s cubic-bezier(0,0,0.2,1) infinite' }} />
-              <div style={{ position: 'relative', width: '100%', height: '100%', borderRadius: '50%', background: 'rgba(59,130,246,0.15)', border: '1.5px solid rgba(59,130,246,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <UserCheck size={30} color="#60a5fa" />
-              </div>
-            </div>
-
-            <h1 style={{ margin: '0 0 0.75rem', color: 'var(--text-primary)', fontSize: '1.75rem', fontWeight: 700, lineHeight: 1.2 }}>
-              Waiting for host to let you in
+            
+            <h1 style={{ margin: '0 0 0.75rem', color: '#0A0A0A', fontSize: '2.5rem', fontWeight: 600, lineHeight: 1.1, fontFamily: 'var(--font-serif)', fontStyle: 'italic' }}>
+              Waiting to Connect
             </h1>
-            <p style={{ margin: '0 0 2.5rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '0.95rem', lineHeight: 1.6 }}>
+            <p style={{ margin: '0 0 2.5rem', color: '#5A5A5A', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', lineHeight: 1.6, textTransform: 'uppercase' }}>
               The host will admit you shortly. You will join automatically once admitted.
             </p>
 
             {/* Status indicator */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.9rem 1.2rem', background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.15)', borderRadius: '0', marginBottom: '1.5rem' }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#60a5fa', animation: 'pulse 2s infinite' }} />
-              <span style={{ color: '#93c5fd', fontSize: '0.88rem' }}>Waiting in lobby — meeting: <strong>{meetingId}</strong></span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '1rem', background: 'transparent', border: '2px solid #0A0A0A', borderRadius: '0', marginBottom: '1.5rem', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
+              <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#0022FF', animation: 'pulse 2s infinite' }} />
+              <span style={{ color: '#0A0A0A', fontSize: '0.85rem', fontFamily: 'var(--font-mono)' }}>Lobby <strong>{meetingId}</strong></span>
             </div>
 
             <button
               onClick={() => router.push('/dashboard')}
-              style={{ width: '100%', padding: '0.875rem', background: 'rgba(239,68,68,0.08)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0', fontWeight: 600, cursor: 'pointer', fontSize: '0.95rem', transition: 'all 0.2s' }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.14)'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.08)'; }}
+              style={{ width: '100%', padding: '1rem', background: '#0A0A0A', color: '#F7F5F0', border: 'none', borderRadius: '0', fontWeight: 600, cursor: 'pointer', fontSize: '0.95rem', transition: 'transform 0.2s', boxShadow: '4px 4px 0 #FF3311', fontFamily: 'var(--font-grotesk)' }}
+              onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; }}
+              onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
             >
               Leave Waiting Room
             </button>
@@ -603,78 +597,80 @@ export default function MeetingRoom() {
     <div className={styles.container}>
 
       {/* === LOBBY PANEL (Host only, floating overlay) === */}
-      {isHostOrCoHost && waitingUsers.length > 0 && showLobby && (
-        <div style={{
-          position: 'fixed', top: '5rem', right: '370px', zIndex: 500,
-          width: 300, background: 'rgba(0,0,0,0.8)',
-          border: '1px solid var(--vermilion, #ff4500)', borderRadius: '0',
-          backdropFilter: 'blur(20px)', overflow: 'hidden', fontFamily: 'var(--font-grotesk)'
-        }}>
-          <div style={{ padding: '1rem', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--vermilion, #ff4500)', animation: 'pulse 1.5s infinite' }} />
-              <span style={{ fontWeight: 400, color: 'white', fontSize: '0.9rem' }}>Lobby ({waitingUsers.length})</span>
-            </div>
-            <button onClick={() => setShowLobby(false)} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '1.1rem' }}>×</button>
-          </div>
-          <div style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: 300, overflowY: 'auto' }}>
-            {waitingUsers.map(w => (
-              <div key={w.userId} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem', background: 'transparent', borderRadius: 0, borderBottom: '1px solid var(--text-primary)' }}>
-                <Avatar name={w.name} size={34} color="#4b5563" />
-                <span style={{ flex: 1, color: 'var(--text-primary)', fontSize: '0.85rem', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
-                <button onClick={() => handleAdmit(w.userId)} title="Admit" style={{ width: 30, height: 30, borderRadius: '0', background: 'var(--cobalt)', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <UserCheck size={15} />
-                </button>
-                <button onClick={() => handleReject(w.userId)} title="Reject" style={{ width: 30, height: 30, borderRadius: '0', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <UserX size={15} />
-                </button>
+        {isHostOrCoHost && waitingUsers.length > 0 && showLobby && (
+          <div style={{
+            position: 'fixed', top: '5rem', right: '1rem', zIndex: 500,
+            width: 340, background: '#F7F5F0',
+            border: '2px solid #0A0A0A', borderRadius: '0',
+            boxShadow: '8px 8px 0 rgba(10,10,10,1)', overflow: 'hidden', fontFamily: 'var(--font-grotesk)'
+          }}>
+            <div style={{ padding: '1rem', borderBottom: '2px solid #0A0A0A', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0A0A0A' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <div style={{ width: 10, height: 10, borderRadius: '0', background: '#FF3311', animation: 'pulse 1.5s infinite' }} />
+                <span style={{ fontWeight: 600, color: '#F7F5F0', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Lobby ({waitingUsers.length})</span>
               </div>
-            ))}
+              <button onClick={() => setShowLobby(false)} style={{ background: 'none', border: 'none', color: '#F7F5F0', cursor: 'pointer', fontSize: '1.2rem', fontWeight: 600 }}>&times;</button>
+            </div>
+            <div style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: 350, overflowY: 'auto' }}>
+              {waitingUsers.map(w => (
+                <div key={w.userId} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0', borderBottom: '1px solid #0A0A0A' }}>
+                  <Avatar name={w.name} size={34} color="#0022FF" avatarUrl={w.avatar} />
+                  <span style={{ flex: 1, color: '#0A0A0A', fontSize: '0.9rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
+                  <div style={{ display: 'flex', gap: '0.4rem' }}>
+                    <button onClick={() => handleAdmit(w.userId)} title="Admit" style={{ width: 34, height: 34, borderRadius: '0', background: '#0022FF', border: '2px solid #0A0A0A', color: '#F7F5F0', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '2px 2px 0 rgba(10,10,10,1)', transition: 'transform 0.1s' }} onMouseEnter={e => e.currentTarget.style.transform='translateY(-1px)'} onMouseLeave={e => e.currentTarget.style.transform='none'}>
+                      <UserCheck size={16} />
+                    </button>
+                    <button onClick={() => handleReject(w.userId)} title="Reject" style={{ width: 34, height: 34, borderRadius: '0', background: '#FF3311', border: '2px solid #0A0A0A', color: '#F7F5F0', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '2px 2px 0 rgba(10,10,10,1)', transition: 'transform 0.1s' }} onMouseEnter={e => e.currentTarget.style.transform='translateY(-1px)'} onMouseLeave={e => e.currentTarget.style.transform='none'}>
+                      <UserX size={16} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* === HEADER === */}
-      <header className={styles.header}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--vermilion, #ff4500)' }} />
-            <span className={styles.headerTitle}>BhashaBridge</span>
+        {/* === HEADER === */}
+        <header style={{ position: 'absolute', top: 0, left: 0, right: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 2rem', background: '#F7F5F0', borderBottom: '2px solid #0A0A0A', zIndex: 10, fontFamily: 'var(--font-grotesk)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <div style={{ width: 12, height: 12, borderRadius: '0', background: '#FF3311' }} />
+              <span style={{ fontWeight: 600, color: '#0A0A0A', fontSize: '1.5rem', fontFamily: 'var(--font-serif)', fontStyle: 'italic', letterSpacing: '-0.02em' }}>BhashaBridge</span>
+            </div>
+            <div style={{ height: 24, width: 2, background: '#0A0A0A' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.9rem', color: '#0022FF', fontWeight: 600 }}>{meetingId}</code>
+              {participantRole && (
+                <span style={{ background: participantRole === 'HOST' ? '#FF3311' : '#0022FF', color: '#F7F5F0', padding: '0.25rem 0.5rem', fontSize: '0.7rem', fontWeight: 700, fontFamily: 'var(--font-mono)', border: '2px solid #0A0A0A', boxShadow: '2px 2px 0 rgba(10,10,10,1)' }}>
+                  {participantRole}
+                </span>
+              )}
+            </div>
           </div>
-          <div style={{ height: 16, width: 1, background: 'rgba(255,255,255,0.2)' }} />
-          <code className={styles.headerBadge}>
-            {meetingId}
-          </code>
-          {participantRole && (
-            <span className={styles.headerBadge} style={{ color: participantRole === 'HOST' ? 'var(--vermilion, #ff4500)' : 'var(--cobalt, #a3c4f3)' }}>
-              {participantRole}
-            </span>
-          )}
-        </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          {isHostOrCoHost && waitingUsers.length > 0 && (
-            <button
-              onClick={() => setShowLobby(l => !l)}
-              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: 'var(--vermilion, #ff4500)', cursor: 'pointer', fontFamily: 'var(--font-grotesk)', fontSize: '0.9rem' }}
-            >
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--vermilion, #ff4500)', animation: 'pulse 1s infinite' }} />
-              Lobby ({waitingUsers.length})
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            {isHostOrCoHost && waitingUsers.length > 0 && (
+              <button
+                onClick={() => setShowLobby(l => !l)}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#F7F5F0', border: '2px solid #0A0A0A', color: '#0A0A0A', cursor: 'pointer', fontFamily: 'var(--font-grotesk)', fontSize: '0.9rem', padding: '0.5rem 1rem', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}
+              >
+                <div style={{ width: 8, height: 8, borderRadius: '0', background: '#FF3311', animation: 'pulse 1s infinite' }} />
+                <span style={{ fontWeight: 700 }}>Lobby ({waitingUsers.length})</span>
+              </button>
+            )}
+            <button onClick={fetchLiveSummary} style={{ background: '#F7F5F0', border: '2px solid #0A0A0A', color: '#0A0A0A', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.9rem', padding: '0.5rem 1rem', boxShadow: '4px 4px 0 rgba(10,10,10,1)', fontWeight: 600 }}>
+              ✨ Summary
             </button>
-          )}
-          <button onClick={fetchLiveSummary} style={{ background: 'transparent', border: 'none', color: 'var(--cobalt, #a3c4f3)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.9rem' }}>
-            ✨ Summary
-          </button>
-          <button onClick={() => setShowSettings(true)} style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.9rem' }}>
-            <Settings size={16} /> Settings
-          </button>
-          <button onClick={() => setIsDemoActive(!isDemoActive)} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '999px', color: isDemoActive ? 'var(--vermilion, #ff4500)' : 'white', padding: '0.4rem 1rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.8rem', textTransform: 'uppercase' }}>
-            {isDemoActive ? 'Stop Demo' : 'Start Demo'}
-          </button>
-        </div>
-      </header>
+            <button onClick={() => setShowSettings(true)} style={{ background: '#0A0A0A', border: '2px solid #0A0A0A', color: '#F7F5F0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.9rem', padding: '0.5rem 1rem', boxShadow: '4px 4px 0 rgba(10,10,10,1)', fontWeight: 600 }}>
+              <Settings size={16} /> Settings
+            </button>
+            <button onClick={() => setIsDemoActive(!isDemoActive)} style={{ background: isDemoActive ? '#FF3311' : '#0022FF', border: '2px solid #0A0A0A', color: '#F7F5F0', padding: '0.5rem 1.5rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
+              {isDemoActive ? 'Stop Demo' : 'Start Demo'}
+            </button>
+          </div>
+        </header>
 
-      <main className={styles.main}>
+        <main className={styles.main}>
         {/* === VIDEO AREA === */}
         <div className={styles.videoSection}>
           <div className={styles.videoGrid} data-count={peers.length + 1}>
@@ -682,20 +678,20 @@ export default function MeetingRoom() {
             <div className={`${styles.videoTile} ${isAudioOn ? styles.activeSpeaker : ''}`}>
               <video muted ref={userVideo} autoPlay playsInline className={styles.video} />
               {!isVideoOn && (
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
-                  <Avatar name={user.name} size={60} color="var(--cobalt, #3b82f6)" />
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F7F5F0' }}>
+                  <Avatar name={user.name} size={60} color="#0022FF" avatarUrl={user.avatar} />
                 </div>
               )}
               <div className={styles.tileOverlay}>
                 <span className={styles.tileName}>{user.name} (You)</span>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  {!isAudioOn && <MicOff size={16} color="var(--vermilion, #ef4444)" />}
-                  {!isVideoOn && <VideoOff size={16} color="var(--vermilion, #ef4444)" />}
+                  {!isAudioOn && <MicOff size={16} color="var(--vermilion, #FF3311)" />}
+                  {!isVideoOn && <VideoOff size={16} color="var(--vermilion, #FF3311)" />}
                 </div>
               </div>
             </div>
             {peers.map((peer, i) => (
-              <VideoPeer key={i} peer={peer.peer} name={`${peer.name || `Participant ${i + 1}`}`} isAudioOn={peer.isAudioOn} isVideoOn={peer.isVideoOn} />
+              <VideoPeer key={i} peer={peer.peer} name={`${peer.name || `Participant ${i + 1}`}`} isAudioOn={peer.isAudioOn} isVideoOn={peer.isVideoOn} avatarUrl={peer.avatar} />
             ))}
           </div>
 
@@ -707,25 +703,26 @@ export default function MeetingRoom() {
           )}
 
           {/* Controls bar */}
-          <div style={{ position: 'absolute', bottom: '2rem', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '1rem', padding: '0.75rem 1.5rem', background: 'var(--bg-ivory)', borderRadius: '0', border: 'var(--border-thick)', boxShadow: '8px 8px 0 rgba(10,10,10,1)', zIndex: 150 }}>
+          <div style={{ position: 'absolute', bottom: '2rem', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '0.75rem', padding: '0.75rem 1rem', background: '#F7F5F0', border: '2px solid #0A0A0A', boxShadow: '8px 8px 0 rgba(10,10,10,1)', zIndex: 150 }}>
             <button
               onClick={toggleAudio}
               title={isAudioOn ? 'Mute' : 'Unmute'}
-              style={{ width: 48, height: 48, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.3s', background: isAudioOn ? 'transparent' : 'var(--vermilion, #ff4500)', color: 'white' }}
+              style={{ width: 48, height: 48, borderRadius: '0', border: '2px solid #0A0A0A', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.1s', background: isAudioOn ? 'transparent' : '#FF3311', color: isAudioOn ? '#0A0A0A' : 'white' }}
             >
               {isAudioOn ? <Mic size={20} /> : <MicOff size={20} />}
             </button>
             <button
               onClick={toggleVideo}
               title={isVideoLocked ? 'Camera disabled by Host' : (isVideoOn ? 'Turn off camera' : 'Turn on camera')}
-              style={{ opacity: isVideoLocked ? 0.5 : 1, cursor: isVideoLocked ? 'not-allowed' : 'pointer', width: 48, height: 48, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.3s', background: isVideoOn ? 'transparent' : 'var(--vermilion, #ff4500)', color: 'white' }}
+              disabled={isVideoLocked}
+              style={{ width: 48, height: 48, borderRadius: '0', border: '2px solid #0A0A0A', cursor: isVideoLocked ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.1s', background: isVideoOn ? 'transparent' : '#FF3311', color: isVideoOn ? '#0A0A0A' : 'white', opacity: isVideoLocked ? 0.5 : 1 }}
             >
               {isVideoOn ? <Video size={20} /> : <VideoOff size={20} />}
             </button>
             <button
               onClick={() => setSidebarTab(t => t === 'CHAT' ? null : 'CHAT')}
-              title="Chat / Members"
-              style={{ width: 48, height: 48, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: sidebarTab === 'CHAT' ? 'rgba(255,255,255,0.2)' : 'transparent', color: 'white' }}
+              title="Chat"
+              style={{ width: 48, height: 48, borderRadius: '0', border: '2px solid #0A0A0A', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: sidebarTab === 'CHAT' ? '#0022FF' : 'transparent', color: sidebarTab === 'CHAT' ? 'white' : '#0A0A0A' }}
             >
               <MessageSquare size={20} />
             </button>
@@ -734,39 +731,39 @@ export default function MeetingRoom() {
                 <button
                   onClick={() => setShowMoreMenu(m => !m)}
                   title="More Controls"
-                  style={{ width: 48, height: 48, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: showMoreMenu ? 'rgba(255,255,255,0.2)' : 'transparent', color: 'white', transition: 'all 0.3s' }}
+                  style={{ width: 48, height: 48, borderRadius: '0', border: '2px solid #0A0A0A', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: showMoreMenu ? '#0A0A0A' : 'transparent', color: showMoreMenu ? '#F7F5F0' : '#0A0A0A', transition: 'all 0.1s' }}
                 >
                   <MoreVertical size={20} />
                 </button>
                 {showMoreMenu && (
-                  <div style={{ position: 'absolute', bottom: 60, left: '50%', transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.8)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '0', padding: '0.5rem', minWidth: 220, backdropFilter: 'blur(20px)', zIndex: 100, fontFamily: 'var(--font-grotesk)' }}>
-                    <button onClick={() => { if(socket) socket.emit('meeting:force_mute_all', { role: participantRole }); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: 'var(--vermilion, #ff4500)', cursor: 'pointer', fontSize: '0.9rem' }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
-                      <MicOff size={16} /> Mute All
+                  <div style={{ position: 'absolute', bottom: 60, left: '50%', transform: 'translateX(-50%)', background: '#F7F5F0', border: '2px solid #0A0A0A', borderRadius: '0', padding: '0.5rem', minWidth: 220, zIndex: 100, fontFamily: 'var(--font-grotesk)', boxShadow: '8px 8px 0 rgba(10,10,10,1)' }}>
+                    <button onClick={() => { if(socket) socket.emit('meeting:force_mute_all', { role: participantRole }); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: '#0A0A0A', cursor: 'pointer', fontSize: '0.9rem', textAlign: 'left' }} onMouseEnter={e => e.currentTarget.style.background='rgba(10,10,10,0.05)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
+                      <MicOff size={16} color="#FF3311" /> Mute All
                     </button>
-                    <button onClick={() => { if(socket) socket.emit('meeting:force_video_off_all', { role: participantRole }); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: 'var(--vermilion, #ff4500)', cursor: 'pointer', fontSize: '0.9rem' }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
-                      <VideoOff size={16} /> Turn Off All Cameras
+                    <button onClick={() => { if(socket) socket.emit('meeting:force_video_off_all', { role: participantRole }); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: '#0A0A0A', cursor: 'pointer', fontSize: '0.9rem', textAlign: 'left' }} onMouseEnter={e => e.currentTarget.style.background='rgba(10,10,10,0.05)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
+                      <VideoOff size={16} color="#FF3311" /> Turn Off All Cameras
                     </button>
                     <button onClick={() => {
                       const newLock = !roomAudioLocked;
                       setRoomAudioLocked(newLock);
                       if(socket) socket.emit('meeting:lock_hardware', { role: participantRole, type: 'audio', locked: newLock });
                       setShowMoreMenu(false);
-                    }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: roomAudioLocked ? 'var(--cobalt, #a3c4f3)' : 'var(--vermilion, #ff4500)', cursor: 'pointer', fontSize: '0.9rem' }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
-                      <MicOff size={16} /> {roomAudioLocked ? 'Unlock All Mics' : 'Lock All Mics'}
+                    }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: '#0A0A0A', cursor: 'pointer', fontSize: '0.9rem', textAlign: 'left' }} onMouseEnter={e => e.currentTarget.style.background='rgba(10,10,10,0.05)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
+                      <MicOff size={16} color={roomAudioLocked ? "#0022FF" : "#0A0A0A"} /> {roomAudioLocked ? 'Unlock All Mics' : 'Lock All Mics'}
                     </button>
                     <button onClick={() => {
                       const newLock = !roomVideoLocked;
                       setRoomVideoLocked(newLock);
                       if(socket) socket.emit('meeting:lock_hardware', { role: participantRole, type: 'video', locked: newLock });
                       setShowMoreMenu(false);
-                    }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: roomVideoLocked ? 'var(--cobalt, #a3c4f3)' : 'var(--vermilion, #ff4500)', cursor: 'pointer', fontSize: '0.9rem' }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
-                      <VideoOff size={16} /> {roomVideoLocked ? 'Unlock All Cameras' : 'Lock All Cameras'}
+                    }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: '#0A0A0A', cursor: 'pointer', fontSize: '0.9rem', textAlign: 'left' }} onMouseEnter={e => e.currentTarget.style.background='rgba(10,10,10,0.05)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
+                      <VideoOff size={16} color={roomVideoLocked ? "#0022FF" : "#0A0A0A"} /> {roomVideoLocked ? 'Unlock All Cameras' : 'Lock All Cameras'}
                     </button>
-                    <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '0' }} />
-                    <button onClick={() => { setShowLobby(l => !l); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '0.9rem' }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
-                      <Shield size={16} /> {waitingUsers.length > 0 ? `Lobby (${waitingUsers.length})` : 'Lobby'}
+                    <div style={{ height: 1, background: 'rgba(10,10,10,0.1)', margin: '0' }} />
+                    <button onClick={() => { setShowLobby(l => !l); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: '#0A0A0A', cursor: 'pointer', fontSize: '0.9rem', textAlign: 'left' }} onMouseEnter={e => e.currentTarget.style.background='rgba(10,10,10,0.05)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
+                      <Shield size={16} color="#0022FF" /> {waitingUsers.length > 0 ? `Lobby (${waitingUsers.length})` : 'Lobby'}
                     </button>
-                    <button onClick={() => { setSidebarTab(t => t === 'MEMBERS' ? null : 'MEMBERS'); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '0.9rem' }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.1)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
+                    <button onClick={() => { setSidebarTab(t => t === 'MEMBERS' ? null : 'MEMBERS'); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: '#0A0A0A', cursor: 'pointer', fontSize: '0.9rem', textAlign: 'left' }} onMouseEnter={e => e.currentTarget.style.background='rgba(10,10,10,0.05)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
                       <Users size={16} /> Manage Members
                     </button>
                   </div>
@@ -776,7 +773,9 @@ export default function MeetingRoom() {
             <button
               onClick={leaveMeeting}
               title="Leave meeting"
-              style={{ width: 48, height: 48, borderRadius: '0', border: 'var(--border-thin)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--vermilion, #ff4500)', color: 'white' }}
+              style={{ width: 48, height: 48, borderRadius: '0', border: '2px solid #0A0A0A', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#FF3311', color: '#F7F5F0', boxShadow: '4px 4px 0 rgba(10,10,10,1)', transition: 'transform 0.1s' }}
+              onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-2px)'}
+              onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}
             >
               <PhoneOff size={20} />
             </button>
@@ -786,9 +785,9 @@ export default function MeetingRoom() {
         {/* === SIDEBAR === */}
         <aside className={`${styles.chatSection} ${sidebarTab ? styles.chatSectionOpen : ''}`}>
           {/* Sidebar tabs */}
-          <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+          <div style={{ display: 'flex', borderBottom: '2px solid #0A0A0A' }}>
             {['CHAT', 'MEMBERS'].map(tab => (
-              <button key={tab} onClick={() => setSidebarTab(tab)} style={{ flex: 1, padding: '1rem', background: 'none', border: 'none', cursor: 'pointer', color: sidebarTab === tab ? 'white' : 'rgba(255,255,255,0.5)', fontFamily: 'var(--font-grotesk)', borderBottom: sidebarTab === tab ? '2px solid white' : '2px solid transparent', fontSize: '0.9rem', transition: 'all 0.2s', position: 'relative' }}>
+              <button key={tab} onClick={() => setSidebarTab(tab)} style={{ flex: 1, padding: '1rem', background: 'none', border: 'none', cursor: 'pointer', color: sidebarTab === tab ? '#0A0A0A' : '#5A5A5A', fontFamily: 'var(--font-grotesk)', borderBottom: sidebarTab === tab ? '2px solid #0A0A0A' : '3px solid transparent', fontSize: '0.9rem', transition: 'all 0.2s', position: 'relative' }}>
                 {tab === 'CHAT' ? <><MessageSquare size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Chat</>
                   : <><Users size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Members ({peers.length + 1}){waitingUsers.length > 0 && isHostOrCoHost && <span style={{ position: 'absolute', top: 12, right: 12, width: 8, height: 8, borderRadius: '50%', background: 'var(--vermilion, #ff4500)' }} />}</>}
               </button>
@@ -799,14 +798,14 @@ export default function MeetingRoom() {
             <>
               <div className={styles.chatMessages}>
                 {messages.length === 0 && (
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#4b5563', padding: '2rem 1rem', textAlign: 'center' }}>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#5A5A5A', padding: '2rem 1rem', textAlign: 'center' }}>
                     <MessageSquare size={32} style={{ marginBottom: '0.75rem', opacity: 0.4 }} />
                     <p style={{ margin: 0, fontSize: '0.88rem' }}>No messages yet.<br />Start the conversation!</p>
                   </div>
                 )}
                 {messages.map((m, i) => (
                   <div key={i} className={`${styles.message} ${m.senderId === user.id ? styles.self : ''}`}>
-                    {m.senderId !== user.id && <span style={{ fontSize: '0.72rem', color: '#6b7280', marginBottom: '0.2rem', paddingLeft: '0.25rem' }}>{m.senderName}</span>}
+                    {m.senderId !== user.id && <span style={{ fontSize: '0.72rem', color: '#5A5A5A', fontFamily: 'var(--font-mono)', marginBottom: '0.2rem', paddingLeft: '0.25rem' }}>{m.senderName}</span>}
                     <div className={styles.messageContent}>
                       <div style={{ fontSize: '0.9rem', lineHeight: 1.5 }}>{m.text}</div>
                       {m.translatedText && m.senderId !== user.id && (
@@ -827,19 +826,19 @@ export default function MeetingRoom() {
               {/* Waiting room section for host */}
               {isHostOrCoHost && waitingUsers.length > 0 && (
                 <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0' }}>
-                  <p style={{ margin: '0 0 0.75rem', fontSize: '0.78rem', fontWeight: 700, color: '#f87171', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#ef4444', animation: 'pulse 1s infinite' }} />
+                  <p style={{ margin: '0 0 0.75rem', fontSize: '0.78rem', fontWeight: 700, color: '#FF3311', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#FF3311', animation: 'pulse 1s infinite' }} />
                     Waiting Room ({waitingUsers.length})
                   </p>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                     {waitingUsers.map(w => (
                       <div key={w.userId} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.6rem', background: 'rgba(255,255,255,0.04)', borderRadius: '10px' }}>
-                        <Avatar name={w.name} size={32} color="#374151" />
-                        <span style={{ flex: 1, color: 'var(--text-primary)', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
-                        <button onClick={() => handleAdmit(w.userId)} style={{ width: 28, height: 28, borderRadius: '6px', background: 'var(--cobalt)', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Avatar name={w.name} size={32} color="#0A0A0A" avatarUrl={w.avatar} />
+                        <span style={{ flex: 1, color: '#0A0A0A', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
+                        <button onClick={() => handleAdmit(w.userId)} style={{ width: 28, height: 28, borderRadius: '6px', background: '#0022FF', border: 'none', color: '#0A0A0A', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           <UserCheck size={14} />
                         </button>
-                        <button onClick={() => handleReject(w.userId)} style={{ width: 28, height: 28, borderRadius: '6px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <button onClick={() => handleReject(w.userId)} style={{ width: 28, height: 28, borderRadius: '6px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#FF3311', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           <UserX size={14} />
                         </button>
                       </div>
@@ -849,28 +848,28 @@ export default function MeetingRoom() {
               )}
 
               {/* In-meeting participants */}
-              <p style={{ margin: '0 0 0.6rem', fontSize: '0.72rem', fontWeight: 700, color: '#4b5563', textTransform: 'uppercase', letterSpacing: '0.08em' }}>In Meeting</p>
+              <p style={{ margin: '0 0 0.6rem', fontSize: '0.72rem', fontWeight: 700, color: '#5A5A5A', textTransform: 'uppercase', letterSpacing: '0.08em' }}>In Meeting</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.75rem', background: 'rgba(59,130,246,0.08)', borderRadius: '10px', border: '1px solid rgba(59,130,246,0.15)' }}>
-                  <Avatar name={user.name} size={34} color="#3b82f6" />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.75rem', background: 'transparent', borderRadius: '0', border: 'none', borderBottom: '1px solid #5A5A5A' }}>
+                  <Avatar name={user.name} size={34} color="#0022FF" avatarUrl={user.avatar} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, color: '#f1f5f9', fontSize: '0.88rem' }}>{user.name} <span style={{ color: '#6b7280', fontWeight: 400 }}>(You)</span></div>
-                    <div style={{ fontSize: '0.72rem', color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{participantRole}</div>
+                    <div style={{ fontWeight: 600, color: '#0A0A0A', fontSize: '0.88rem' }}>{user.name} <span style={{ color: '#5A5A5A', fontFamily: 'var(--font-mono)', fontWeight: 400 }}>(You)</span></div>
+                    <div style={{ fontSize: '0.72rem', color: '#0022FF', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{participantRole}</div>
                   </div>
                 </div>
                 {peers.map((peer, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.75rem', background: 'transparent', borderRadius: 0, borderBottom: '1px solid var(--text-primary)' }}>
-                    <Avatar name={peer.name || `P${i + 1}`} size={34} color="#374151" />
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.75rem', background: 'transparent', borderRadius: 0, borderBottom: '1px solid #0A0A0A' }}>
+                    <Avatar name={peer.name || `P${i + 1}`} size={34} color="#0A0A0A" avatarUrl={peer.avatar} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 500, color: 'var(--text-primary)', fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{peer.name || `Participant ${i + 1}`}</div>
-                      <div style={{ fontSize: '0.72rem', color: peer.role === 'HOST' ? '#fbbf24' : peer.role === 'COHOST' ? '#a78bfa' : '#4b5563', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{peer.role || 'Connected'}</div>
+                      <div style={{ fontWeight: 500, color: '#0A0A0A', fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{peer.name || `Participant ${i + 1}`}</div>
+                      <div style={{ fontSize: '0.72rem', color: peer.role === 'HOST' ? '#0022FF' : peer.role === 'COHOST' ? '#FF3311' : '#5A5A5A', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{peer.role || 'Connected'}</div>
                     </div>
                     <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center', flexShrink: 0 }}>
-                      {(peer.isAudioOn ?? true) ? <Mic size={14} color="#6b7280" /> : <MicOff size={14} color="#ef4444" />}
-                      {(peer.isVideoOn ?? true) ? <Video size={14} color="#6b7280" /> : <VideoOff size={14} color="#ef4444" />}
+                      {(peer.isAudioOn ?? true) ? <Mic size={14} color="#5A5A5A" /> : <MicOff size={14} color="#FF3311" />}
+                      {(peer.isVideoOn ?? true) ? <Video size={14} color="#5A5A5A" /> : <VideoOff size={14} color="#FF3311" />}
                       {isHost && peer.role !== 'HOST' && (
-                        <button onClick={() => handleToggleMeetingCoHost(peer.userId, peer.role === 'COHOST')} title={peer.role === 'COHOST' ? 'Remove Co-Host' : 'Make Co-Host'} style={{ background: 'none', border: 'none', color: peer.role === 'COHOST' ? '#c084fc' : '#6b7280', cursor: 'pointer', padding: '0.1rem', display: 'flex' }}>
-                          <Star size={14} fill={peer.role === 'COHOST' ? '#c084fc' : 'none'} />
+                        <button onClick={() => handleToggleMeetingCoHost(peer.userId, peer.role === 'COHOST')} title={peer.role === 'COHOST' ? 'Remove Co-Host' : 'Make Co-Host'} style={{ background: 'none', border: 'none', color: peer.role === 'COHOST' ? '#FF3311' : '#5A5A5A', cursor: 'pointer', padding: '0.1rem', display: 'flex' }}>
+                          <Star size={14} fill={peer.role === 'COHOST' ? '#FF3311' : 'none'} />
                         </button>
                       )}
                     </div>
@@ -885,14 +884,14 @@ export default function MeetingRoom() {
       {/* === SUMMARY MODAL === */}
         {summaryModal.isOpen && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))}>
-            <div style={{ background: '#000', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '0', padding: '2rem', width: 600, maxWidth: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-grotesk)' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ background: '#F7F5F0', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '0', padding: '2rem', width: 600, maxWidth: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-grotesk)' }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', flexShrink: 0 }}>
-                <h2 style={{ margin: 0, color: 'white', fontSize: '1.35rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 400 }}>
+                <h2 style={{ margin: 0, color: '#0A0A0A', fontSize: '1.35rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 400 }}>
                   ✨ Live Summary
                 </h2>
-                <button onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))} style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>&times;</button>
+                <button onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))} style={{ background: 'transparent', border: 'none', color: '#0A0A0A', cursor: 'pointer', fontSize: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>&times;</button>
               </div>
-              <div style={{ flex: 1, overflowY: 'auto', paddingRight: '0.5rem', color: 'white', fontSize: '1rem', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+              <div style={{ flex: 1, overflowY: 'auto', paddingRight: '0.5rem', color: '#0A0A0A', fontSize: '1rem', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
                 {summaryModal.loading ? (
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '1rem', color: 'var(--cobalt, #a3c4f3)' }}>
                     <div style={{ width: 40, height: 40, borderRadius: '50%', border: '3px solid rgba(163,196,243,0.2)', borderTopColor: 'var(--cobalt, #a3c4f3)', animation: 'spin 1s linear infinite' }} />
@@ -900,7 +899,7 @@ export default function MeetingRoom() {
                   </div>
                 ) : summaryModal.text}
               </div>
-              <button onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))} style={{ width: '100%', marginTop: '1.5rem', padding: '0.8rem', background: 'transparent', color: 'var(--cobalt, #a3c4f3)', border: '1px solid var(--cobalt, #a3c4f3)', borderRadius: '0', fontFamily: 'var(--font-grotesk)', cursor: 'pointer', fontSize: '1rem', flexShrink: 0 }}>
+              <button onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))} style={{ width: '100%', marginTop: '1.5rem', padding: '0.8rem', background: 'transparent', background: '#0022FF', color: '#F7F5F0', border: '2px solid #0A0A0A', boxShadow: '4px 4px 0 rgba(10,10,10,1)', borderRadius: '0', fontFamily: 'var(--font-grotesk)', cursor: 'pointer', fontSize: '1rem', flexShrink: 0 }}>
                 Close
               </button>
             </div>
@@ -910,17 +909,17 @@ export default function MeetingRoom() {
         {/* === SETTINGS MODAL === */}
         {showSettings && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowSettings(false)}>
-            <div style={{ background: '#000', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '0', padding: '2rem', width: 440, fontFamily: 'var(--font-grotesk)' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ background: '#F7F5F0', border: '2px solid #0A0A0A', borderRadius: '0', padding: '3rem', width: 480, fontFamily: 'var(--font-grotesk)', boxShadow: '12px 12px 0 rgba(10,10,10,1)' }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
-                <h2 style={{ margin: 0, color: 'white', fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 400 }}>
-                  <Settings size={20} color="white" /> Settings
+                <h2 style={{ margin: 0, color: '#0A0A0A', fontSize: '2rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 600, fontFamily: 'var(--font-serif)', fontStyle: 'italic' }}>
+                  <Settings size={20} color="#0A0A0A" /> <span style={{color: "#0A0A0A"}}>Settings</span>
                 </h2>
-                <button onClick={() => setShowSettings(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>&times;</button>
+                <button onClick={() => setShowSettings(false)} style={{ background: 'transparent', border: 'none', color: '#0A0A0A', cursor: 'pointer', fontSize: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>&times;</button>
               </div>
   
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                   <div>
-                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.75rem', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.75rem', color: '#0A0A0A', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       <Globe size={12} style={{ verticalAlign: 'middle', marginRight: 5 }} />My spoken language (mic)
                     </label>
                     <select value={spokenLanguage} onChange={e => {
@@ -938,77 +937,77 @@ export default function MeetingRoom() {
                             body: JSON.stringify({ preferredLanguage: val })
                           }).catch(console.error);
                         }
-                      }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '0', fontSize: '0.9rem', outline: 'none' }}>
-                      {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#0c1527', color: 'white' }}>{l.label}</option>)}
+                      }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'transparent', color: '#0A0A0A', border: '2px solid #0A0A0A', borderRadius: '0', fontSize: '0.9rem', outline: 'none', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
+                      {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#F7F5F0', color: '#0A0A0A' }}>{l.label}</option>)}
                     </select>
                   </div>
                   
                   {/* Speech to Speech */}
-                  <div style={{ padding: '1.25rem', background: 'rgba(255,255,255,0.03)', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <div style={{ padding: '1.25rem', background: 'transparent', borderRadius: '0', borderBottom: '1px solid rgba(10,10,10,0.1)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (user.ttsEnabled ?? true) ? '1rem' : '0' }}>
                       <div>
-                        <p style={{ margin: 0, fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.9rem' }}>Speech-to-Speech</p>
-                        <p style={{ margin: 0, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', marginTop: '0.2rem' }}>Read out audio translations</p>
+                        <p style={{ margin: 0, fontWeight: 600, color: '#0A0A0A', fontSize: '0.9rem' }}>Speech-to-Speech</p>
+                        <p style={{ margin: 0, color: '#5A5A5A', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', marginTop: '0.2rem' }}>Read out audio translations</p>
                       </div>
                       <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
                         <input type="checkbox" checked={user.ttsEnabled ?? true} onChange={e => { useAuthStore.getState().user.ttsEnabled = e.target.checked; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ display: 'none' }} />
-                        <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.ttsEnabled ?? true) ? '#3b82f6' : 'rgba(255,255,255,0.1)', transition: 'background 0.2s', position: 'relative' }}>
+                        <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.ttsEnabled ?? true) ? '#0022FF' : 'rgba(10,10,10,0.2)', transition: 'background 0.2s', position: 'relative' }}>
                           <div style={{ position: 'absolute', top: 2, left: (user.ttsEnabled ?? true) ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
                         </div>
                       </label>
                     </div>
                     {(user.ttsEnabled ?? true) && (
-                      <select value={user.ttsLang || 'original'} onChange={e => { useAuthStore.getState().user.ttsLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.2)', color: 'white', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', fontSize: '0.9rem', outline: 'none' }}>
-                        <option value="original" style={{ background: '#0c1527', color: 'white' }}>Original</option>
-                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#0c1527', color: 'white' }}>{l.label}</option>)}
+                      <select value={user.ttsLang || 'original'} onChange={e => { useAuthStore.getState().user.ttsLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'transparent', color: '#0A0A0A', border: '1px solid #0A0A0A', borderRadius: '0', fontSize: '0.9rem', outline: 'none' }}>
+                        <option value="original" style={{ background: '#F7F5F0', color: '#0A0A0A' }}>Original</option>
+                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#F7F5F0', color: '#0A0A0A' }}>{l.label}</option>)}
                       </select>
                     )}
                   </div>
   
                   {/* Message Chat Translation */}
-                  <div style={{ padding: '1.25rem', background: 'rgba(255,255,255,0.03)', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <div style={{ padding: '1.25rem', background: 'transparent', borderRadius: '0', borderBottom: '1px solid rgba(10,10,10,0.1)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (user.chatEnabled ?? true) ? '1rem' : '0' }}>
                       <div>
-                        <p style={{ margin: 0, fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.9rem' }}>Message Chat Translation</p>
+                        <p style={{ margin: 0, fontWeight: 600, color: '#0A0A0A', fontSize: '0.9rem' }}>Message Chat Translation</p>
                       </div>
                       <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
                         <input type="checkbox" checked={user.chatEnabled ?? true} onChange={e => { useAuthStore.getState().user.chatEnabled = e.target.checked; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ display: 'none' }} />
-                        <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.chatEnabled ?? true) ? '#3b82f6' : 'rgba(255,255,255,0.1)', transition: 'background 0.2s', position: 'relative' }}>
+                        <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.chatEnabled ?? true) ? '#0022FF' : 'rgba(10,10,10,0.2)', transition: 'background 0.2s', position: 'relative' }}>
                           <div style={{ position: 'absolute', top: 2, left: (user.chatEnabled ?? true) ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
                         </div>
                       </label>
                     </div>
                     {(user.chatEnabled ?? true) && (
-                      <select value={user.chatLang || 'original'} onChange={e => { useAuthStore.getState().user.chatLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.2)', color: 'white', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', fontSize: '0.9rem', outline: 'none' }}>
-                        <option value="original" style={{ background: '#0c1527', color: 'white' }}>Original</option>
-                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#0c1527', color: 'white' }}>{l.label}</option>)}
+                      <select value={user.chatLang || 'original'} onChange={e => { useAuthStore.getState().user.chatLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'transparent', color: '#0A0A0A', border: '1px solid #0A0A0A', borderRadius: '0', fontSize: '0.9rem', outline: 'none' }}>
+                        <option value="original" style={{ background: '#F7F5F0', color: '#0A0A0A' }}>Original</option>
+                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#F7F5F0', color: '#0A0A0A' }}>{l.label}</option>)}
                       </select>
                     )}
                   </div>
   
                   {/* Speech to Caption */}
-                  <div style={{ padding: '1.25rem', background: 'rgba(255,255,255,0.03)', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <div style={{ padding: '1.25rem', background: 'transparent', borderRadius: '0', borderBottom: '1px solid rgba(10,10,10,0.1)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (user.captionEnabled ?? true) ? '1rem' : '0' }}>
                       <div>
-                        <p style={{ margin: 0, fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.9rem' }}>Speech to Caption</p>
+                        <p style={{ margin: 0, fontWeight: 600, color: '#0A0A0A', fontSize: '0.9rem' }}>Speech to Caption</p>
                       </div>
                       <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
                         <input type="checkbox" checked={user.captionEnabled ?? true} onChange={e => { useAuthStore.getState().user.captionEnabled = e.target.checked; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ display: 'none' }} />
-                        <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.captionEnabled ?? true) ? '#3b82f6' : 'rgba(255,255,255,0.1)', transition: 'background 0.2s', position: 'relative' }}>
+                        <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.captionEnabled ?? true) ? '#0022FF' : 'rgba(10,10,10,0.2)', transition: 'background 0.2s', position: 'relative' }}>
                           <div style={{ position: 'absolute', top: 2, left: (user.captionEnabled ?? true) ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
                         </div>
                       </label>
                     </div>
                     {(user.captionEnabled ?? true) && (
-                      <select value={user.captionLang || 'original'} onChange={e => { useAuthStore.getState().user.captionLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.2)', color: 'white', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '10px', fontSize: '0.9rem', outline: 'none' }}>
-                        <option value="original" style={{ background: '#0c1527', color: 'white' }}>Original</option>
-                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#0c1527', color: 'white' }}>{l.label}</option>)}
+                      <select value={user.captionLang || 'original'} onChange={e => { useAuthStore.getState().user.captionLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'transparent', color: '#0A0A0A', border: '1px solid #0A0A0A', borderRadius: '0', fontSize: '0.9rem', outline: 'none' }}>
+                        <option value="original" style={{ background: '#F7F5F0', color: '#0A0A0A' }}>Original</option>
+                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#F7F5F0', color: '#0A0A0A' }}>{l.label}</option>)}
                       </select>
                     )}
                   </div>
               </div>
   
-              <button onClick={() => setShowSettings(false)} style={{ width: '100%', marginTop: '2rem', padding: '1rem', background: 'transparent', color: 'var(--cobalt, #a3c4f3)', border: '1px solid var(--cobalt, #a3c4f3)', borderRadius: '0', fontWeight: 400, cursor: 'pointer', fontSize: '1rem', fontFamily: 'var(--font-grotesk)' }}>
+              <button onClick={() => setShowSettings(false)} style={{ width: '100%', marginTop: '2rem', padding: '1rem', background: 'transparent', background: '#0022FF', color: '#F7F5F0', border: '2px solid #0A0A0A', boxShadow: '4px 4px 0 rgba(10,10,10,1)', borderRadius: '0', fontWeight: 400, cursor: 'pointer', fontSize: '1rem', fontFamily: 'var(--font-grotesk)' }}>
                 Done
               </button>
             </div>
@@ -1032,10 +1031,10 @@ export default function MeetingRoom() {
         }}>
           <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--vermilion, #ff4500)', flexShrink: 0, animation: 'pulse 1s infinite' }} />
           <div style={{ flex: 1 }}>
-            <p style={{ margin: 0, fontWeight: 400, color: 'white', fontSize: '0.9rem' }}>
+            <p style={{ margin: 0, fontWeight: 400, color: '#0A0A0A', fontSize: '0.9rem' }}>
               Someone is waiting
             </p>
-            <p style={{ margin: 0, color: 'var(--text-primary)', fontSize: '0.8rem', marginTop: '0.15rem' }}>
+            <p style={{ margin: 0, color: '#0A0A0A', fontSize: '0.8rem', marginTop: '0.15rem' }}>
               <span style={{ color: 'var(--cobalt, #a3c4f3)' }}>{lobbyToast.name}</span> is in the lobby
             </p>
           </div>
@@ -1047,7 +1046,7 @@ export default function MeetingRoom() {
           </button>
           <button
             onClick={() => setLobbyToast(null)}
-            style={{ background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '1.1rem', padding: '0.1rem', flexShrink: 0 }}
+            style={{ background: 'none', border: 'none', color: '#0A0A0A', cursor: 'pointer', fontSize: '1.1rem', padding: '0.1rem', flexShrink: 0 }}
           >
             ×
           </button>
@@ -1056,10 +1055,10 @@ export default function MeetingRoom() {
 
       {/* === ALERT MODAL === */}
       {alertMessage && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'var(--bg-ivory)', padding: '3rem', borderRadius: '0', border: 'var(--border-thick)', boxShadow: '8px 8px 0 rgba(10,10,10,1)', maxWidth: 380, width: '90%', textAlign: 'center' }}>
-            <p style={{ margin: '0 0 1.5rem', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', lineHeight: 1.6 }}>{alertMessage}</p>
-            <button onClick={() => setAlertMessage(null)} style={{ width: '100%', padding: '0.875rem', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '0', fontWeight: 700, cursor: 'pointer' }}>OK</button>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#F7F5F0', padding: '3rem', borderRadius: '0', border: '2px solid #0A0A0A', boxShadow: '8px 8px 0 rgba(10,10,10,1)', maxWidth: 380, width: '90%', textAlign: 'center' }}>
+            <p style={{ margin: '0 0 1.5rem', color: '#0A0A0A', fontFamily: 'var(--font-mono)', lineHeight: 1.6 }}>{alertMessage}</p>
+            <button onClick={() => setAlertMessage(null)} style={{ width: '100%', padding: '0.875rem', background: '#0022FF', color: '#0A0A0A', border: 'none', borderRadius: '0', fontWeight: 700, cursor: 'pointer' }}>OK</button>
           </div>
         </div>
       )}

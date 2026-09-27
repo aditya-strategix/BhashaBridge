@@ -268,26 +268,36 @@ exports.joinMeeting = async (req, res) => {
     const isCoHost = isOrgCoHost || (participant && participant.role === 'COHOST');
     
     // Default: if you are host or cohost, you bypass waiting room.
-    const newStatus = (isHost || isCoHost) ? 'ADMITTED' : 'WAITING';
+    let finalStatus;
+      if (!participant) {
+        finalStatus = (isHost || isCoHost) ? 'ADMITTED' : 'WAITING';
+        participant = await prisma.participant.create({
+          data: {
+            userId: req.user.userId,
+            meetingId: meeting.id,
+            role: isHost ? 'HOST' : (isOrgCoHost ? 'COHOST' : 'PARTICIPANT'),
+            status: finalStatus
+          }
+        });
+      } else {
+        // If they already exist, keep their status unless they were upgraded to Host/CoHost
+        finalStatus = (isHost || isCoHost) ? 'ADMITTED' : participant.status;
+        const updatedRole = isHost ? 'HOST' : (isOrgCoHost ? 'COHOST' : participant.role);
+        participant = await prisma.participant.update({
+          where: { id: participant.id },
+          data: { joinTime: new Date(), status: finalStatus, role: updatedRole }
+        });
+      }
 
-    if (!participant) {
-      participant = await prisma.participant.create({
-        data: {
-          userId: req.user.userId,
-          meetingId: meeting.id,
-          role: isHost ? 'HOST' : (isOrgCoHost ? 'COHOST' : 'PARTICIPANT'),
-          status: newStatus
-        }
-      });
-    } else {
-      const updatedRole = isHost ? 'HOST' : (isOrgCoHost ? 'COHOST' : participant.role);
-      participant = await prisma.participant.update({
-        where: { id: participant.id },
-        data: { joinTime: new Date(), status: newStatus, role: updatedRole }
-      });
-    }
-
-    res.json({ meeting, participantStatus: participant.status, participantRole: participant.role });
+    let waitingUsers = [];
+      if (participant.status === 'ADMITTED' && (participant.role === 'HOST' || participant.role === 'COHOST')) {
+        const waitingDb = await prisma.participant.findMany({
+          where: { meetingId: meeting.id, status: 'WAITING' },
+          include: { user: { select: { id: true, name: true, avatar: true } } }
+        });
+        waitingUsers = waitingDb.map(p => ({ userId: p.user.id, name: p.user.name, avatar: p.user.avatar }));
+      }
+      res.json({ meeting, participantStatus: participant.status, participantRole: participant.role, waitingUsers });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Server error' });

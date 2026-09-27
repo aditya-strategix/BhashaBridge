@@ -309,3 +309,15 @@ We implemented a strict two-tier caching system to eliminate 95% of redundant AP
 **Problem:** The Post-Meeting Report displayed "No translations were active during this session" in the Languages Spoken section, even when participants actively conversed using their microphones.
 **Root Cause:** The Analytics Engine (`getMeetingAnalytics`) was exclusively querying the `ChatMessage` table to determine which languages were used. It was completely ignoring the `Caption` table where the live microphone speech transcripts are stored.
 **Solution:** Upgraded the analytics aggregation pipeline to execute a union query across both `chatMessage.originalLanguage` and `caption.originalLanguage`, providing an accurate, holistic view of all languages actively spoken or typed.
+
+
+## Problem 17: Host Refresh Deletes the Waiting Room Lobby
+**Problem:** When the Host reloaded the page during an ongoing meeting, any users currently waiting in the Waiting Room to be admitted would completely disappear from the Host's sidebar, trapping them in the lobby indefinitely.
+**Root Cause:** The waitingUsers React array was stored entirely in volatile frontend state. When the Host's browser refreshed, the state wiped out. The backend socket.io server relied solely on a one-time broadcast event (waiting:request) when a user initially joined. Because the backend didn't actively resend these events to the Host upon reconnection, the Host had no way of knowing people were waiting.
+**Solution:** Modified the /meetings/join/:id API controller to actively query PostgreSQL for all participants with status === 'WAITING' and bundle that list directly into the Host's initial HTTP re-authentication response, guaranteeing the lobby UI instantly rehydrates.
+
+## Problem 18: ADMITTED Participants Locked Out on Page Refresh
+**Problem:** If a participant was successfully admitted by the Host, but subsequently refreshed their browser, they were unexpectedly thrown back into the Waiting Room and locked out of the meeting.
+**Root Cause:** The joinMeeting backend logic defaulted to assigning 
+ewStatus = 'WAITING' for any returning normal participant. It forcefully updated their PostgreSQL database record back to WAITING, overwriting their previously granted ADMITTED status.
+**Solution:** Rewrote the database fallback logic to verify the user's existing participant.status first. If they already hold an ADMITTED status, the database seamlessly preserves it, allowing them to bypass the waiting room upon reconnection.

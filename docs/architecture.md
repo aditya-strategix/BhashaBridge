@@ -324,3 +324,17 @@ The Post-Meeting Analytics Engine calculates metrics asynchronously on-demand. T
 User preferences are synchronized across the system via a Dual-State pattern:
 1. **Frontend (Zustand):** `useAuthStore` manages immediate reactivity (e.g., updating the language dropdown).
 2. **Backend (PostgreSQL + JWT):** `PUT /api/auth/profile` permanently saves settings to the DB and issues a fresh JWT. The JWT payload explicitly maps the database's `preferredLanguage` to the token's `language` property, which all API endpoints subsequently read to dictate AI Summary caching and generation targets.
+
+
+### 8. WebRTC Mesh State Recovery & Self-Healing
+The WebRTC mesh network operates entirely on the client side, meaning a browser refresh instantly wipes out local React state (peers, waitingUsers, WebRTC connections). The application heals itself via an outside-in signaling pattern:
+
+1. **Re-Authentication:** The joining user's socket emits meeting:join.
+2. **Network Broadcast:** The backend server explicitly does *not* send the connecting user a list of existing peers. Instead, it broadcasts a participant:joined event to all *existing* users in the room.
+3. **Reverse-Signaling:** Every existing participant in the room reacts to participant:joined by immediately generating a new WebRTC offer (udio:signal) and firing it directly at the new user's socket ID.
+4. **Mesh Reconstruction:** The newly refreshed user receives this barrage of incoming signals, automatically reconstructs their peers array, and replies with answers, successfully rebuilding the P2P mesh from the outside in.
+
+### 9. Persistent Connection State & Lobby Preservation
+To prevent state-loss in critical database roles (like Host lockouts or lost Waiting Room lobbies):
+- The /meetings/join/:id API route forcefully rehydrates missing states by actively querying PostgreSQL for any users trapped in status === 'WAITING' and bundles them into the initial HTTP response payload so the Host's lobby UI is instantly restored.
+- The database engine actively checks the user's existing participant.status (e.g. ADMITTED) during reconnection to prevent the default fallback (which would force returning ADMITTED participants back into the WAITING state upon refresh).

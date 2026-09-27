@@ -68,6 +68,7 @@ model User {
   passwordHash     String
   role             UserRole      @default(PARTICIPANT)
   preferredLanguage String       @default("en")
+    avatar            String?      @db.Text
   organizations    Organization[] @relation("OrgMembers")
   coHostedOrganizations Organization[] @relation("OrgCoHosts")
   createdAt        DateTime      @default(now())

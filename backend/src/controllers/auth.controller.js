@@ -47,7 +47,7 @@ exports.login = async (req, res) => {
       { expiresIn: '24h' }
     );
 
-    res.json({ token, user: { id: user.id, name: user.name, email: user.email, language: user.preferredLanguage } });
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email, language: user.preferredLanguage, avatar: user.avatar } });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Server error' });
@@ -56,13 +56,14 @@ exports.login = async (req, res) => {
 
 exports.updateProfile = async (req, res) => {
   try {
-    const { name, preferredLanguage } = req.body;
+    const { name, preferredLanguage, avatar } = req.body;
     
     const user = await prisma.user.update({
       where: { id: req.user.userId },
       data: { 
         ...(name && { name }),
-        ...(preferredLanguage && { preferredLanguage })
+        ...(preferredLanguage && { preferredLanguage }),
+        ...(avatar !== undefined && { avatar })
       }
     });
 
@@ -72,7 +73,7 @@ exports.updateProfile = async (req, res) => {
       { expiresIn: '24h' }
     );
 
-    res.json({ token, user: { id: user.id, name: user.name, email: user.email, language: user.preferredLanguage } });
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email, language: user.preferredLanguage, avatar: user.avatar } });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Server error' });

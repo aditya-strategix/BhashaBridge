@@ -31,7 +31,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 2px;
-  padding: 2px;
+  padding: 6rem 2px 7rem 2px;
   background: #000;
   overflow-y: hidden;
   align-content: stretch;
@@ -112,13 +112,12 @@
 /* ---- SIDEBAR ---- */
 .chatSection {
   position: absolute;
-  top: 0;
+  top: 5rem;
   right: 0;
   bottom: 0;
   width: 380px;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(20px);
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  background: #F7F5F0;
+  border-left: 2px solid #0A0A0A;
   display: flex;
   flex-direction: column;
   z-index: 200;
@@ -157,36 +156,36 @@
   max-width: 100%;
   border: none;
   font-size: 1rem;
-  color: #fff;
+  color: #0A0A0A;
   line-height: 1.5;
 }
 
 .message.self .messageContent {
   text-align: right;
-  color: var(--cobalt, #a3c4f3);
+  color: #0022FF;
 }
 
 .translatedText {
   font-size: 0.85rem;
-  color: var(--vermilion, #ff4500);
+  color: #FF3311;
   margin-top: 0.5rem;
   font-family: var(--font-mono);
 }
 
 .chatInputArea {
   padding: 1.5rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 2px solid #0A0A0A;
   display: flex;
   gap: 1rem;
 }
 
 .chatInput {
   flex: 1;
-  padding: 0;
+  padding: 0 0 0.5rem 0;
   border: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+  border-bottom: 2px solid #0A0A0A;
   background: transparent;
-  color: white;
+  color: #0A0A0A;
   font-size: 1rem;
   transition: border-color 0.2s;
   font-family: var(--font-grotesk);
@@ -194,24 +193,25 @@
 }
 
 .chatInput:focus {
-  border-color: var(--vermilion, #ff4500);
+  border-color: #0022FF;
 }
 
 .chatInput::placeholder {
-  color: rgba(255, 255, 255, 0.4);
+  color: #5A5A5A;
 }
 
 .sendBtn {
-  background: transparent;
-  color: var(--cobalt, #a3c4f3);
-  border: none;
+  background: #FF3311;
+  color: #F7F5F0;
+  border: 2px solid #0A0A0A;
   cursor: pointer;
-  padding: 0;
+  padding: 0 1rem;
   width: auto;
+  box-shadow: 4px 4px 0 rgba(10,10,10,1);
 }
 
 .sendBtn:hover {
-  color: white;
+  transform: translateY(-2px);
 }
 
 /* Animations */
@@ -255,5 +255,5 @@
   font-family: var(--font-mono);
   font-size: 0.75rem;
   text-transform: uppercase;
-  color: var(--cobalt, #a3c4f3);
+  color: #0022FF;
 }

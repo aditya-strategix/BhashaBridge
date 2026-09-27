@@ -50,7 +50,7 @@ function setupSocket(server) {
 
         if (participant.status === 'WAITING') {
           // Tell hosts someone is waiting
-          socket.to(meetingId).emit('waiting:request', { userId, name: participant.user?.name || 'User' });
+          socket.to(meetingId).emit('waiting:request', { userId, name: participant.user?.name || 'User', avatar: participant.user?.avatar });
         } else if (participant.status === 'ADMITTED') {
           socket.join(meetingId);
           socket.to(meetingId).emit('participant:joined', { 
@@ -58,7 +58,8 @@ function setupSocket(server) {
             peerId, 
             socketId: socket.id,
             name: participant.user?.name,
-            role: participant.role 
+              role: participant.role,
+              avatar: participant.user?.avatar 
           });
           console.log(`User ${userId} joined meeting ${meetingId}`);
           
@@ -70,7 +71,7 @@ function setupSocket(server) {
             });
             console.log('Sending waiting user to host:', waitingUsers.length);
               waitingUsers.forEach(w => {
-              socket.emit('waiting:request', { userId: w.userId, name: w.user?.name || 'User' });
+              socket.emit('waiting:request', { userId: w.userId, name: w.user?.name || 'User', avatar: w.user?.avatar });
             });
           }
           

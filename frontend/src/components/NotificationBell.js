@@ -221,7 +221,7 @@ export default function NotificationBell() {
           style={{
             position: 'relative', background: open ? 'rgba(96,165,250,0.15)' : 'rgba(255,255,255,0.07)',
             border: `1px solid ${open ? 'rgba(96,165,250,0.4)' : 'rgba(255,255,255,0.1)'}`,
-            color: open ? '#60a5fa' : '#e2e8f0', padding: '0.45rem 0.55rem', borderRadius: '0',
+            color: open ? '#0022FF' : '#0A0A0A', padding: '0.45rem 0.55rem', borderRadius: '0',
             cursor: 'pointer', display: 'flex', alignItems: 'center', transition: 'all 0.2s'
           }}
           title="Invitations"
@@ -230,10 +230,10 @@ export default function NotificationBell() {
           {count > 0 && (
             <span style={{
               position: 'absolute', top: -6, right: -6,
-              background: '#ef4444', color: 'white', borderRadius: '999px',
+              background: '#FF3311', color: 'white', borderRadius: '999px',
               fontSize: '0.65rem', fontWeight: 800, minWidth: 18, height: 18,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              border: '2px solid #0f172a', padding: '0 3px'
+              border: '2px solid #F7F5F0', padding: '0 3px'
             }}>
               {count > 9 ? '9+' : count}
             </span>
@@ -254,7 +254,7 @@ export default function NotificationBell() {
             {/* Header */}
             <div style={{ padding: '1rem 1.25rem', borderBottom: '2px solid #111', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Bell size={16} style={{ color: '#60a5fa' }} />
+                <Bell size={16} style={{ color: '#0A0A0A' }} />
                 <span style={{ fontWeight: 700, color: '#111', fontSize: '0.95rem' }}>Organization Invitations</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -272,7 +272,7 @@ export default function NotificationBell() {
             {/* Body */}
             {count === 0 ? (
               <div style={{ padding: '2.5rem 1.25rem', textAlign: 'center', color: '#777' }}>
-                <Bell size={32} style={{ margin: '0 auto 0.75rem', opacity: 0.4 }} />
+                <Bell size={32} style={{ margin: '0 auto 0.75rem', opacity: 0.8, color: '#0A0A0A' }} />
                 <p style={{ margin: 0, fontSize: '0.9rem' }}>No pending invitations</p>
               </div>
             ) : (

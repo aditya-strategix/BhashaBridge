@@ -16,6 +16,7 @@ export default function MeetingReport() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
   const [error, setError] = useState(null);
+  const [alertData, setAlertData] = useState(null);
 
   useEffect(() => { initialize(); }, [initialize]);
 
@@ -90,7 +91,7 @@ export default function MeetingReport() {
       const res = await api.get(`/meetings/${meetingId}/summary`);
       setSummaryModal({ loading: false, text: res.data.summary || 'No summary available.' });
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to load summary.');
+      setAlertData(err.response?.data?.error || 'Failed to load summary.');
       setSummaryModal(null);
     }
   };
@@ -100,7 +101,7 @@ export default function MeetingReport() {
       const res = await api.get(`/meetings/${meetingId}/transcript`);
       const transcript = res.data.transcript;
       if (!transcript || transcript.length === 0) {
-        alert("No transcript recorded for this meeting.");
+        setAlertData('No transcript recorded for this meeting.');
         return;
       }
       const lines = transcript.map(t => {
@@ -116,7 +117,7 @@ export default function MeetingReport() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      alert("Failed to export transcript.");
+      setAlertData('Failed to export transcript.');
     }
   };
 
@@ -225,6 +226,22 @@ export default function MeetingReport() {
         <div style={{ position: 'absolute', bottom: '2rem', left: '2rem', fontFamily: 'var(--font-mono, monospace)', fontSize: '0.75rem', textTransform: 'uppercase', color: '#666' }}>
           Chronicle generated: {new Date(report?.generatedAt || Date.now()).toLocaleString()}
         </div>
+
+
+        {alertData && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ background: '#F7F5F0', border: '2px solid #0A0A0A', boxShadow: '12px 12px 0 rgba(10,10,10,1)', padding: '2.5rem', width: 440, fontFamily: 'var(--font-grotesk)' }}>
+              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#0A0A0A', marginBottom: '1.5rem', fontFamily: 'var(--font-serif)', fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div style={{ width: 12, height: 12, background: '#FF3311', border: '2px solid #0A0A0A' }} />
+                System Notice
+              </div>
+              <div style={{ fontSize: '1.1rem', color: '#0A0A0A', marginBottom: '2.5rem', lineHeight: 1.5 }}>{alertData}</div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button onClick={() => setAlertData(null)} style={{ background: '#0022FF', color: '#F7F5F0', border: '2px solid #0A0A0A', boxShadow: '4px 4px 0 rgba(10,10,10,1)', padding: '0.75rem 2rem', fontWeight: 600, fontSize: '1rem', cursor: 'pointer', transition: 'transform 0.1s' }} onMouseEnter={e => e.currentTarget.style.transform='translateY(-2px)'} onMouseLeave={e => e.currentTarget.style.transform='none'}>Acknowledge</button>
+              </div>
+            </div>
+          </div>
+        )}
 
       </div>
     </>

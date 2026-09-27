@@ -126,6 +126,7 @@ function DashboardContent() {
   // Profile state
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [editName, setEditName] = useState('');
+  const [editAvatar, setEditAvatar] = useState('');
   const [editLanguage, setEditLanguage] = useState('');
 
   // Modal state
@@ -455,10 +456,21 @@ function DashboardContent() {
   };
 
   // ------- profile handler -------
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setEditAvatar(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const handleUpdateProfile = async (e) => {
     e.preventDefault();
     try {
-      const res = await api.put('/auth/profile', { name: editName, preferredLanguage: editLanguage });
+      const res = await api.put('/auth/profile', { name: editName, preferredLanguage: editLanguage, avatar: editAvatar });
       useAuthStore.getState().updateUser(res.data.token, res.data.user);
       setShowProfileModal(false);
       setAlertMessage('Profile updated successfully!');
@@ -529,7 +541,7 @@ function DashboardContent() {
                 value={newOrgName}
                 onChange={e => setNewOrgName(e.target.value)}
                 required
-                style={{ width: '100%', background: 'transparent', border: '2px solid #111', marginBottom: '1.5rem' }}
+                style={{ width: '100%', background: 'transparent', border: '2px solid #111', marginBottom: '1.5rem', padding: '0.75rem 1rem', fontSize: '1rem', color: '#111', outline: 'none', fontFamily: 'var(--font-grotesk)' }}
               />
               <div style={{ display: 'flex', gap: '1rem' }}>
                 <button type="button" onClick={() => setShowOrgModal(false)} style={{ flex: 1, padding: '0.875rem', background: 'transparent', color: '#555', border: '2px solid #111', borderRadius: '0', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
@@ -546,13 +558,29 @@ function DashboardContent() {
           <div style={MODAL_STYLE.box} onClick={(e) => e.stopPropagation()}>
             <h2 style={{ margin: '0 0 1.5rem', color: '#111', textAlign: 'center' }}>Edit Profile</h2>
             <form onSubmit={handleUpdateProfile}>
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.85rem', color: '#555' }}>Display Name</label>
-                <input type="text" className={styles.input} value={editName} onChange={e => setEditName(e.target.value)} style={{ width: '100%', background: 'transparent', border: '2px solid #111' }} />
+              <div style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  {editAvatar ? (
+                    <img src={editAvatar} style={{ width: 64, height: 64, borderRadius: '50%', objectFit: 'cover', border: '2px solid #0A0A0A' }} />
+                  ) : (
+                    <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#0022FF', border: '2px solid #0A0A0A', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '1.5rem', color: '#F7F5F0' }}>
+                      {(editName || '?').charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.85rem', color: '#555', cursor: 'pointer' }}>
+                       <span style={{ display: 'block', marginBottom: '0.4rem' }}>Profile Photo</span>
+                       <input type="file" accept="image/*" onChange={handleFileChange} style={{ display: 'none' }} />
+                       <div style={{ background: '#F7F5F0', color: '#0A0A0A', border: '2px solid #0A0A0A', padding: '0.4rem 0.8rem', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-mono)', display: 'inline-block', boxShadow: '2px 2px 0 rgba(10,10,10,1)' }}>Upload Image</div>
+                    </label>
+                  </div>
+                </div>
+                <div style={{ marginBottom: '1rem' }}>
+                  <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.85rem', color: '#555' }}>Display Name</label>
+                  <input type="text" className={styles.input} value={editName} onChange={e => setEditName(e.target.value)} style={{ width: '100%', background: 'transparent', border: '2px solid #111', padding: '0.75rem 1rem', fontSize: '1rem', color: '#111', outline: 'none', fontFamily: 'var(--font-grotesk)' }} />
               </div>
               <div style={{ marginBottom: '1.5rem' }}>
                 <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.85rem', color: '#555' }}>Preferred Language</label>
-                <select className={styles.input} value={editLanguage} onChange={e => setEditLanguage(e.target.value)} style={{ width: '100%', background: 'transparent', border: '2px solid #111' }}>
+                <select className={styles.input} value={editLanguage} onChange={e => setEditLanguage(e.target.value)} style={{ width: '100%', background: 'transparent', border: '2px solid #111', padding: '0.75rem 1rem', fontSize: '1rem', color: '#111', outline: 'none', fontFamily: 'var(--font-grotesk)' }}>
                   <option value="en">English</option>
                   <option value="hi">Hindi</option>
                   <option value="es">Spanish</option>
@@ -692,7 +720,7 @@ function DashboardContent() {
               <Link href="/admin" style={{ color: 'var(--cobalt)', textDecoration: 'none', fontWeight: 600 }}>Admin Panel</Link>
             )}
             <button
-              onClick={() => { setEditName(user.name); setEditLanguage(user.language); setShowProfileModal(true); }}
+              onClick={() => { setEditName(user.name); setEditLanguage(user.language); setEditAvatar(user.avatar || ''); setShowProfileModal(true); }}
               style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', background: 'transparent', border: '1px solid #111', color: '#111', padding: '0.4rem 0.8rem', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
             >
               <UserIcon size={14} /> Profile
@@ -931,135 +959,69 @@ function DashboardContent() {
                   ) : (
                     <div className={styles.meetingList}>
                       {displayMeetings.map(m => (
-                        <div key={m.id} className={styles.meetingItem} style={{ flexDirection: 'column', alignItems: 'stretch', gap: '0.75rem' }}>
-
-                          {/* Top row */}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '0.3rem' }}>
-                                <h4 style={{ margin: 0, fontSize: '1rem', color: '#111' }}>{m.title}</h4>
-                                <StateBadge state={m.state} />
+                        
+                          <div key={m.id} style={{ display: 'flex', flexDirection: 'column', padding: '1.5rem', background: 'transparent', borderTop: '2px solid #0A0A0A', gap: '1.5rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1, minWidth: '300px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                  <h3 style={{ margin: 0, fontSize: '1.75rem', color: '#0A0A0A', fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontWeight: 600 }}>{m.title || 'Untitled Meeting'}</h3>
+                                  <span style={{ background: m.state === 'COMPLETED' ? '#0022FF' : '#FF3311', color: '#F7F5F0', padding: '0.2rem 0.5rem', fontSize: '0.7rem', fontWeight: 700, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', border: '1px solid #0A0A0A', boxShadow: '2px 2px 0 rgba(10,10,10,1)' }}>
+                                    {m.state}
+                                  </span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                                  <code style={{ fontSize: '0.9rem', color: '#0022FF', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>ID: {m.meetingLink}</code>
+                                  <span style={{ color: '#5A5A5A', fontSize: '0.85rem' }}>Host: <strong style={{ color: '#0A0A0A' }}>{m.host?.name || 'Unknown'}</strong></span>
+                                  <span style={{ color: '#5A5A5A', fontSize: '0.85rem' }}>{new Date(m.createdAt).toLocaleString()}</span>
+                                </div>
                               </div>
-                              <p style={{ margin: '0.15rem 0', fontSize: '0.83rem', color: '#444', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                <span>
-                                  Code: <code style={{ background: 'rgba(0,0,0,0.05)', padding: '0.1rem 0.4rem', borderRadius: 4 }}>{m.meetingLink}</code>
-                                </span>
-                                <button
-                                  onClick={() => copyCode(m.meetingLink)}
-                                  style={{ background: 'none', border: '1px solid #111', borderRadius: 4, color: copiedCode === m.meetingLink ? '#34d399' : '#9ca3af', cursor: 'pointer', fontSize: '0.72rem', padding: '0.1rem 0.5rem' }}
-                                >
-                                  {copiedCode === m.meetingLink ? '✓ Copied!' : 'Copy'}
-                                </button>
-                                <span style={{ color: '#777' }}>•</span>
-                                <span>Host: <strong>{m.hostId === user.id ? 'You' : m.host?.name}</strong></span>
-                              </p>
-                              <p style={{ margin: 0, fontSize: '0.78rem', color: '#555', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                                <Clock size={12} />
-                                {m.state === 'SCHEDULED' && m.startTime
-                                  ? `Scheduled for ${new Date(m.startTime).toLocaleString()}`
-                                  : `Created ${new Date(m.createdAt).toLocaleString()}`}
-                              </p>
-                            </div>
 
-                            {/* Actions */}
-                            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexShrink: 0 }}>
-                              <button
-                                  onClick={() => handleDeleteMeeting(m.id)}
-                                  title="Remove from History"
-                                  style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)', padding: '0.5rem', borderRadius: '0', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                                >
+                              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                                {m.state === 'COMPLETED' ? (
+                                  <>
+                                    <button onClick={() => handleViewTranscript(m.meetingLink)} style={{ background: '#F7F5F0', color: '#0A0A0A', border: '2px solid #0A0A0A', padding: '0.5rem 1rem', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600, fontFamily: 'var(--font-mono)', boxShadow: '4px 4px 0 rgba(10,10,10,1)', textTransform: 'uppercase' }}>
+                                      Transcript
+                                    </button>
+                                    <button onClick={(e) => { e.preventDefault(); handleViewSummary(m.meetingLink); }} style={{ background: '#0A0A0A', color: '#F7F5F0', border: '2px solid #0A0A0A', padding: '0.5rem 1rem', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600, fontFamily: 'var(--font-mono)', boxShadow: '4px 4px 0 rgba(10,10,10,1)', textTransform: 'uppercase' }}>
+                                      Summary
+                                    </button>
+                                    <Link href={`/meeting/${m.meetingLink}/report`} style={{ background: '#0022FF', color: '#F7F5F0', border: '2px solid #0A0A0A', padding: '0.5rem 1rem', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600, fontFamily: 'var(--font-mono)', boxShadow: '4px 4px 0 rgba(10,10,10,1)', textTransform: 'uppercase', textDecoration: 'none' }}>
+                                      Report
+                                    </Link>
+                                  </>
+                                ) : (
+                                  <Link href={`/meeting/${m.meetingLink}`} style={{ background: '#FF3311', color: '#F7F5F0', border: '2px solid #0A0A0A', padding: '0.5rem 2rem', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 700, fontFamily: 'var(--font-mono)', boxShadow: '4px 4px 0 rgba(10,10,10,1)', textTransform: 'uppercase', textDecoration: 'none' }}>
+                                    {m.state === 'SCHEDULED' ? 'Start' : 'Join'}
+                                  </Link>
+                                )}
+                                <button onClick={() => handleDeleteMeeting(m.id)} title="Remove" style={{ background: '#FF3311', color: '#F7F5F0', border: '2px solid #0A0A0A', padding: '0.5rem', cursor: 'pointer', display: 'flex', alignItems: 'center', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
                                   <Trash2 size={16} />
                                 </button>
-
-                              {m.state === 'COMPLETED' ? (
-                                <div style={{ display: 'flex', gap: '0.4rem' }}>
-                                  <button
-                                    onClick={() => handleViewTranscript(m.meetingLink)}
-                                    style={{ background: 'rgba(96,165,250,0.1)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.2)', padding: '0.5rem 0.8rem', borderRadius: '0', cursor: 'pointer', fontSize: '0.82rem', whiteSpace: 'nowrap', fontWeight: 600 }}
-                                  >
-                                    📝 Transcript
-                                  </button>
-                                    <button
-                                      onClick={(e) => { e.preventDefault(); handleViewSummary(m.meetingLink); }}
-                                      style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.2)', padding: '0.5rem 0.8rem', borderRadius: '0', cursor: 'pointer', fontSize: '0.82rem', whiteSpace: 'nowrap', fontWeight: 600, marginLeft: '0.4rem' }}
-                                    >
-                                      ✨ Summary
-                                    </button>
-                                  <Link
-                                    href={`/meeting/${m.meetingLink}/report`}
-                                    style={{ background: 'rgba(167,139,250,0.1)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)', padding: '0.5rem 0.8rem', borderRadius: '0', cursor: 'pointer', fontSize: '0.82rem', whiteSpace: 'nowrap', fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
-                                  >
-                                    📊 Report
-                                  </Link>
-                                </div>
-                              ) : (
-                                <Link
-                                  href={`/meeting/${m.meetingLink}`}
-                                  className={styles.btnJoin}
-                                  style={{ whiteSpace: 'nowrap' }}
-                                >
-                                  {m.state === 'SCHEDULED' ? '▶ Start' : 'Join'}
-                                </Link>
-                              )}
+                              </div>
                             </div>
-                          </div>
-
-                          {/* Attendance log (history only) */}
+                            
                             {activeTab === 'history' && m.participants?.length > 0 && (
-                              <details style={{ fontSize: '0.82rem', color: '#555', background: 'rgba(255,255,255,0.02)', padding: '0.5rem', borderRadius: '0' }}>
-                                <summary style={{ cursor: 'pointer', color: '#a78bfa', marginBottom: '0.4rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                  <div>
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4, verticalAlign: 'middle' }}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-                                    Attendance Log ({m.participants.length} participants)
-                                  </div>
-                                </summary>
-                                <div style={{ marginTop: '0.5rem', marginBottom: '0.5rem' }}>
-                                  <button onClick={(e) => { e.preventDefault(); handleExportAttendance(m); }} style={{ background: 'rgba(167,139,250,0.1)', color: '#a78bfa', border: '1px solid rgba(167,139,250,0.2)', padding: '0.3rem 0.6rem', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                              <div style={{ padding: '1rem', border: '2px solid #0A0A0A', background: 'transparent' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', color: '#0A0A0A' }}>Attendance Log ({m.participants.length} Users)</span>
+                                  <button onClick={(e) => { e.preventDefault(); handleExportAttendance(m); }} style={{ background: 'transparent', color: '#0022FF', border: '2px solid #0022FF', padding: '0.3rem 0.6rem', fontSize: '0.75rem', fontWeight: 700, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', cursor: 'pointer' }}>
                                     Export CSV
                                   </button>
                                 </div>
-                                <div style={{ paddingLeft: '0.25rem', maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                                  {m.participants.map(p => {
-                                    let totalMs = 0;
-                                    (p.sessions || []).forEach((s, index, arr) => {
-                                      const start = new Date(s.joinedAt).getTime();
-                                      let end;
-                                      if (s.leftAt) {
-                                        end = new Date(s.leftAt).getTime();
-                                      } else {
-                                        if (index === arr.length - 1) {
-                                          end = m.endTime ? new Date(m.endTime).getTime() : Date.now();
-                                        } else {
-                                          end = start;
-                                        }
-                                      }
-                                      totalMs += (end - start);
-                                    });
-                                    const mins = Math.floor(totalMs / 60000);
-                                    const timeStr = mins < 1 ? '< 1m' : (mins >= 60 ? `${Math.floor(mins/60)}h ${mins%60}m` : `${mins}m`);
-                                    return (
-                                      <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', padding: '0.4rem 0.6rem', borderRadius: '6px', flexWrap: 'wrap' }}>
-                                        <strong style={{ color: '#111', flexShrink: 0 }}>{p.user?.name || 'Unknown'}</strong>
-                                        <RoleBadge role={p.role} />
-                                        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                                          <span style={{ color: '#555', fontSize: '0.75rem' }}>
-                                            Total Time: <span style={{ color: '#111', fontWeight: 600 }}>{timeStr}</span>
-                                          </span>
-                                          <span style={{ color: '#64748b', fontSize: '0.7rem' }}>
-                                            ({p.sessions?.length || 0} session{(p.sessions?.length || 0) !== 1 ? 's' : ''})
-                                          </span>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                  {m.participants.map(p => (
+                                    <div key={p.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', border: '1px solid #0A0A0A', padding: '0.25rem 0.75rem', fontSize: '0.85rem', color: '#0A0A0A' }}>
+                                      <strong style={{ fontWeight: 600 }}>{p.user?.name || 'Unknown'}</strong>
+                                      <span style={{ fontSize: '0.7rem', color: '#FF3311', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>{p.role}</span>
+                                    </div>
+                                  ))}
                                 </div>
-                              </details>
-                          )}
-                        </div>
-                      ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
 
-                      {/* Show more / less for history */}
+                        {/* Show more / less for history */}
                       {activeTab === 'history' && historyMeetings.length > 3 && (
                         <div style={{ textAlign: 'center', marginTop: '1rem', paddingTop: '1rem', borderTop: '2px solid #111' }}>
                           <button
