@@ -55,3 +55,6 @@ backend/dev.db-journal
 
 docker-compose.override.yml
 
+
+# Next.js 15 Agent Rules
+AGENTS.md
