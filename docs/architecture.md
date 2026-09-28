@@ -338,3 +338,89 @@ The WebRTC mesh network operates entirely on the client side, meaning a browser 
 To prevent state-loss in critical database roles (like Host lockouts or lost Waiting Room lobbies):
 - The /meetings/join/:id API route forcefully rehydrates missing states by actively querying PostgreSQL for any users trapped in status === 'WAITING' and bundles them into the initial HTTP response payload so the Host's lobby UI is instantly restored.
 - The database engine actively checks the user's existing participant.status (e.g. ADMITTED) during reconnection to prevent the default fallback (which would force returning ADMITTED participants back into the WAITING state upon refresh).
+
+### 10. Appendix: WebRTC Networking Flow (NAT, STUN, TURN)
+
+#### 1. Public IP vs private IP
+Your internet provider gives your home one public address.
+* **Your home router:** 203.0.113.50 (The public internet can potentially find that address)
+
+But inside your house, you may have many devices:
+* **Laptop:** 192.168.1.5
+* **Phone:** 192.168.1.6
+* **TV:** 192.168.1.7
+
+These are private IP addresses. They are like room numbers inside a building. Someone outside the building cannot send a letter to �Room 5� without knowing which building it belongs to. Likewise, 192.168.1.5 exists in millions of homes, so it cannot identify your laptop on the public internet.
+
+#### 2. What your router does
+Your router sits between your private home network ? the public internet. It lets all your devices share the one public IP given by your ISP. This is called **NAT: Network Address Translation**.
+
+For example, when your laptop opens YouTube, the router remembers:
+*Internet reply sent to 203.0.113.50 : 50123 should actually go to 192.168.1.5 : laptop*
+
+The port is like a temporary apartment-door number. So the router keeps a temporary table:
+* 203.0.113.50:50123 ? 192.168.1.5
+* 203.0.113.50:50124 ? 192.168.1.6
+
+That is how YouTube replies reach the correct device.
+
+#### 3. Why incoming connections are blocked
+Imagine a stranger on the internet sends a packet to 203.0.113.50:9999. Your router asks: Which device inside my home asked for this?
+
+If it has no matching entry in its table, it drops the packet. This is good for security, otherwise anyone on the internet could attempt to connect directly to your laptop or camera. This behavior is often called **NAT firewall behavior**.
+
+#### 4. Why a direct WebRTC call is difficult (The NAT Problem)
+Suppose you are on one home network and your friend is on another.
+* **You:** Laptop private IP 192.168.1.5, Router public IP 203.0.113.50
+* **Friend:** Laptop private IP 192.168.1.9, Router public IP 198.51.100.70
+
+If you tell your friend: *"Connect to 192.168.1.5"*, their laptop looks for that address inside their own home network not yours. So it fails.
+
+Even if they know your public IP (*"Connect to 203.0.113.50"*), your router may still reject the request because it does not know which internal device should receive it.
+
+#### 5. What WebRTC actually does
+WebRTC tries to create a direct connection between browsers. It uses a process called **ICE** (Interactive Connectivity Establishment). ICE means: *"Try every sensible way to connect these two people."*
+
+It tries three main approaches:
+
+**A. Local connection**
+If both people are on the same Wi-Fi, private addresses can work (192.168.1.5 ? 192.168.1.9). No internet routing is needed.
+
+**B. STUN: discover the public-facing address**
+A STUN server is a public server on the internet. Your browser sends it a message: *"Hi, what address do you see me coming from?"*
+The STUN server replies: *"I see you as 203.0.113.50:50123"*
+
+Now your browser knows the temporary public address and port created by the router. This is called a **server-reflexive candidate**. Your browser sends this information to your friend through the signaling server (Your browser ? signaling server ? friend�s browser).
+
+**C. NAT hole punching**
+Both browsers send outgoing packets toward each other at nearly the same time. Because each router sees an outgoing request, it creates a temporary mapping and may allow the matching incoming reply through.
+* You send outward ? your router opens a temporary path
+* Friend sends outward ? their router opens a temporary path
+
+If compatible, the browsers establish a direct peer-to-peer connection. Then the audio/video travels directly between them.
+
+#### 6. Why STUN is sometimes not enough
+Some networks are stricter (corporate networks, university Wi-Fi, symmetric NAT, UDP blocking). In those cases, the direct path fails even with STUN.
+
+#### 7. TURN: the reliable fallback
+TURN is a public relay server. Instead of connecting directly, both connect outward to the TURN server (You ? TURN server ? Friend). Both connections are outbound, which routers usually permit. The TURN server forwards the data. It costs bandwidth and efficiency, but guarantees the call works.
+
+#### 8. The complete WebRTC flow
+1. User A opens a meeting.
+2. User B opens the same meeting.
+3. Both browsers connect to your signaling server using WebSocket / Socket.IO.
+4. They exchange offers, answers, and ICE candidates.
+5. Each browser asks STUN: "What public address and port do you see?"
+6. WebRTC tries direct connections: local IP ? public STUN address ? other candidates.
+7. If direct connection works: Browser A ? Browser B
+8. If direct connection fails: Browser A ? TURN relay ? Browser B
+
+#### 9. In simple terms
+* **Router:** The security guard for your home network.
+* **Private IP:** Your room number inside the home.
+* **Public IP:** Your homes street address.
+* **NAT:** The routers record of which room requested which internet response.
+* **STUN:** A service that tells your browser how the internet sees it.
+* **ICE:** WebRTCs process for trying possible connection routes.
+* **TURN:** A relay service that carries the call when direct connection fails.
+* **Signaling server:** The messenger that helps browsers exchange connection details.

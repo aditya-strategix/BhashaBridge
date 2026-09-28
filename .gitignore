@@ -52,6 +52,6 @@ backend/dev.db-journal
 *.swo
 
 # Docker
-.dockerignore
+
 docker-compose.override.yml
 

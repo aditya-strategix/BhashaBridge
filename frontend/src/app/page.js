@@ -41,8 +41,8 @@ export default function Home() {
       <div className={styles.floatingWord2}>Listen</div>
       <div className={styles.floatingWord3}>Connect</div>
       
-      <svg className={styles.speechWave} viewBox="0 0 100 20" preserveAspectRatio="none">
-        <path d="M0,10 Q25,0 50,10 T100,10" fill="none" stroke="var(--cobalt)" strokeWidth="0.2"/>
+      <svg suppressHydrationWarning className={styles.speechWave} viewBox="0 0 100 20" preserveAspectRatio="none">
+        <path suppressHydrationWarning d="M0,10 Q25,0 50,10 T100,10" fill="none" stroke="var(--cobalt)" strokeWidth="0.2"/>
       </svg>
     </div>
   );
