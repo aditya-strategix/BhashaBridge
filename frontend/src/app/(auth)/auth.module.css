@@ -114,3 +114,13 @@
   font-size: 0.85rem;
   text-transform: uppercase;
 }
+
+/* SMARTPHONE RESPONSIVENESS */
+@media screen and (max-width: 768px) {
+  .editorialAuthContainer {
+    padding: 1.5rem;
+  }
+  .sharpTitle {
+    font-size: clamp(2.5rem, 12vw, 4rem);
+  }
+}

@@ -244,7 +244,7 @@ export default function NotificationBell() {
         {open && (
           <div style={{
             position: 'absolute', right: 0, top: 'calc(100% + 10px)',
-            width: 360, maxHeight: 480, overflowY: 'auto',
+            width: 'min(360px, 90vw)', maxHeight: 480, overflowY: 'auto',
             background: 'linear-gradient(135deg, #FDFBF7, #FDFBF7)',
             border: '2px solid #111',
             borderRadius: '0', zIndex: 9998,

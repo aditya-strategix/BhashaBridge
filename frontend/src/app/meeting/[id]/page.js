@@ -92,6 +92,7 @@ export default function MeetingRoom() {
   const [waitingUsers, setWaitingUsers] = useState([]);
   const [sidebarTab, setSidebarTab] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [showLobby, setShowLobby] = useState(false);
   const [summaryModal, setSummaryModal] = useState({ isOpen: false, text: '', loading: false });
   const [lobbyToast, setLobbyToast] = useState(null); // { name }
@@ -235,7 +236,11 @@ export default function MeetingRoom() {
           if (userId === user.id) setParticipantStatus('REJECTED');
           else setWaitingUsers(prev => prev.filter(u => u.userId !== userId));
         });
-        newSocket.on('participant:joined', ({ userId, socketId, name, role, avatar }) => {
+                  newSocket.on('meeting:ended', () => {
+            alert('The host has ended this meeting for everyone.');
+            router.push(`/meeting/${meetingId}/report`);
+          });
+          newSocket.on('participant:joined', ({ userId, socketId, name, role, avatar }) => {
           newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current });
           const peer = createPeer(socketId, newSocket.id, currentStream, newSocket, user.name, data.participantRole);
           peersRef.current.push({ peerID: socketId, userId, peer, name, role, avatar });
@@ -365,7 +370,12 @@ export default function MeetingRoom() {
     };
 
     initializeMeeting();
-    return () => { if (newSocket) newSocket.disconnect(); };
+    return () => { 
+        if (newSocket) newSocket.disconnect(); 
+        peersRef.current.forEach(p => p.peer.destroy()); 
+        peersRef.current = []; 
+        if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop()); 
+      };
   }, [user, meetingId]);
 
   // Speech recognition
@@ -438,8 +448,20 @@ export default function MeetingRoom() {
     } catch (err) { console.error('Failed to reject', err); }
   };
 
-  const leaveMeeting = async () => {
+  const leaveMeeting = () => {
+    if (isHostOrCoHost) {
+      setShowLeaveModal(true);
+    } else {
+      router.push(`/meeting/${meetingId}/report`);
+    }
+  };
+
+  const confirmEndMeeting = async () => {
     try { await authFetch(`/meetings/${meetingId}/end`, { method: 'POST' }); } catch {}
+    router.push(`/meeting/${meetingId}/report`);
+  };
+
+  const confirmLeaveMeeting = () => {
     router.push(`/meeting/${meetingId}/report`);
   };
 
@@ -531,10 +553,10 @@ export default function MeetingRoom() {
   // ======= WAITING ROOM =======
   if (participantStatus === 'WAITING') {
     return (
-      <div style={{ display: 'flex', height: '100vh', background: '#F7F5F0', overflow: 'hidden' }}>
+      <div className={styles.lobbyContainer}>
 
         {/* Left - camera preview */}
-        <div style={{ flex: '0 0 55%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3rem' }}>
+        <div className={styles.lobbyLeft}>
           <div style={{ width: '100%', maxWidth: 560, position: 'relative' }}>
             {/* Video card */}
             <div style={{ position: 'relative', borderRadius: '0', overflow: 'hidden', background: '#000', border: '2px solid #0A0A0A', boxShadow: '12px 12px 0 rgba(10,10,10,1)', aspectRatio: '16/9' }}>
@@ -562,7 +584,7 @@ export default function MeetingRoom() {
         </div>
 
         {/* Right - waiting info */}
-        <div style={{ flex: '0 0 45%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3rem', borderLeft: '2px solid #0A0A0A' }}>
+        <div className={styles.lobbyRight}>
           <div style={{ maxWidth: 380, width: '100%' }}>
             
             <h1 style={{ margin: '0 0 0.75rem', color: '#0A0A0A', fontSize: '2.5rem', fontWeight: 600, lineHeight: 1.1, fontFamily: 'var(--font-serif)', fontStyle: 'italic' }}>
@@ -631,14 +653,14 @@ export default function MeetingRoom() {
         )}
 
         {/* === HEADER === */}
-        <header style={{ position: 'absolute', top: 0, left: 0, right: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 2rem', background: '#F7F5F0', borderBottom: '2px solid #0A0A0A', zIndex: 10, fontFamily: 'var(--font-grotesk)' }}>
+        <header style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 1rem', gap: '1rem', background: '#F7F5F0', borderBottom: '2px solid #0A0A0A', zIndex: 10, fontFamily: 'var(--font-grotesk)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
               <div style={{ width: 12, height: 12, borderRadius: '0', background: '#FF3311' }} />
               <span style={{ fontWeight: 600, color: '#0A0A0A', fontSize: '1.5rem', fontFamily: 'var(--font-serif)', fontStyle: 'italic', letterSpacing: '-0.02em' }}>BhashaBridge</span>
             </div>
             <div style={{ height: 24, width: 2, background: '#0A0A0A' }} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div className='meetingHeaderRight' style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
               <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.9rem', color: '#0022FF', fontWeight: 600 }}>{meetingId}</code>
               {participantRole && (
                 <span style={{ background: participantRole === 'HOST' ? '#FF3311' : '#0022FF', color: '#F7F5F0', padding: '0.25rem 0.5rem', fontSize: '0.7rem', fontWeight: 700, fontFamily: 'var(--font-mono)', border: '2px solid #0A0A0A', boxShadow: '2px 2px 0 rgba(10,10,10,1)' }}>
@@ -648,7 +670,7 @@ export default function MeetingRoom() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div className='meetingHeaderRight' style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
             {isHostOrCoHost && waitingUsers.length > 0 && (
               <button
                 onClick={() => setShowLobby(l => !l)}
@@ -703,7 +725,7 @@ export default function MeetingRoom() {
           )}
 
           {/* Controls bar */}
-          <div style={{ position: 'absolute', bottom: '2rem', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '0.75rem', padding: '0.75rem 1rem', background: '#F7F5F0', border: '2px solid #0A0A0A', boxShadow: '8px 8px 0 rgba(10,10,10,1)', zIndex: 150 }}>
+          <div className='meetingControlsBar' style={{ position: 'absolute', bottom: '2rem', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '0.75rem', padding: '0.75rem 1rem', background: '#F7F5F0', border: '2px solid #0A0A0A', boxShadow: '8px 8px 0 rgba(10,10,10,1)', zIndex: 150 }}>
             <button
               onClick={toggleAudio}
               title={isAudioOn ? 'Mute' : 'Unmute'}
@@ -826,10 +848,8 @@ export default function MeetingRoom() {
               {/* Waiting room section for host */}
               {isHostOrCoHost && waitingUsers.length > 0 && (
                 <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0' }}>
-                  <p style={{ margin: '0 0 0.75rem', fontSize: '0.78rem', fontWeight: 700, color: '#FF3311', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#FF3311', animation: 'pulse 1s infinite' }} />
-                    Waiting Room ({waitingUsers.length})
-                  </p>
+                  <div style={{ margin: '0 0 0.75rem', fontSize: '0.78rem', fontWeight: 700, color: '#FF3311', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#FF3311', animation: 'pulse 1s infinite' }} /> Waiting Room ({waitingUsers.length}) </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                     {waitingUsers.map(w => (
                       <div key={w.userId} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.6rem', background: 'rgba(255,255,255,0.04)', borderRadius: '10px' }}>
@@ -906,7 +926,28 @@ export default function MeetingRoom() {
           </div>
         )}
 
-        {/* === SETTINGS MODAL === */}
+        {/* === SETTINGS MODAL === */}        {showLeaveModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowLeaveModal(false)}>
+            <div style={{ background: '#F7F5F0', border: '2px solid #0A0A0A', borderRadius: '0', padding: '3rem', width: 440, fontFamily: 'var(--font-grotesk)', boxShadow: '12px 12px 0 rgba(10,10,10,1)' }} onClick={(e) => e.stopPropagation()}>
+              <h2 style={{ margin: '0 0 1rem 0', color: '#0A0A0A', fontSize: '2rem', fontWeight: 600, fontFamily: 'var(--font-serif)', fontStyle: 'italic' }}>Leave Meeting</h2>
+              <p style={{ margin: '0 0 2rem 0', color: '#5A5A5A', fontSize: '1rem', lineHeight: 1.5 }}>
+                You are the host. Do you want to end the meeting for everyone, or just leave?
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <button onClick={confirmEndMeeting} style={{ padding: '1rem', background: '#FF3311', color: '#F7F5F0', border: '2px solid #0A0A0A', fontWeight: 600, cursor: 'pointer', fontSize: '1rem', textTransform: 'uppercase', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
+                  End Meeting for All
+                </button>
+                <button onClick={confirmLeaveMeeting} style={{ padding: '1rem', background: '#0A0A0A', color: '#F7F5F0', border: '2px solid #0A0A0A', fontWeight: 600, cursor: 'pointer', fontSize: '1rem', textTransform: 'uppercase', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
+                  Just Leave
+                </button>
+                <button onClick={() => setShowLeaveModal(false)} style={{ padding: '1rem', background: 'transparent', color: '#0A0A0A', border: 'none', fontWeight: 600, cursor: 'pointer', fontSize: '0.9rem', textDecoration: 'underline' }}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {showSettings && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowSettings(false)}>
             <div style={{ background: '#F7F5F0', border: '2px solid #0A0A0A', borderRadius: '0', padding: '3rem', width: 480, fontFamily: 'var(--font-grotesk)', boxShadow: '12px 12px 0 rgba(10,10,10,1)' }} onClick={(e) => e.stopPropagation()}>
@@ -1065,6 +1106,12 @@ export default function MeetingRoom() {
     </div>
   );
 }
+
+
+
+
+
+
 
 
 

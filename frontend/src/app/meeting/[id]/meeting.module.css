@@ -257,3 +257,44 @@
   text-transform: uppercase;
   color: #0022FF;
 }
+
+/* ---- LOBBY MOBILE FIX ---- */
+.lobbyContainer {
+  display: flex;
+  height: 100vh;
+  background: #FDFBF7;
+  overflow-y: auto;
+}
+
+.lobbyLeft {
+  flex: 0 0 55%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+}
+
+.lobbyRight {
+  flex: 0 0 45%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  border-left: 2px solid #0A0A0A;
+}
+
+@media screen and (max-width: 768px) {
+  .lobbyContainer {
+    flex-direction: column;
+  }
+  .lobbyLeft {
+    flex: auto;
+    padding: 1.5rem;
+  }
+  .lobbyRight {
+    flex: auto;
+    padding: 1.5rem;
+    border-left: none;
+    border-top: 2px solid #0A0A0A;
+  }
+}

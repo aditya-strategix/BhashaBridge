@@ -57,9 +57,14 @@ export default function Login() {
         </form>
 
         <div className={styles.thinRule}></div>
-        <Link href={`/register${typeof window !== 'undefined' && window.location.search ? window.location.search : ''}`} className={styles.editorialLink}>
-          Or Register
-        </Link>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Link href="/" className={styles.editorialLink} style={{ textAlign: 'left' }}>
+            &larr; Home
+          </Link>
+          <Link href={`/register${typeof window !== 'undefined' && window.location.search ? window.location.search : ''}`} className={styles.editorialLink}>
+            Or Register
+          </Link>
+        </div>
       </div>
     </div>
   );

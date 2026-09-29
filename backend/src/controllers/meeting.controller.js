@@ -92,6 +92,7 @@ exports.getSummary = async (req, res) => {
     }
 
     if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
+    if (meeting.state !== 'COMPLETED') return res.status(403).json({ error: 'This meeting is still ongoing. The summary will be available once the host ends the session.' });
 
     
       let isOrgAdmin = false;
@@ -336,7 +337,8 @@ exports.endMeeting = async (req, res) => {
       }
     });
 
-    res.json({ meeting: updated });
+    if (global.io) global.io.to(link).emit('meeting:ended');
+      res.json({ meeting: updated });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Server error' });
@@ -472,6 +474,7 @@ exports.getTranscript = async (req, res) => {
     }
 
     if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
+    if (meeting.state !== 'COMPLETED') return res.status(403).json({ error: 'This meeting is still ongoing. The transcript will be available once the host ends the session.' });
 
     
       let isOrgAdmin = false;
@@ -508,3 +511,5 @@ exports.getTranscript = async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 };
+
+

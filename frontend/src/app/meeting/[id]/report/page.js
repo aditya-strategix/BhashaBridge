@@ -23,28 +23,17 @@ export default function MeetingReport() {
   useEffect(() => {
     if (!user) return;
     
-    const fetchReport = async () => {
+        const fetchReport = async () => {
       try {
         const res = await api.get(`/analytics/${meetingId}/report`);
         setReport(res.data.report);
       } catch (err) {
-        if (err.response?.status === 404) {
-          try {
-            await api.get(`/analytics/${meetingId}`);
-            const res2 = await api.post(`/analytics/${meetingId}/report`);
-            setReport(res2.data.report);
-          } catch (e) {
-            setError('Failed to generate report');
-          }
-        } else {
-          setError('Failed to load report');
-        }
+        setError('Failed to load report');
       } finally {
         setLoading(false);
       }
     };
-
-    fetchReport();
+fetchReport();
   }, [meetingId, user]);
 
   if (!mounted) return null;
@@ -52,13 +41,13 @@ export default function MeetingReport() {
   
   if (loading) return (
     <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-ivory, #FAF9F6)', color: '#000', fontFamily: 'var(--font-mono, monospace)' }}>
-      <div style={{ fontSize: '2rem', textTransform: 'uppercase' }}>[ SYNTHESIZING ARCHIVES ]</div>
+      <div className='animate-pulse' style={{ fontSize: 'clamp(1.2rem, 5vw, 2rem)', textTransform: 'uppercase', textAlign: 'center', letterSpacing: '0.1em' }}>[ SYNTHESIZING ARCHIVES... ]</div>
     </div>
   );
 
   if (error) return (
     <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-ivory, #FAF9F6)', color: '#000' }}>
-      <div style={{ border: '2px solid #000', padding: '3rem', textAlign: 'center', fontFamily: 'var(--font-mono, monospace)' }}>
+      <div style={{ border: '2px solid #000', padding: '1.5rem', textAlign: 'center', fontFamily: 'var(--font-mono, monospace)' }}>
         <h2 style={{ margin: '0 0 1rem 0', color: 'var(--vermilion, #E34234)', textTransform: 'uppercase' }}>[ FRAGMENT CORRUPTED ]</h2>
         <p style={{ margin: '0 0 2rem 0' }}>{error}</p>
         <Link href="/dashboard" style={{ color: '#000', textDecoration: 'underline', textTransform: 'uppercase' }}>Retreat to Base</Link>
@@ -125,8 +114,8 @@ export default function MeetingReport() {
     <>
       {summaryModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(250, 249, 246, 0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }} onClick={() => setSummaryModal(null)}>
-          <div style={{ background: 'var(--bg-ivory, #FAF9F6)', border: '2px solid #000', padding: '3rem', width: '90%', maxWidth: '800px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', borderBottom: '1px solid #000', paddingBottom: '1rem' }}>
+          <div style={{ background: 'var(--bg-ivory, #FAF9F6)', border: '2px solid #000', padding: '1.5rem', width: '90%', maxWidth: '800px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', borderBottom: '1px solid #000', paddingBottom: '1rem', marginBottom: '2rem' }}>
               <h2 style={{ margin: 0, fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '2rem', color: 'var(--cobalt, #0047AB)' }}>Condensed Narrative</h2>
               <div style={{ display: 'flex', gap: '1rem' }}>
                 {!summaryModal.loading && summaryModal.text && (
@@ -154,7 +143,7 @@ export default function MeetingReport() {
 
       <div style={{ minHeight: '100vh', backgroundColor: 'var(--bg-ivory, #FAF9F6)', color: '#000', padding: '2rem', position: 'relative', overflow: 'hidden' }}>
         
-        <header style={{ position: 'relative', zIndex: 10, display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #000', paddingBottom: '1rem' }}>
+        <header style={{ position: 'relative', zIndex: 10, display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #000', paddingBottom: '1rem', marginBottom: '2rem' }}>
           <div>
             <h1 style={{ fontFamily: 'var(--font-mono, monospace)', textTransform: 'uppercase', fontSize: '1rem', margin: 0 }}>BhashaBridge / Analytics</h1>
             <div style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '1.2rem', color: '#666' }}>Post-Mortem Record</div>
@@ -166,26 +155,26 @@ export default function MeetingReport() {
 
         <div style={{ position: 'relative', height: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           
-          <div style={{ position: 'absolute', top: '10%', left: '-5%', fontSize: '20vw', fontFamily: 'var(--font-grotesk, sans-serif)', fontWeight: 'bold', color: 'rgba(0, 71, 171, 0.05)', lineHeight: 0.8, letterSpacing: '-0.05em', zIndex: 1 }}>
+          <div className='hide-on-mobile' style={{ position: 'absolute', top: '10%', left: '-5%', fontSize: '20vw', fontFamily: 'var(--font-grotesk, sans-serif)', fontWeight: 'bold', color: 'rgba(0, 71, 171, 0.05)', lineHeight: 0.8, letterSpacing: '-0.05em', zIndex: 1 }}>
             {data?.totalParticipants || 0}
           </div>
-          <div style={{ position: 'absolute', bottom: '5%', right: '-10%', fontSize: '25vw', fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', color: 'rgba(227, 66, 52, 0.05)', lineHeight: 0.8, zIndex: 1 }}>
+          <div className='hide-on-mobile' style={{ position: 'absolute', bottom: '5%', right: '-10%', fontSize: '25vw', fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', color: 'rgba(227, 66, 52, 0.05)', lineHeight: 0.8, zIndex: 0 }}>
             {formatDuration(data?.totalDurationSeconds || 0)}
           </div>
 
-          <div style={{ position: 'relative', zIndex: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4rem', width: '100%', maxWidth: '1200px' }}>
+          <div style={{ position: 'relative', zIndex: 10, display: 'grid', gridTemplateColumns: '1fr', gap: '4rem', width: '100%', maxWidth: '1200px' }}>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4rem' }}>
               <div>
                 <div style={{ fontFamily: 'var(--font-mono, monospace)', textTransform: 'uppercase', marginBottom: '0.5rem', borderBottom: '1px solid #000', display: 'inline-block', paddingBottom: '0.2rem' }}>Total Entities</div>
-                <div style={{ fontFamily: 'var(--font-grotesk, sans-serif)', fontSize: '6rem', fontWeight: 'bold', lineHeight: 1, color: 'var(--cobalt, #0047AB)' }}>
+                <div style={{ fontFamily: 'var(--font-grotesk, sans-serif)', fontSize: '3rem', fontWeight: 'bold', lineHeight: 1, color: 'var(--cobalt, #0047AB)' }}>
                   {data?.totalParticipants || 0}
                 </div>
               </div>
 
               <div>
                 <div style={{ fontFamily: 'var(--font-mono, monospace)', textTransform: 'uppercase', marginBottom: '0.5rem', borderBottom: '1px solid #000', display: 'inline-block', paddingBottom: '0.2rem' }}>Duration (Min)</div>
-                <div style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '7rem', lineHeight: 1, color: 'var(--vermilion, #E34234)' }}>
+                <div style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '3.5rem', lineHeight: 1, color: 'var(--vermilion, #E34234)' }}>
                   {formatDuration(data?.totalDurationSeconds || 0)}
                 </div>
               </div>
@@ -223,7 +212,7 @@ export default function MeetingReport() {
           </div>
         </div>
 
-        <div style={{ position: 'absolute', bottom: '2rem', left: '2rem', fontFamily: 'var(--font-mono, monospace)', fontSize: '0.75rem', textTransform: 'uppercase', color: '#666' }}>
+        <div style={{ position: 'relative', marginTop: '4rem', fontFamily: 'var(--font-mono, monospace)', fontSize: '0.75rem', textTransform: 'uppercase', color: '#666' }}>
           Chronicle generated: {new Date(report?.generatedAt || Date.now()).toLocaleString()}
         </div>
 
@@ -247,3 +236,4 @@ export default function MeetingReport() {
     </>
   );
 }
+

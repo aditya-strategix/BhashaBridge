@@ -962,7 +962,7 @@ function DashboardContent() {
                         
                           <div key={m.id} style={{ display: 'flex', flexDirection: 'column', padding: '1.5rem', background: 'transparent', borderTop: '2px solid #0A0A0A', gap: '1.5rem' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1, minWidth: '300px' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1, minWidth: 'min(200px, 100%)' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                                   <h3 style={{ margin: 0, fontSize: '1.75rem', color: '#0A0A0A', fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontWeight: 600 }}>{m.title || 'Untitled Meeting'}</h3>
                                   <span style={{ background: m.state === 'COMPLETED' ? '#0022FF' : '#FF3311', color: '#F7F5F0', padding: '0.2rem 0.5rem', fontSize: '0.7rem', fontWeight: 700, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', border: '1px solid #0A0A0A', boxShadow: '2px 2px 0 rgba(10,10,10,1)' }}>

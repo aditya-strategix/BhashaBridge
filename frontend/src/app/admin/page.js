@@ -83,10 +83,10 @@ export default function AdminDashboard() {
   if (!user || (user.role !== 'ORG_ADMIN' && user.role !== 'PLATFORM_ADMIN')) return null;
 
   return (
-    <div style={{ backgroundColor: 'var(--bg-ivory, #FAF9F6)', minHeight: '100vh', padding: '4rem 2rem', fontFamily: 'var(--font-grotesk, sans-serif)', color: '#000' }}>
+    <div style={{ backgroundColor: 'var(--bg-ivory, #FAF9F6)', minHeight: '100vh', padding: '1rem', fontFamily: 'var(--font-grotesk, sans-serif)', color: '#000' }}>
       <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
         <header style={{ borderBottom: '2px solid #000', paddingBottom: '2rem', marginBottom: '4rem' }}>
-          <h1 style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '3rem', margin: 0, fontWeight: 'normal', color: 'var(--cobalt, #0047AB)' }}>BhashaBridge Directory</h1>
+          <h1 style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '2rem', margin: 0, fontWeight: 'normal', color: 'var(--cobalt, #0047AB)' }}>BhashaBridge Directory</h1>
           <p style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '0.85rem', marginTop: '1rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             OPERATOR: {user.name} // ACCESS_LEVEL: {user.role}
           </p>
@@ -121,7 +121,7 @@ export default function AdminDashboard() {
                 placeholder="PROSPECT_EMAIL" 
                 value={newUserEmail} 
                 onChange={(e) => setNewUserEmail(e.target.value)} 
-                style={{ fontFamily: 'var(--font-mono, monospace)', padding: '0.5rem', border: '1px solid #000', background: 'transparent', outline: 'none', width: '250px' }}
+                style={{ fontFamily: 'var(--font-mono, monospace)', padding: '0.5rem', border: '1px solid #000', background: 'transparent', outline: 'none', width: '100%' }}
               />
               <button type="submit" style={{ fontFamily: 'var(--font-mono, monospace)', padding: '0.5rem 1rem', background: '#000', color: 'var(--bg-ivory, #FAF9F6)', border: '1px solid #000', cursor: 'pointer', textTransform: 'uppercase' }}>
                 Induct
@@ -133,14 +133,14 @@ export default function AdminDashboard() {
             <p style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '1.2rem', color: '#666' }}>The registry is currently vacant.</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1fr 1fr', gap: '1rem', paddingBottom: '1rem', borderBottom: '1px solid #000', fontFamily: 'var(--font-mono, monospace)', fontSize: '0.8rem', textTransform: 'uppercase' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem', paddingBottom: '1rem', borderBottom: '1px solid #000', fontFamily: 'var(--font-mono, monospace)', fontSize: '0.8rem', textTransform: 'uppercase' }}>
                 <div>Identifier</div>
                 <div>Contact Route</div>
                 <div>Clearance</div>
                 <div style={{ textAlign: 'right' }}>Directives</div>
               </div>
               {orgUsers.map(u => (
-                <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1fr 1fr', gap: '1rem', padding: '1rem 0', borderBottom: '1px solid #000', alignItems: 'center' }}>
+                <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem', padding: '1rem 0', borderBottom: '1px solid #000', alignItems: 'center' }}>
                   <div style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '1.2rem' }}>{u.name}</div>
                   <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '0.9rem' }}>{u.email}</div>
                   <div>

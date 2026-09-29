@@ -424,3 +424,4 @@ TURN is a public relay server. Instead of connecting directly, both connect outw
 * **ICE:** WebRTCs process for trying possible connection routes.
 * **TURN:** A relay service that carries the call when direct connection fails.
 * **Signaling server:** The messenger that helps browsers exchange connection details.
+

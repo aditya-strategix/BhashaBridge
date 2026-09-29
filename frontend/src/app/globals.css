@@ -75,12 +75,40 @@ a {
   animation: fadeIn 0.3s ease-out forwards;
 }
 
-@keyframes slideInRight {
-  from { opacity: 0; transform: translateX(40px); }
-  to   { opacity: 1; transform: translateX(0); }
+/* SENSIBLE MOBILE RESPONSIVENESS */
+@media screen and (max-width: 768px) {
+  /* Meeting Controls Bottom Bar */
+  .meetingControlsBar {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    transform: none !important;
+    display: flex !important;
+    justify-content: center !important;
+    flex-wrap: wrap !important;
+    padding: 0.5rem !important;
+    gap: 0.5rem !important;
+  }
+  
+  /* Make sure header buttons wrap nicely */
+  .meetingHeaderRight {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    margin-top: 0.5rem;
+  }
+  
+  /* Utilities */
+  .responsive-grid-1fr { grid-template-columns: 1fr !important; }
+  .responsive-flex-col { flex-direction: column !important; }
+  .responsive-padding { padding: 1rem !important; }
+  .responsive-text-xl { font-size: 3rem !important; }
+  .responsive-text-lg { font-size: 2rem !important; }
 }
 
-@keyframes toastProgress {
-  from { width: 100%; }
-  to   { width: 0%; }
+@media screen and (max-width: 768px) {
+  .hide-on-mobile { display: none !important; }
 }
