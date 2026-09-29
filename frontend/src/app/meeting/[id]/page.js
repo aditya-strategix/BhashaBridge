@@ -350,15 +350,22 @@ export default function MeetingRoom() {
             const ttsLang = u.ttsLang || 'original';
             
             console.log("Caption arrived! ttsEnabled:", ttsEnabled, "speakerSocket:", data.senderSocketId, "mySocket:", newSocket.id);
-              if (ttsEnabled && data.senderSocketId !== newSocket.id) {
+              if (ttsEnabled) { // Temporarily allow self-echo for testing
               console.log("TTS condition passed! Preparing to speak via Backend Proxy API...");
               const textToSpeak = ttsLang === 'original' ? data.text : (data.translations[ttsLang] || data.text);
               if (textToSpeak) {
                 const targetLangCode = ttsLang === 'original' ? (data.sourceLanguage || 'en') : ttsLang;
-                const url = `${API_URL}/tts?text=${encodeURIComponent(textToSpeak)}&lang=${targetLangCode.split('-')[0]}`;
-                const audio = new Audio(url);
-                audio.play().catch(e => console.warn("Autoplay blocked for cloud TTS:", e));
-                console.log("Playing Cloud TTS:", textToSpeak, "| Lang:", targetLangCode);
+                
+                // Try native browser TTS first (much faster, bypasses some strict MP3 autoplay rules)
+                if ('speechSynthesis' in window) {
+                  const utterance = new SpeechSynthesisUtterance(textToSpeak);
+                  utterance.lang = targetLangCode;
+                  window.speechSynthesis.speak(utterance);
+                } else {
+                  const url = `${API_URL}/tts?text=${encodeURIComponent(textToSpeak)}&lang=${targetLangCode.split("-")[0]}`;
+                  const audio = new Audio(url);
+                  audio.play().catch(e => setAlertMessage('Browser blocked audio playback. Please click anywhere on the page first.'));
+                }
               }
             }
           });
@@ -385,27 +392,21 @@ export default function MeetingRoom() {
     if (!SpeechRecognition) return;
 
     const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = false; // Changed to false to prevent Google Translate IP bans
-    recognition.lang = spokenLanguage;
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = spokenLanguage;
 
-    let isStopped = false;
-    recognition.onresult = (event) => {
-      let text = '';
-      for (let i = event.resultIndex; i < event.results.length; ++i)
-        text += event.results[i][0].transcript;
-      if (text.trim()) {
-        socket.emit('caption:text', { meetingId, speakerId: user.id, text: text.trim(), language: spokenLanguage });
-      }
-    };
-    recognition.onerror = (e) => { if (e.error !== 'no-speech') console.warn('Speech error:', e.error); };
-    recognition.onend = () => { if (!isStopped && isAudioOn) { try { recognition.start(); } catch {} } };
-    try { recognition.start(); } catch {}
-    return () => { isStopped = true; recognition.stop(); };
-  }, [socket, user, isAudioOn, meetingId, spokenLanguage]);
-
-  // Auto-scroll chat
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+      let isStopped = false;
+      recognition.onresult = (event) => {
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            const text = event.results[i][0].transcript.trim();
+            if (text) {
+              socket.emit('caption:text', { meetingId, speakerId: user.id, text, language: spokenLanguage });
+            }
+          }
+        }
+      }; }, [messages]);
 
   const toggleVideo = () => {
     if (videoLockedRef.current) {
@@ -532,7 +533,13 @@ export default function MeetingRoom() {
   const isHost = participantRole === 'HOST';
   const isHostOrCoHost = isHost || participantRole === 'COHOST';
 
-  if (!user) return null;
+  if (!user || !participantStatus) {
+    return (
+      <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', background: '#FDFBF7', color: '#0047AB' }}>
+        <h2 style={{ fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: '2rem' }}>Connecting to meeting...</h2>
+      </div>
+    );
+  }
 
   // ======= REJECTED SCREEN =======
   if (participantStatus === 'REJECTED') {
@@ -1106,6 +1113,16 @@ export default function MeetingRoom() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
 
 
 

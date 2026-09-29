@@ -70,6 +70,7 @@ exports.createMeeting = async (req, res) => {
       }
     });
 
+    if (global.io) global.io.emit('dashboard:refresh');
     res.status(201).json({ meeting });
   } catch (error) {
     console.error(error);
@@ -249,6 +250,7 @@ exports.joinMeeting = async (req, res) => {
       });
       meeting.state = 'ONGOING';
       meeting.startTime = new Date();
+      if (global.io) global.io.emit('dashboard:refresh');
     }
 
     let isOrgCoHost = false;
@@ -338,6 +340,7 @@ exports.endMeeting = async (req, res) => {
     });
 
     if (global.io) global.io.to(link).emit('meeting:ended');
+      if (global.io) global.io.emit('dashboard:refresh');
       res.json({ meeting: updated });
   } catch (error) {
     console.error(error);
@@ -360,7 +363,8 @@ exports.deleteMeeting = async (req, res) => {
         }
       });
   
-      res.json({ message: 'Meeting removed from your history' });
+      if (global.io) global.io.emit('dashboard:refresh');
+        res.json({ message: 'Meeting removed from your history' });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Server error' });
@@ -511,5 +515,8 @@ exports.getTranscript = async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 };
+
+
+
 
 

@@ -7,6 +7,8 @@ import {
   PlusCircle, Video, Link as LinkIcon, Clock, Users,
   CalendarCheck2, LogOut, Trash2, User as UserIcon, Copy, Check
 } from 'lucide-react';
+import { io } from 'socket.io-client';
+const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
 import useAuthStore from '../../stores/authStore';
 import api from '../../services/api';
 import styles from './dashboard.module.css';
@@ -173,6 +175,14 @@ function DashboardContent() {
     }
     fetchData();
   }, [user, router, fetchData]);
+
+    useEffect(() => {
+    const socket = io(SOCKET_URL);
+    socket.on('dashboard:refresh', () => {
+      fetchData();
+    });
+    return () => socket.disconnect();
+  }, [fetchData]);
 
   // ------- copy helper -------
   const copyCode = (code) => {
@@ -1051,6 +1061,9 @@ export default function Dashboard() {
     </Suspense>
   );
 }
+
+
+
 
 
 
