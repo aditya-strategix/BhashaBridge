@@ -350,7 +350,7 @@ export default function MeetingRoom() {
             const ttsLang = u.ttsLang || 'original';
             
             console.log("Caption arrived! ttsEnabled:", ttsEnabled, "speakerSocket:", data.senderSocketId, "mySocket:", newSocket.id);
-              if (ttsEnabled) { // Temporarily allow self-echo for testing
+              if (ttsEnabled && data.speakerId !== u.id) {
               console.log("TTS condition passed! Preparing to speak via Backend Proxy API...");
               const textToSpeak = ttsLang === 'original' ? data.text : (data.translations[ttsLang] || data.text);
               if (textToSpeak) {
@@ -385,28 +385,38 @@ export default function MeetingRoom() {
       };
   }, [user, meetingId]);
 
-  // Speech recognition
+  // Speech recognition - starts when mic is unmuted
   useEffect(() => {
-    if (!socket || !user || !isAudioOn) return;
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
-
-    const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = spokenLanguage;
-
-      let isStopped = false;
-      recognition.onresult = (event) => {
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            const text = event.results[i][0].transcript.trim();
-            if (text) {
-              socket.emit('caption:text', { meetingId, speakerId: user.id, text, language: spokenLanguage });
-            }
+    if (!socket || !user) return;
+    if (!isAudioOn) return;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { console.error('[STT] SpeechRecognition not supported'); return; }
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = spokenLanguage;
+    let stopped = false;
+    rec.onstart = () => { console.log('[STT] STARTED - now listening to mic'); };
+    rec.onresult = (ev) => {
+      for (let i = ev.resultIndex; i < ev.results.length; ++i) {
+        if (ev.results[i].isFinal) {
+          const txt = ev.results[i][0].transcript.trim();
+          if (txt) {
+            console.log('[STT] CAPTURED:', txt);
+            socket.emit('caption:text', { meetingId, speakerId: user.id, text: txt, language: spokenLanguage });
           }
         }
-      }; }, [messages]);
+      }
+    };
+    rec.onerror = (e) => { console.warn('[STT] ERROR:', e.error); };
+    rec.onend = () => {
+      console.log('[STT] ENDED, stopped=', stopped);
+      if (!stopped) { try { rec.start(); } catch(e) { console.error('[STT] restart failed', e); } }
+    };
+    console.log('[STT] Calling rec.start() for lang:', spokenLanguage);
+    try { rec.start(); } catch(e) { console.error('[STT] initial start failed:', e); }
+    return () => { stopped = true; try { rec.stop(); } catch(e) {} };
+  }, [socket, user, isAudioOn, spokenLanguage, meetingId]);
 
   const toggleVideo = () => {
     if (videoLockedRef.current) {
