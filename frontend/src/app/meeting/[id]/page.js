@@ -93,6 +93,7 @@ export default function MeetingRoom() {
   const [sidebarTab, setSidebarTab] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [meetingEnded, setMeetingEnded] = useState(false);
   const [showLobby, setShowLobby] = useState(false);
   const [summaryModal, setSummaryModal] = useState({ isOpen: false, text: '', loading: false });
   const [lobbyToast, setLobbyToast] = useState(null); // { name }
@@ -489,10 +490,10 @@ export default function MeetingRoom() {
       }
       if (!res.ok) {
         const data = await res.json();
-        alert(data.error || 'Failed to toggle co-host');
+        setAlertMessage(data.error || 'Failed to toggle co-host');
       }
     } catch (err) {
-      alert('Failed to toggle co-host');
+      setAlertMessage('Failed to toggle co-host');
     }
   };
 
