@@ -260,7 +260,7 @@ exports.joinMeeting = async (req, res) => {
         include: { coHosts: { select: { id: true } } }
       });
       if (!org) return res.status(403).json({ error: 'You are not a member of this organization.' });
-      if (org.coHosts.some(c => c.id === req.user.userId)) isOrgCoHost = true;
+      if (org.coHosts.some(c => c.id === req.user.userId) || org.ownerId === req.user.userId) isOrgCoHost = true;
     }
 
     let participant = await prisma.participant.findUnique({
