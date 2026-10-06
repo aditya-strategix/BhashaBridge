@@ -424,7 +424,7 @@ function DashboardContent() {
       }
       fetchData();
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to toggle co-host');
+      console.error(err.response?.data?.error || 'Failed to toggle co-host');
     }
   };
 

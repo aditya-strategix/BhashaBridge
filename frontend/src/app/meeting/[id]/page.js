@@ -238,8 +238,7 @@ export default function MeetingRoom() {
           else setWaitingUsers(prev => prev.filter(u => u.userId !== userId));
         });
                   newSocket.on('meeting:ended', () => {
-            alert('The host has ended this meeting for everyone.');
-            router.push(`/meeting/${meetingId}/report`);
+            setMeetingEnded(true);
           });
           newSocket.on('participant:joined', ({ userId, socketId, name, role, avatar }) => {
           newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current });
@@ -1112,7 +1111,17 @@ export default function MeetingRoom() {
         </div>
       )}
 
-      {/* === ALERT MODAL === */}
+      {/* === MEETING ENDED MODAL === */}
+        {meetingEnded && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ background: '#F7F5F0', padding: '3rem', borderRadius: '0', border: '2px solid #0A0A0A', boxShadow: '8px 8px 0 rgba(10,10,10,1)', maxWidth: 380, width: '90%', textAlign: 'center' }}>
+              <p style={{ margin: '0 0 1.5rem', color: '#0A0A0A', fontFamily: 'var(--font-mono)', lineHeight: 1.6 }}>The host has ended this meeting for everyone.</p>
+              <button onClick={() => router.push(/meeting//report)} style={{ width: '100%', padding: '0.875rem', background: '#0022FF', color: '#F7F5F0', border: 'none', borderRadius: '0', fontWeight: 700, cursor: 'pointer' }}>OK</button>
+            </div>
+          </div>
+        )}
+
+        {/* === ALERT MODAL === */}
       {alertMessage && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#F7F5F0', padding: '3rem', borderRadius: '0', border: '2px solid #0A0A0A', boxShadow: '8px 8px 0 rgba(10,10,10,1)', maxWidth: 380, width: '90%', textAlign: 'center' }}>
