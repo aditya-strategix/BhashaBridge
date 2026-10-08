@@ -28,6 +28,8 @@ exports.createOrganization = async (req, res) => {
     });
 
     res.status(201).json({ organization });
+    if (global.sseEmit) global.sseEmit('dashboard:refresh');
+    if (global.io) global.io.emit('dashboard:refresh');
   } catch (error) {
     console.error('Create org error:', error);
     res.status(500).json({ error: 'Server error' });
@@ -42,14 +44,33 @@ exports.getMyOrganizations = async (req, res) => {
       },
       include: {
         owner: { select: { id: true, name: true, email: true } },
-        users: { select: { id: true, name: true, email: true } },
-        coHosts: { select: { id: true, name: true, email: true } },
+        users: { select: { id: true, name: true, email: true, avatar: true } },
+        coHosts: { select: { id: true, name: true, email: true, avatar: true } },
         invitations: { 
-          where: { status: 'PENDING' },
-          select: { id: true, email: true, createdAt: true }
+          where: { status: { in: ['PENDING', 'REQUESTED'] } },
+          select: { id: true, email: true, status: true, createdAt: true }
         }
       }
     });
+
+    const requestedEmails = [...new Set(organizations.flatMap(o => (o.invitations || []).filter(i => i.status === 'REQUESTED').map(i => i.email)))];
+    let applicantMap = {};
+    if (requestedEmails.length > 0) {
+      const applicants = await prisma.user.findMany({
+        where: { email: { in: requestedEmails } },
+        select: { id: true, name: true, email: true, avatar: true }
+      });
+      applicants.forEach(a => { applicantMap[a.email] = a; });
+    }
+
+    organizations.forEach(org => {
+      org.joinRequests = (org.invitations || []).filter(i => i.status === 'REQUESTED').map(i => ({
+        ...i,
+        user: applicantMap[i.email] || { name: i.email.split('@')[0], email: i.email }
+      }));
+      org.invitations = (org.invitations || []).filter(i => i.status === 'PENDING');
+    });
+
     res.json({ organizations });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
@@ -69,6 +90,8 @@ exports.regenerateCode = async (req, res) => {
       data: { accessCode: newCode }
     });
 
+    if (global.sseEmit) global.sseEmit('dashboard:refresh');
+    if (global.io) global.io.emit('dashboard:refresh');
     res.json({ accessCode: updatedOrg.accessCode });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
@@ -199,6 +222,8 @@ exports.acceptInvitation = async (req, res) => {
     ]);
 
     res.json({ message: 'Successfully joined the organization' });
+    if (global.sseEmit) global.sseEmit('dashboard:refresh');
+    if (global.io) global.io.emit('dashboard:refresh');
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -227,15 +252,18 @@ exports.deleteOrganization = async (req, res) => {
       });
     }
 
-    // Delete all invitations, disconnect all users, then delete the org
+    // Disconnect meetings, delete invitations, disconnect all users and coHosts, then delete the org
     await prisma.$transaction([
+      prisma.meeting.updateMany({ where: { organizationId: id }, data: { organizationId: null } }),
       prisma.organizationInvitation.deleteMany({ where: { organizationId: id } }),
-      prisma.organization.update({ where: { id }, data: { users: { set: [] } } }),
+      prisma.organization.update({ where: { id }, data: { users: { set: [] }, coHosts: { set: [] } } }),
     ]);
 
     await prisma.organization.delete({ where: { id } });
 
     res.json({ message: 'Organization deleted successfully' });
+    if (global.sseEmit) global.sseEmit('dashboard:refresh');
+    if (global.io) global.io.emit('dashboard:refresh');
   } catch (error) {
     console.error('deleteOrganization error:', error);
     res.status(500).json({ error: 'Server error' });
@@ -252,9 +280,14 @@ exports.leaveOrganization = async (req, res) => {
 
     await prisma.organization.update({
       where: { id },
-      data: { users: { disconnect: { id: req.user.userId } } }
+      data: {
+        users: { disconnect: { id: req.user.userId } },
+        coHosts: { disconnect: { id: req.user.userId } }
+      }
     });
     res.json({ message: 'Successfully left the organization' });
+    if (global.sseEmit) global.sseEmit('dashboard:refresh');
+    if (global.io) global.io.emit('dashboard:refresh');
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -271,9 +304,14 @@ exports.removeMember = async (req, res) => {
 
     await prisma.organization.update({
       where: { id },
-      data: { users: { disconnect: { id: userId } } }
+      data: {
+        users: { disconnect: { id: userId } },
+        coHosts: { disconnect: { id: userId } }
+      }
     });
     res.json({ message: 'Member removed successfully' });
+    if (global.sseEmit) global.sseEmit('dashboard:refresh');
+    if (global.io) global.io.emit('dashboard:refresh');
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -346,6 +384,8 @@ exports.addCoHost = async (req, res) => {
       where: { id },
       data: { coHosts: { connect: { id: userId } } }
     });
+    if (global.sseEmit) global.sseEmit('dashboard:refresh');
+    if (global.io) global.io.emit('dashboard:refresh');
     res.json({ message: 'Co-Host added successfully' });
   } catch (error) {
     console.error(error);
@@ -364,6 +404,8 @@ exports.removeCoHost = async (req, res) => {
       where: { id },
       data: { coHosts: { disconnect: { id: userId } } }
     });
+    if (global.sseEmit) global.sseEmit('dashboard:refresh');
+    if (global.io) global.io.emit('dashboard:refresh');
     res.json({ message: 'Co-Host removed successfully' });
   } catch (error) {
     console.error(error);
@@ -371,3 +413,217 @@ exports.removeCoHost = async (req, res) => {
   }
 };
 
+
+exports.joinByCode = async (req, res) => {
+  try {
+    const rawCode = req.body.code || req.body.accessCode;
+    if (!rawCode) return res.status(400).json({ error: 'Organization code is required' });
+
+    const normalizedCode = rawCode.trim().toUpperCase();
+    const org = await prisma.organization.findUnique({
+      where: { accessCode: normalizedCode },
+      include: { owner: true, users: true, coHosts: true }
+    });
+
+    if (!org) return res.status(404).json({ error: 'No organization found with this code' });
+
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (org.users.some(u => u.id === user.id)) {
+      return res.status(400).json({ error: `You are already a member of ${org.name}` });
+    }
+
+    // Check if the user already has a pending invitation from the host -> auto-join
+    const pendingInvite = await prisma.organizationInvitation.findFirst({
+      where: {
+        organizationId: org.id,
+        email: user.email,
+        status: 'PENDING'
+      }
+    });
+
+    if (pendingInvite) {
+      await prisma.$transaction([
+        prisma.organization.update({
+          where: { id: org.id },
+          data: { users: { connect: { id: user.id } } }
+        }),
+        prisma.organizationInvitation.update({
+          where: { id: pendingInvite.id },
+          data: { status: 'ACCEPTED' }
+        })
+      ]);
+      if (global.sseEmit) global.sseEmit('dashboard:refresh');
+      if (global.io) global.io.emit('dashboard:refresh');
+      return res.json({
+        message: `You were already invited to "${org.name}"! You are now a member.`,
+        organizationName: org.name,
+        joined: true
+      });
+    }
+
+    const existingReq = await prisma.organizationInvitation.findFirst({
+      where: {
+        organizationId: org.id,
+        email: user.email,
+        status: 'REQUESTED'
+      }
+    });
+
+    if (existingReq) {
+      return res.status(400).json({ error: 'You have already sent a join request to this organization. Please wait for the host to review.' });
+    }
+
+    const cancelledReq = await prisma.organizationInvitation.findFirst({
+      where: {
+        organizationId: org.id,
+        email: user.email,
+        status: 'CANCELLED'
+      }
+    });
+
+    let joinRequest;
+    if (cancelledReq) {
+      joinRequest = await prisma.organizationInvitation.update({
+        where: { id: cancelledReq.id },
+        data: {
+          status: 'REQUESTED',
+          createdAt: new Date(),
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        }
+      });
+    } else {
+      const token = 'REQ-' + generateToken();
+      joinRequest = await prisma.organizationInvitation.create({
+        data: {
+          organizationId: org.id,
+          email: user.email,
+          token,
+          status: 'REQUESTED',
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        }
+      });
+    }
+
+    if (global.io) {
+      if (org.ownerId) {
+        global.io.to(`user:${org.ownerId}`).emit('notification:join_request', {
+          id: joinRequest.id,
+          organizationId: org.id,
+          organizationName: org.name,
+          applicantName: user.name,
+          applicantEmail: user.email,
+          createdAt: joinRequest.createdAt
+        });
+      }
+      if (org.coHosts && org.coHosts.length > 0) {
+        org.coHosts.forEach(coHost => {
+          global.io.to(`user:${coHost.id}`).emit('notification:join_request', {
+            id: joinRequest.id,
+            organizationId: org.id,
+            organizationName: org.name,
+            applicantName: user.name,
+            applicantEmail: user.email,
+            createdAt: joinRequest.createdAt
+          });
+        });
+      }
+    }
+    if (global.sseEmit) global.sseEmit('dashboard:refresh');
+    if (global.io) global.io.emit('dashboard:refresh');
+
+    res.json({
+      message: `Join request sent to the host of "${org.name}". You will be added once approved!`,
+      organizationName: org.name
+    });
+  } catch (error) {
+    console.error('joinByCode error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+
+exports.approveJoinRequest = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const request = await prisma.organizationInvitation.findUnique({
+      where: { id: requestId },
+      include: { organization: { include: { coHosts: true } } }
+    });
+
+    if (!request || request.status !== 'REQUESTED') {
+      return res.status(404).json({ error: 'Join request not found or already processed' });
+    }
+
+    const org = request.organization;
+    const isOwner = org.ownerId === req.user.userId;
+    const isCoHost = org.coHosts.some(c => c.id === req.user.userId);
+    if (!isOwner && !isCoHost) {
+      return res.status(403).json({ error: 'Only Organization Host or Co-Hosts can approve join requests' });
+    }
+
+    const applicant = await prisma.user.findUnique({ where: { email: request.email } });
+    if (!applicant) {
+      return res.status(404).json({ error: 'Applicant user account not found' });
+    }
+
+    await prisma.$transaction([
+      prisma.organization.update({
+        where: { id: org.id },
+        data: { users: { connect: { id: applicant.id } } }
+      }),
+      prisma.organizationInvitation.update({
+        where: { id: request.id },
+        data: { status: 'ACCEPTED' }
+      })
+    ]);
+
+    if (global.io) {
+      global.io.to(`user:${applicant.id}`).emit('notification:request_approved', {
+        organizationId: org.id,
+        organizationName: org.name
+      });
+    }
+    if (global.sseEmit) global.sseEmit('dashboard:refresh');
+    if (global.io) global.io.emit('dashboard:refresh');
+
+    res.json({ message: `${applicant.name} has been added to ${org.name}` });
+  } catch (error) {
+    console.error('approveJoinRequest error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+
+exports.rejectJoinRequest = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const request = await prisma.organizationInvitation.findUnique({
+      where: { id: requestId },
+      include: { organization: { include: { coHosts: true } } }
+    });
+
+    if (!request || request.status !== 'REQUESTED') {
+      return res.status(404).json({ error: 'Join request not found or already processed' });
+    }
+
+    const org = request.organization;
+    const isOwner = org.ownerId === req.user.userId;
+    const isCoHost = org.coHosts.some(c => c.id === req.user.userId);
+    if (!isOwner && !isCoHost) {
+      return res.status(403).json({ error: 'Only Organization Host or Co-Hosts can reject join requests' });
+    }
+
+    await prisma.organizationInvitation.update({
+      where: { id: request.id },
+      data: { status: 'CANCELLED' }
+    });
+
+    if (global.sseEmit) global.sseEmit('dashboard:refresh');
+    if (global.io) global.io.emit('dashboard:refresh');
+
+    res.json({ message: 'Join request rejected' });
+  } catch (error) {
+    console.error('rejectJoinRequest error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+};

@@ -12,6 +12,8 @@ export default function AdminDashboard() {
   const [orgUsers, setOrgUsers] = useState([]);
   const [newUserEmail, setNewUserEmail] = useState('');
   const [alertMessage, setAlertMessage] = useState(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     initialize();
@@ -80,7 +82,7 @@ export default function AdminDashboard() {
     }
   };
 
-  if (!user || (user.role !== 'ORG_ADMIN' && user.role !== 'PLATFORM_ADMIN')) return null;
+  if (!mounted || !user || (user.role !== 'ORG_ADMIN' && user.role !== 'PLATFORM_ADMIN')) return null;
 
   return (
     <div style={{ backgroundColor: 'var(--bg-ivory, #FAF9F6)', minHeight: '100vh', padding: '1rem', fontFamily: 'var(--font-grotesk, sans-serif)', color: '#000' }}>

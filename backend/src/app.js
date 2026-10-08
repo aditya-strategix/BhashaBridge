@@ -17,6 +17,50 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
+const sseClients = new Set();
+app.get('/api/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+  
+  const client = { res };
+  sseClients.add(client);
+  console.log(`[SSE] Client connected. Total clients: ${sseClients.size}`);
+
+  // Send initial connected comment
+  res.write(': connected\n\n');
+  
+  req.on('close', () => {
+    sseClients.delete(client);
+    console.log(`[SSE] Client disconnected. Total clients: ${sseClients.size}`);
+  });
+});
+
+// Periodic ping to keep SSE connections alive
+setInterval(() => {
+  for (const client of sseClients) {
+    try {
+      client.res.write(': ping\n\n');
+    } catch (e) {
+      sseClients.delete(client);
+    }
+  }
+}, 25000);
+
+global.sseEmit = (event, data = {}) => {
+  console.log(`[SSE] Broadcasting "${event}" to ${sseClients.size} client(s)`);
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.res.write(payload);
+    } catch (err) {
+      sseClients.delete(client);
+    }
+  }
+};
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/organizations', organizationRoutes);

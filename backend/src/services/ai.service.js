@@ -12,14 +12,13 @@ class AIService {
       throw new Error('Transcript is empty');
     }
 
-    const systemPrompt = "You are an expert executive assistant. Analyze the following meeting transcript and provide a highly structured, professional summary.\\nYour summary must include:\\n1. A brief overview of the meeting's primary goal.\\n2. A bulleted list of key discussion points.\\n3. Action items (who is doing what) if any are mentioned.\\nDo not invent information. Keep the tone professional and concise. IMPORTANT: DO NOT use any markdown formatting (no asterisks, no bolding, no hashes). Output pure plain text only.";
+    const systemPrompt = "You are an expert executive assistant. Analyze the following meeting transcript and provide a highly structured, professional summary.\nYour summary must include:\n1. A brief overview of the meeting's primary goal.\n2. A bulleted list of key discussion points.\n3. Action items (who is doing what) if any are mentioned.\nDo not invent information. Keep the tone professional and concise. IMPORTANT: DO NOT use any markdown formatting (no asterisks, no bolding, no hashes). Output pure plain text only.";
 
     const models = [
-      'gemini-3.7-flash',
-      'gemini-3.6-flash',
-      'gemini-3.5-flash',
-      'gemini-omni-1.1-flash',
-      'gemini-flash-latest'
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro'
     ];
 
     let lastError = null;

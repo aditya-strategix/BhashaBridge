@@ -1,11 +1,18 @@
 .editorialAuthContainer {
+  --bg-ivory: #FDFBF7;
+  --font-grotesk: "Space Grotesk", system-ui, sans-serif;
+  --font-serif: "Playfair Display", Georgia, serif;
+  --font-mono: "Space Mono", monospace;
+  --cobalt: #0047AB;
+  --vermilion: #E34234;
+
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background-color: var(--bg-ivory, #fffff0);
-  color: var(--cobalt, #0047AB);
-  font-family: var(--font-grotesk, sans-serif);
+  background-color: var(--bg-ivory);
+  color: var(--cobalt);
+  font-family: var(--font-grotesk);
   padding: 2rem;
 }
 
@@ -15,6 +22,29 @@
   background: transparent;
   display: flex;
   flex-direction: column;
+}
+
+.editorialInstruction {
+  font-family: var(--font-mono, monospace);
+  color: var(--cobalt, #0047AB);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0 0 1.5rem 0;
+  opacity: 0.9;
+}
+
+.editorialInfoBox {
+  font-family: var(--font-mono, monospace);
+  color: var(--cobalt, #0047AB);
+  border: 1px solid var(--cobalt, #0047AB);
+  background: rgba(0, 71, 171, 0.03);
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .sharpTitle {
@@ -109,6 +139,17 @@
   font-family: var(--font-mono, monospace);
   color: var(--vermilion, #E34234);
   border: 1px solid var(--vermilion, #E34234);
+  padding: 1rem;
+  margin-bottom: 2rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+}
+
+.editorialSuccess {
+  font-family: var(--font-mono, monospace);
+  color: #10b981;
+  border: 1px solid #10b981;
+  background: rgba(16, 185, 129, 0.05);
   padding: 1rem;
   margin-bottom: 2rem;
   font-size: 0.85rem;

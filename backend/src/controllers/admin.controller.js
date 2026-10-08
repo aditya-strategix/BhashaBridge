@@ -8,12 +8,14 @@ exports.getOrgUsers = async (req, res) => {
       include: { ownedOrganizations: { include: { users: true } } }
     });
     
-    if (!user.ownedOrganizations.length) return res.json({ users: [] });
+    if (!user || !user.ownedOrganizations || !user.ownedOrganizations.length) {
+      return res.json({ users: [] });
+    }
 
     // Aggregate users across all owned orgs
     const userMap = new Map();
     user.ownedOrganizations.forEach(org => {
-      org.users.forEach(u => {
+      (org.users || []).forEach(u => {
         if (!userMap.has(u.id)) {
           userMap.set(u.id, { id: u.id, name: u.name, email: u.email, role: u.role });
         }
@@ -22,7 +24,7 @@ exports.getOrgUsers = async (req, res) => {
 
     res.json({ users: Array.from(userMap.values()) });
   } catch (error) {
-    console.error(error);
+    console.error('getOrgUsers error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 };
@@ -33,11 +35,15 @@ exports.addOrgUser = async (req, res) => {
       where: { id: req.user.userId },
       include: { ownedOrganizations: true } 
     });
-    if (!adminUser.ownedOrganizations.length) {
+    if (!adminUser || !adminUser.ownedOrganizations || !adminUser.ownedOrganizations.length) {
       return res.status(400).json({ error: 'You do not own an organization' });
     }
 
     const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
     const targetUser = await prisma.user.findUnique({ where: { email } });
     if (!targetUser) {
       return res.status(404).json({ error: 'User not found' });
@@ -51,7 +57,7 @@ exports.addOrgUser = async (req, res) => {
 
     res.status(201).json({ message: 'User added to organization successfully' });
   } catch (error) {
-    console.error(error);
+    console.error('addOrgUser error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 };
@@ -62,7 +68,7 @@ exports.removeOrgUser = async (req, res) => {
       where: { id: req.user.userId },
       include: { ownedOrganizations: true }
     });
-    if (!adminUser.ownedOrganizations.length) {
+    if (!adminUser || !adminUser.ownedOrganizations || !adminUser.ownedOrganizations.length) {
       return res.status(400).json({ error: 'You do not own an organization' });
     }
 
@@ -76,7 +82,7 @@ exports.removeOrgUser = async (req, res) => {
 
     res.json({ message: 'User removed from organization successfully' });
   } catch (error) {
-    console.error(error);
+    console.error('removeOrgUser error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 };
@@ -86,19 +92,28 @@ exports.changeUserRole = async (req, res) => {
     const { id } = req.params;
     const { role } = req.body;
     
+    const validRoles = ['HOST', 'PARTICIPANT', 'ORG_ADMIN', 'PLATFORM_ADMIN'];
+    if (!role || !validRoles.includes(role)) {
+      return res.status(400).json({ error: 'Invalid user role specified' });
+    }
+
     await prisma.user.update({
-        where: { id },
-        data: { role }
+      where: { id },
+      data: { role }
     });
     res.json({ message: 'User role updated' });
   } catch (error) {
-    console.error(error);
+    console.error('changeUserRole error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 };
 
 exports.getSystemHealth = async (req, res) => {
-  const activeMeetings = await prisma.meeting.count({ where: { state: 'ONGOING' } });
-  res.json({ status: 'Healthy', activeMeetings, uptime: process.uptime() });
+  try {
+    const activeMeetings = await prisma.meeting.count({ where: { state: 'ONGOING' } });
+    res.json({ status: 'Healthy', activeMeetings, uptime: process.uptime() });
+  } catch (error) {
+    console.error('getSystemHealth error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
 };
-

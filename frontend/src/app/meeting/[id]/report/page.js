@@ -115,7 +115,7 @@ fetchReport();
       {summaryModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(250, 249, 246, 0.95)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }} onClick={() => setSummaryModal(null)}>
           <div style={{ background: 'var(--bg-ivory, #FAF9F6)', border: '2px solid #000', padding: '1.5rem', width: '90%', maxWidth: '800px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', borderBottom: '1px solid #000', paddingBottom: '1rem', marginBottom: '2rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', borderBottom: '1px solid #000', paddingBottom: '1rem' }}>
               <h2 style={{ margin: 0, fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '2rem', color: 'var(--cobalt, #0047AB)' }}>Condensed Narrative</h2>
               <div style={{ display: 'flex', gap: '1rem' }}>
                 {!summaryModal.loading && summaryModal.text && (

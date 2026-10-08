@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import useAuthStore from '../../../stores/authStore';
@@ -11,9 +11,16 @@ export default function Register() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [language, setLanguage] = useState('en');
+  const [searchQuery, setSearchQuery] = useState('');
   
   const { register, isLoading, error } = useAuthStore();
   const router = useRouter();
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setSearchQuery(window.location.search);
+    }
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -95,7 +102,7 @@ export default function Register() {
           <Link href="/" className={styles.editorialLink} style={{ textAlign: 'left' }}>
             &larr; Home
           </Link>
-          <Link href={`/login${typeof window !== 'undefined' && window.location.search ? window.location.search : ''}`} className={styles.editorialLink}>
+          <Link href={`/login${searchQuery}`} className={styles.editorialLink}>
             Or Access
           </Link>
         </div>

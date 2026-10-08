@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import useAuthStore from '../../../stores/authStore';
@@ -9,8 +9,15 @@ import styles from '../auth.module.css';
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const { login, isLoading, error } = useAuthStore();
   const router = useRouter();
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setSearchQuery(window.location.search);
+    }
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -42,7 +49,12 @@ export default function Login() {
             />
           </div>
           <div className={styles.formGroup}>
-            <label className={styles.editorialLabel}>Password</label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <label className={styles.editorialLabel}>Password</label>
+              <Link href="/forgot-password" className={styles.editorialLink} style={{ fontSize: '0.78rem', textTransform: 'none', letterSpacing: '0.02em', opacity: 0.85 }}>
+                Forgot password?
+              </Link>
+            </div>
             <input 
               type="password" 
               className={styles.editorialInput} 
@@ -61,7 +73,7 @@ export default function Login() {
           <Link href="/" className={styles.editorialLink} style={{ textAlign: 'left' }}>
             &larr; Home
           </Link>
-          <Link href={`/register${typeof window !== 'undefined' && window.location.search ? window.location.search : ''}`} className={styles.editorialLink}>
+          <Link href={`/register${searchQuery}`} className={styles.editorialLink}>
             Or Register
           </Link>
         </div>

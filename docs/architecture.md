@@ -38,14 +38,15 @@ frontend/src/app/
 ├── layout.js                    # Root layout, global fonts
 ├── page.js                      # Landing page (/)
 ├── (auth)/
-│   ├── login/page.js            # Login page
-│   └── register/page.js         # Register page
-├── dashboard/page.js            # Meeting list, create/join meeting
-├── admin/page.js                # Admin panel (org management)
+│   ├── login/page.js            # Login page (includes Forgot Password link)
+│   ├── register/page.js         # Register page
+│   └── forgot-password/page.js  # Multi-step OTP password reset
+├── dashboard/page.js            # Meeting list, join with code, org code join, copy links
+├── admin/page.js                # Admin panel (org & join request management)
 ├── invite/[token]/page.js       # Invite link handler
 └── meeting/
     └── [id]/
-        ├── page.js              # Main meeting room (all logic lives here)
+        ├── page.js              # Main meeting room (WebRTC, live speech translation, lobby)
         └── report/page.js       # Post-meeting analytics report
 ```
 
@@ -67,6 +68,7 @@ The auth store holds:
 **Real-time:** Socket.IO  
 **ORM:** Prisma  
 **Database:** PostgreSQL  
+**Cache/In-Memory:** Valkey (Redis fork) + Memory Store fallback  
 
 ### Folder Structure
 
@@ -75,19 +77,22 @@ backend/src/
 ├── server.js                        # Entry point — creates HTTP server, attaches Socket.IO
 ├── app.js                           # Express app — registers middleware and routes
 ├── routes/
-│   ├── auth.routes.js               # POST /auth/login, /auth/register
+│   ├── auth.routes.js               # POST /auth/login, /register, /forgot-password/*
 │   ├── meeting.routes.js            # POST /meetings, /meetings/:id/join, /admit, /reject, /end
-│   ├── organization.routes.js       # Organization CRUD
+│   ├── organization.routes.js       # Org CRUD, join codes, request approval/rejection
 │   ├── analytics.routes.js          # Meeting analytics endpoints
-│   └── admin.routes.js              # Admin-only routes
+│   ├── admin.routes.js              # Admin-only routes
+│   └── tts.routes.js                # GET /tts (Google Cloud TTS proxy)
 ├── controllers/
-│   ├── auth.controller.js           # JWT generation, bcrypt password hashing
-│   ├── meeting.controller.js        # Meeting create/join/end logic
-│   ├── organization.controller.js   # Org management
+│   ├── auth.controller.js           # JWT generation, bcrypt, OTP password recovery
+│   ├── meeting.controller.js        # Meeting create/join/end logic, Google Meet codes
+│   ├── organization.controller.js   # Org management & code-based join requests
 │   ├── analytics.controller.js      # Participation time, message stats
 │   └── admin.controller.js          # Admin user/org management
 ├── services/
-│   ├── email.service.js             # Nodemailer — invite emails
+│   ├── otp.service.js               # Dual-layer OTP store (Valkey + memory, rate limiting)
+│   ├── email.service.js             # Resend API + Nodemailer (invites & branded OTP emails)
+│   ├── ai.service.js                # Gemini 3.7 Flash AI Meeting Summarization
 │   └── translation.service.js       # Translation utility wrapper
 └── socket/
     └── index.js                     # All real-time logic (see Section 5)
@@ -97,15 +102,23 @@ backend/src/
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/auth/register` | Create account |
-| POST | `/auth/login` | Login, returns JWT |
-| POST | `/meetings` | Create a new meeting |
-| POST | `/meetings/join/:id` | Join meeting, returns participant status |
-| POST | `/meetings/:id/admit` | Host admits a waiting user |
-| POST | `/meetings/:id/reject` | Host rejects a waiting user |
-| POST | `/meetings/:id/end` | End meeting, log leave time |
-| GET | `/analytics/:id` | Get meeting analytics |
-| GET | `/admin/users` | Admin: list all users |
+| POST | `/api/auth/register` | Create account |
+| POST | `/api/auth/login` | Login, returns JWT |
+| POST | `/api/auth/forgot-password/send-otp` | Dispatch 6-digit OTP code to registered email via Resend |
+| POST | `/api/auth/forgot-password/verify-otp` | Verify 6-digit OTP, issue 10-minute JWT reset token |
+| POST | `/api/auth/forgot-password/reset` | Reset password using verified token or active OTP |
+| POST | `/api/meetings` | Create a new meeting (generates `bha-xxxx-yyy` code) |
+| POST | `/api/meetings/join/:id` | Join meeting by ID or code, returns participant status |
+| POST | `/api/meetings/:id/admit` | Host admits a waiting user |
+| POST | `/api/meetings/:id/reject` | Host rejects a waiting user |
+| POST | `/api/meetings/:id/end` | End meeting, log leave time |
+| POST | `/api/organizations/join-code` | Request to join organization via code (e.g. `BB-E01D16`) |
+| GET | `/api/organizations/requests` | List pending join requests for host/admin |
+| POST | `/api/organizations/requests/:id/approve` | Approve join request and assign user to organization |
+| POST | `/api/organizations/requests/:id/reject` | Reject join request |
+| GET | `/api/tts` | Audio streaming proxy for Google Cloud TTS |
+| GET | `/api/analytics/:id` | Get meeting analytics |
+| GET | `/api/admin/users` | Admin: list all users |
 
 ---
 
@@ -118,7 +131,7 @@ User
 └── Meetings (many-to-many via Participant)
 
 Meeting
-├── id, meetingCode (e.g. BB-4F0389-89ee), status
+├── id, meetingCode (e.g. bha-e82a-91f, Google Meet format), status
 ├── createdBy → User
 ├── Participants → Participant[]
 ├── ChatMessages → ChatMessage[]
@@ -138,7 +151,8 @@ Caption
 ├── originalText, originalLanguage
 
 Organization
-└── id, name, Users[]
+├── id, name, code (e.g. BB-E01D16), Users[]
+└── JoinRequests → OrganizationJoinRequest[] (PENDING/APPROVED/REJECTED)
 ```
 
 ---
@@ -260,13 +274,56 @@ Once the handshake is complete, audio and video flow **directly between browsers
 
 ---
 
-## 9. Authentication Architecture
+## 9. Authentication & Password Recovery Architecture
 
-- Passwords are hashed with **bcrypt** (10 rounds)
-- On login, server signs a **JWT** with the user's id, email, and role
-- JWT is stored in `localStorage` on the frontend
-- All protected API routes check for `Authorization: Bearer <token>` header
-- Admin routes additionally verify `role === 'ADMIN'`
+### 9.1 Authentication & Session Management
+- Passwords are encrypted using **bcrypt** (10 salt rounds).
+- Upon successful authentication, the server generates a signed **JWT** containing the user's `id`, `email`, and `role`.
+- The JWT is stored in `localStorage` on the frontend and injected via an HTTP interceptor as `Authorization: Bearer <token>` for all protected API calls.
+- Admin endpoints strictly enforce `role === 'ADMIN'`.
+
+### 9.2 Password Recovery & OTP Architecture
+The password recovery pipeline implements a robust, time-bound, multi-step verification mechanism designed for high availability and protection against abuse:
+
+```
+[User submits email]
+        │
+        ▼
+POST /api/auth/forgot-password/send-otp
+        │
+        ├── Checks 60s cooldown limit
+        ├── Generates secure 6-digit cryptographic OTP
+        ├── Stores in Valkey / Redis (10m TTL) + in-memory Map fallback
+        └── Dispatches branded HTML email via Resend (bhashabridge@aditya-kumar.in)
+        │
+[User enters 6-digit OTP]
+        │
+        ▼
+POST /api/auth/forgot-password/verify-otp
+        │
+        ├── Checks attempt count (< 5 attempts allowed)
+        ├── Validates OTP match and TTL expiration
+        ├── Destroys OTP immediately upon verification (single-use)
+        └── Signs short-lived JWT resetToken (10m expiry, purpose: "password_reset")
+        │
+[User submits new password]
+        │
+        ▼
+POST /api/auth/forgot-password/reset
+        │
+        ├── Validates JWT resetToken (or active OTP payload)
+        ├── Enforces password minimum length (>= 6 characters)
+        ├── Hashes new password with bcrypt
+        └── Persists updated credentials in PostgreSQL
+```
+
+#### Key Security & Performance Guarantees:
+1. **Dual-Layer Store (`otp.service.js`):** Integrates with Valkey (Redis fork) running on Docker (`localhost:6379`) with seamless, automatic fallback to an in-memory `Map`. This bypasses schema lock contentions and delivers sub-millisecond retrieval and automatic key expiration.
+2. **60-Second Cooldown:** Prevents email flooding and spamming the verification endpoints.
+3. **Brute-Force Safeguard:** Limits incorrect attempts to 5 per OTP. If exceeded, the OTP is instantly evicted from memory/cache.
+4. **Single-Use Invalidation:** OTPs are deleted the instant they are consumed to prevent replay attacks.
+5. **Purpose-Bound Reset Token:** The verification endpoint returns a short-lived (10m) JWT signed with `purpose: 'password_reset'`. The reset endpoint validates this payload before modifying credentials.
+6. **Domain-Authenticated Email Delivery (`email.service.js`):** Transactional emails are dispatched through the **Resend API** from the verified domain `BhashaBridge <bhashabridge@aditya-kumar.in>` with styled editorial monospace templates.
 
 ---
 
@@ -275,7 +332,7 @@ Once the handshake is complete, audio and video flow **directly between browsers
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | Frontend Framework | Next.js 14 (App Router) | SSR + client-side routing |
-| UI | React + CSS Modules | Component rendering |
+| UI | React + CSS Modules | Component rendering (Editorial/Brutalist design language) |
 | State | Zustand | Global auth + user settings |
 | Real-time Client | Socket.IO Client | WebSocket communication |
 | Video/Audio | simple-peer (WebRTC) | P2P video/audio streams |
@@ -283,11 +340,13 @@ Once the handshake is complete, audio and video flow **directly between browsers
 | Text-to-Speech | Google Cloud TTS via Backend Proxy | Text → voice (free, cloud-based, OS-independent) |
 | Backend | Node.js + Express | REST API server |
 | Real-time Server | Socket.IO | WebSocket event hub |
+| Cache & In-Memory | Valkey (Redis fork) + RAM store | AI summary cache & OTP verification store |
+| AI Summarization | Google Gemini 3.7 Flash | Automated post-meeting summaries with 503 fallback |
 | Translation | google-translate-api-x + MyMemory | Free text translation |
 | ORM | Prisma | Type-safe database queries |
 | Database | PostgreSQL | Persistent data storage |
-| Auth | JWT + bcrypt | Secure authentication |
-| Email | Nodemailer | Meeting invite emails |
+| Auth | JWT + bcrypt | Secure authentication & password recovery |
+| Email Service | Resend API + Nodemailer | Transactional OTP emails (`bhashabridge@aditya-kumar.in`) & meeting invites |
 
 
 ## Roles and Hierarchy

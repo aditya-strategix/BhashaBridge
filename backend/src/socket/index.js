@@ -31,7 +31,7 @@ function setupSocket(server) {
       try {
         const meeting = await prisma.meeting.findUnique({ where: { meetingLink: meetingId } });
         if (!meeting) return;
-        if (meeting.state === 'COMPLETED') {
+        if (meeting.state === 'COMPLETED' || meeting.state === 'CANCELLED') {
           socket.disconnect(true);
           return;
         }
@@ -86,18 +86,23 @@ function setupSocket(server) {
     });
 
     socket.on('meeting:admit', async ({ meetingId, targetUserId }) => {
-      // Must verify caller is HOST or COHOST
       try {
         const meeting = await prisma.meeting.findUnique({ where: { meetingLink: meetingId } });
+        if (!meeting) return;
         const caller = await prisma.participant.findUnique({ where: { userId_meetingId: { userId: socket.userId, meetingId: meeting.id } } });
+        const isHost = meeting.hostId === socket.userId || (caller && caller.role === 'HOST');
+        const isCoHost = caller && caller.role === 'COHOST';
         
-        if (caller && (caller.role === 'HOST' || caller.role === 'COHOST')) {
+        if (isHost || isCoHost) {
           await prisma.participant.update({
             where: { userId_meetingId: { userId: targetUserId, meetingId: meeting.id } },
             data: { status: 'ADMITTED' }
           });
           io.to(meetingId).emit('waiting:admitted', { userId: targetUserId });
-          io.to(`user_${targetUserId}`).emit('waiting:admitted', { userId: targetUserId });
+          io.to(`user_`).emit('waiting:admitted', { userId: targetUserId });
+          io.to(meetingId).emit('meeting:refresh');
+          io.emit('dashboard:refresh');
+          if (global.sseEmit) global.sseEmit('dashboard:refresh');
         }
       } catch (err) {
         console.error('Socket admit error', err);
@@ -107,18 +112,70 @@ function setupSocket(server) {
     socket.on('meeting:reject', async ({ meetingId, targetUserId }) => {
       try {
         const meeting = await prisma.meeting.findUnique({ where: { meetingLink: meetingId } });
+        if (!meeting) return;
         const caller = await prisma.participant.findUnique({ where: { userId_meetingId: { userId: socket.userId, meetingId: meeting.id } } });
+        const isHost = meeting.hostId === socket.userId || (caller && caller.role === 'HOST');
+        const isCoHost = caller && caller.role === 'COHOST';
         
-        if (caller && (caller.role === 'HOST' || caller.role === 'COHOST')) {
+        if (isHost || isCoHost) {
           await prisma.participant.update({
             where: { userId_meetingId: { userId: targetUserId, meetingId: meeting.id } },
             data: { status: 'REJECTED' }
           });
           io.to(meetingId).emit('waiting:rejected', { userId: targetUserId });
-          io.to(`user_${targetUserId}`).emit('waiting:rejected', { userId: targetUserId });
+          io.to(`user_`).emit('waiting:rejected', { userId: targetUserId });
+          io.to(meetingId).emit('meeting:refresh');
+          io.emit('dashboard:refresh');
+          if (global.sseEmit) global.sseEmit('dashboard:refresh');
         }
       } catch (err) {
         console.error('Socket reject error', err);
+      }
+    });
+
+    socket.on('meeting:remove_participant', async ({ meetingId, targetUserId }) => {
+      try {
+        const meeting = await prisma.meeting.findUnique({ 
+          where: { meetingLink: meetingId },
+          include: { organization: { include: { coHosts: true } } }
+        });
+        if (!meeting) return;
+
+        let isOrgAdmin = false;
+        if (meeting.organization) {
+          if (meeting.organization.ownerId === socket.userId || meeting.organization.coHosts.some(c => c.id === socket.userId)) {
+            isOrgAdmin = true;
+          }
+        }
+
+        const caller = await prisma.participant.findUnique({
+          where: { userId_meetingId: { userId: socket.userId, meetingId: meeting.id } }
+        });
+
+        const isHost = meeting.hostId === socket.userId || isOrgAdmin || (caller && caller.role === 'HOST');
+        const isCoHost = caller && caller.role === 'COHOST';
+
+        if (!isHost && !isCoHost) return;
+
+        const target = await prisma.participant.findUnique({
+          where: { userId_meetingId: { userId: targetUserId, meetingId: meeting.id } }
+        });
+
+        if (!target) return;
+        if (target.userId === meeting.hostId) return;
+        if (!isHost && isCoHost && target.role !== 'PARTICIPANT') return;
+
+        await prisma.participant.update({
+          where: { id: target.id },
+          data: { status: 'REJECTED' }
+        });
+
+        io.to(meetingId).emit('participant:removed', { userId: targetUserId });
+        io.to(meetingId).emit('meeting:refresh');
+        io.emit('dashboard:refresh');
+        if (global.sseEmit) global.sseEmit('dashboard:refresh');
+      } catch (err) {
+        console.error('Socket remove participant error', err);
       }
     });
 

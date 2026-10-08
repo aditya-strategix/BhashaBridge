@@ -32,4 +32,7 @@ router.delete('/:link/cohost/:userId', meetingController.removeCoHost);
 router.get('/:link/transcript', meetingController.getTranscript);
 router.get('/:link/summary', meetingController.getSummary);
 
+router.delete('/:link/participant/:userId', meetingController.removeParticipant);
+router.get('/:link/participants', meetingController.getParticipants);
+
 module.exports = router;

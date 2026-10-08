@@ -72,6 +72,14 @@ export default function NotificationBell() {
       showToast(`"${organizationName}" was deleted by the host.`, 'error');
     });
 
+    sock.on('notification:join_request', ({ applicantName, organizationName }) => {
+      showToast(`${applicantName} requested to join "${organizationName}"!`, 'info');
+    });
+
+    sock.on('notification:request_approved', ({ organizationName }) => {
+      showToast(`Your request to join "${organizationName}" was approved!`, 'success');
+    });
+
     return () => {
       sock.disconnect();
     };

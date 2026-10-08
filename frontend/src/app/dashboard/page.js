@@ -19,6 +19,7 @@ const STATE_CFG = {
   ONGOING:   { label: 'Live',      bg: '#111',  color: '#FDFBF7' },
   SCHEDULED: { label: 'Scheduled', bg: 'transparent',  color: '#111' },
   COMPLETED: { label: 'Ended',     bg: 'transparent', color: '#111' },
+  CANCELLED: { label: 'Cancelled', bg: 'transparent', color: '#FF3311' },
 };
 
 const ROLE_CFG = {
@@ -121,6 +122,10 @@ function DashboardContent() {
   // Organization state
   const [organizations, setOrganizations] = useState([]);
   const [showOrgModal, setShowOrgModal] = useState(false);
+  const [showJoinOrgModal, setShowJoinOrgModal] = useState(false);
+  const [joinOrgCodeInput, setJoinOrgCodeInput] = useState('');
+  const [joinOrgLoading, setJoinOrgLoading] = useState(false);
+  const [joinOrgError, setJoinOrgError] = useState(null);
   const [newOrgName, setNewOrgName] = useState('');
   // Per-org invite email refs (to avoid shared state bleed)
   const inviteEmailRefs = useRef({});
@@ -160,7 +165,12 @@ function DashboardContent() {
         api.get('/organizations/my'),
       ]);
       setMeetings(meetRes.data.meetings || []);
-      setOrganizations(orgRes.data.organizations || []);
+      const freshOrgs = orgRes.data.organizations || [];
+      setOrganizations(freshOrgs);
+      setShowAllMembersOrg(prev => {
+        if (!prev) return null;
+        return freshOrgs.find(o => o.id === prev.id) || prev;
+      });
     } catch (err) {
       console.error('Failed to fetch data', err);
     }
@@ -176,12 +186,22 @@ function DashboardContent() {
     fetchData();
   }, [user, router, fetchData]);
 
-    useEffect(() => {
-    const socket = io(SOCKET_URL);
-    socket.on('dashboard:refresh', () => {
+  useEffect(() => {
+    const sseUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/events`;
+    const eventSource = new EventSource(sseUrl);
+
+    eventSource.addEventListener('dashboard:refresh', () => {
+      console.log('[SSE] dashboard:refresh event received -> refetching data');
       fetchData();
     });
-    return () => socket.disconnect();
+
+    eventSource.onerror = (err) => {
+      console.warn('[SSE] EventSource connection status / reconnecting:', err);
+    };
+
+    return () => {
+      eventSource.close();
+    };
   }, [fetchData]);
 
   // ------- copy helper -------
@@ -238,17 +258,19 @@ function DashboardContent() {
     router.push(`/meeting/${joinLink.trim()}`);
   };
 
-  const handleDeleteMeeting = (meetingId) => {
+  const handleDeleteMeeting = (meetingId, isScheduledAndHost = false) => {
     setConfirmModal({
-        title: 'Remove Meeting',
-        message: 'This will remove the meeting from your history.',
+      title: isScheduledAndHost ? 'Cancel Scheduled Meeting' : 'Remove Meeting',
+      message: isScheduledAndHost 
+        ? 'Are you sure you want to cancel this scheduled meeting? It will be marked as Cancelled for all participants.' 
+        : 'This will remove the meeting from your history.',
       onConfirm: async () => {
         setConfirmModal(null);
         try {
           await api.delete(`/meetings/${meetingId}`);
           fetchData();
         } catch (err) {
-          setAlertMessage('Failed to delete meeting.');
+          setAlertMessage('Failed to update meeting.');
         }
       },
     });
@@ -363,6 +385,49 @@ function DashboardContent() {
       fetchData();
     } catch (err) {
       setAlertMessage(err.response?.data?.error || 'Failed to create organization.');
+    }
+  };
+
+  const handleJoinOrgByCode = async (e) => {
+    e.preventDefault();
+    const cleanCode = joinOrgCodeInput.trim().toUpperCase();
+    if (!cleanCode) return;
+    setJoinOrgLoading(true);
+    setJoinOrgError(null);
+    try {
+      const res = await api.post('/organizations/join-by-code', { 
+        code: cleanCode,
+        accessCode: cleanCode 
+      });
+      setShowJoinOrgModal(false);
+      setJoinOrgCodeInput('');
+      setAlertMessage(res.data.message || 'Join request sent to the host successfully!');
+      fetchData();
+    } catch (err) {
+      const errMsg = err.response?.data?.error || 'Failed to send join request.';
+      setJoinOrgError(errMsg);
+    } finally {
+      setJoinOrgLoading(false);
+    }
+  };
+
+  const handleApproveJoinRequest = async (requestId) => {
+    try {
+      const res = await api.post(`/organizations/join-requests/${requestId}/approve`);
+      setAlertMessage(res.data.message || 'Join request approved!');
+      fetchData();
+    } catch (err) {
+      setAlertMessage(err.response?.data?.error || 'Failed to approve join request.');
+    }
+  };
+
+  const handleRejectJoinRequest = async (requestId) => {
+    try {
+      const res = await api.post(`/organizations/join-requests/${requestId}/reject`);
+      setAlertMessage(res.data.message || 'Join request rejected.');
+      fetchData();
+    } catch (err) {
+      setAlertMessage(err.response?.data?.error || 'Failed to reject join request.');
     }
   };
 
@@ -495,7 +560,7 @@ function DashboardContent() {
 
   // ------- derived state -------
   const upcomingMeetings = meetings.filter(m => m.state === 'SCHEDULED' || m.state === 'ONGOING');
-  const historyMeetings  = meetings.filter(m => m.state === 'COMPLETED');
+  const historyMeetings  = meetings.filter(m => m.state === 'COMPLETED' || m.state === 'CANCELLED');
   const displayedHistory = showAllHistory ? historyMeetings : historyMeetings.slice(0, 3);
   const displayMeetings  = activeTab === 'upcoming' ? upcomingMeetings : displayedHistory;
 
@@ -556,6 +621,42 @@ function DashboardContent() {
               <div style={{ display: 'flex', gap: '1rem' }}>
                 <button type="button" onClick={() => setShowOrgModal(false)} style={{ flex: 1, padding: '0.875rem', background: 'transparent', color: '#555', border: '2px solid #111', borderRadius: '0', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
                 <button type="submit" style={{ flex: 1, padding: '0.875rem', background: '#111', color: '#FDFBF7', border: 'none', borderRadius: '0', fontWeight: 600, cursor: 'pointer' }}>Create</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Join Org with Code Modal */}
+      {showJoinOrgModal && (
+        <div style={MODAL_STYLE.overlay} onClick={() => { setShowJoinOrgModal(false); setJoinOrgError(null); }}>
+          <div style={MODAL_STYLE.box} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ margin: '0 0 1rem', color: '#111', textAlign: 'center' }}>Join Organization</h2>
+            <p style={{ margin: '0 0 1.25rem', color: '#555', fontSize: '0.88rem', textAlign: 'center', lineHeight: 1.5 }}>
+              Enter the organization code (e.g. <code>BB-E01D16</code>) to request access. The host will review and approve your request.
+            </p>
+            {joinOrgError && (
+              <div style={{ color: '#FF3311', background: 'rgba(255,51,17,0.08)', padding: '0.6rem 0.8rem', border: '1px solid #FF3311', marginBottom: '1.25rem', fontSize: '0.85rem', lineHeight: 1.4 }}>
+                {joinOrgError}
+              </div>
+            )}
+            <form onSubmit={handleJoinOrgByCode}>
+              <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.85rem', color: '#555' }}>Organization Access Code</label>
+              <input
+                type="text"
+                placeholder="e.g. BB-E01D16"
+                className={styles.input}
+                value={joinOrgCodeInput}
+                onChange={e => { setJoinOrgCodeInput(e.target.value.toUpperCase()); setJoinOrgError(null); }}
+                required
+                style={{ width: '100%', background: 'transparent', border: '2px solid #111', marginBottom: '1.5rem', padding: '0.75rem 1rem', fontSize: '1rem', color: '#111', outline: 'none', fontFamily: 'var(--font-mono)' }}
+                autoFocus
+              />
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <button type="button" onClick={() => { setShowJoinOrgModal(false); setJoinOrgError(null); }} style={{ flex: 1, padding: '0.875rem', background: 'transparent', color: '#555', border: '2px solid #111', borderRadius: '0', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                <button type="submit" disabled={joinOrgLoading} style={{ flex: 1, padding: '0.875rem', background: '#111', color: '#FDFBF7', border: 'none', borderRadius: '0', fontWeight: 600, cursor: 'pointer' }}>
+                  {joinOrgLoading ? 'Sending...' : 'Send Request'}
+                </button>
               </div>
             </form>
           </div>
@@ -829,11 +930,16 @@ function DashboardContent() {
               {/* ===== ORGANIZATIONS TAB ===== */}
               {activeTab === 'organizations' && (
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
                     <h3 style={{ margin: 0, color: '#111' }}>My Organizations</h3>
-                    <button onClick={() => setShowOrgModal(true)} style={{ background: '#111', color: '#FDFBF7', border: 'none', padding: '0.5rem 1rem', borderRadius: '0', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem' }}>
-                      + Create Org
-                    </button>
+                    <div style={{ display: 'flex', gap: '0.6rem' }}>
+                      <button onClick={() => setShowJoinOrgModal(true)} style={{ background: '#FDFBF7', color: '#111', border: '2px solid #111', padding: '0.5rem 1rem', borderRadius: '0', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem', boxShadow: '2px 2px 0 #111' }}>
+                        Join with Code
+                      </button>
+                      <button onClick={() => setShowOrgModal(true)} style={{ background: '#111', color: '#FDFBF7', border: 'none', padding: '0.5rem 1rem', borderRadius: '0', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem', boxShadow: '2px 2px 0 #111' }}>
+                        + Create Org
+                      </button>
+                    </div>
                   </div>
 
                   {organizations.length === 0 ? (
@@ -915,6 +1021,51 @@ function DashboardContent() {
                               </div>
                             </div>
 
+                            {/* Pending Join Requests (Host / Co-host) */}
+                            {(isOwner || org.coHosts?.some(c => c.id === user.id)) && org.joinRequests?.length > 0 && (
+                              <div style={{ borderTop: '2px solid #FF3311', paddingTop: '0.75rem', marginBottom: '0.75rem', background: 'rgba(255,51,17,0.03)', padding: '0.75rem', border: '1px solid #FF3311' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.6rem' }}>
+                                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#FF3311', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
+                                    Pending Join Requests ({org.joinRequests.length})
+                                  </p>
+                                  <span style={{ fontSize: '0.72rem', color: '#555', fontFamily: 'var(--font-mono)' }}>Review & Approve</span>
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                  {org.joinRequests.map(req => (
+                                    <div key={req.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#FDFBF7', border: '1px solid #111', padding: '0.5rem 0.75rem', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                                        {req.user?.avatar ? (
+                                          <img src={req.user.avatar} alt="" style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', border: '1px solid #111' }} />
+                                        ) : (
+                                          <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#0022FF', color: '#FDFBF7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700 }}>
+                                            {(req.user?.name || req.user?.email || '?').charAt(0).toUpperCase()}
+                                          </div>
+                                        )}
+                                        <div>
+                                          <span style={{ fontWeight: 600, fontSize: '0.85rem', color: '#111' }}>{req.user?.name || req.user?.email}</span>
+                                          <span style={{ fontSize: '0.75rem', color: '#666', marginLeft: '0.4rem' }}>({req.user?.email})</span>
+                                        </div>
+                                      </div>
+                                      <div style={{ display: 'flex', gap: '0.4rem' }}>
+                                        <button
+                                          onClick={() => handleApproveJoinRequest(req.id)}
+                                          style={{ background: '#10b981', color: '#FDFBF7', border: '1px solid #111', padding: '0.3rem 0.75rem', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
+                                        >
+                                          Approve
+                                        </button>
+                                        <button
+                                          onClick={() => handleRejectJoinRequest(req.id)}
+                                          style={{ background: '#ef4444', color: '#FDFBF7', border: '1px solid #111', padding: '0.3rem 0.75rem', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
+                                        >
+                                          Reject
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
                             {/* Pending invitations */}
                             {isOwner && org.invitations?.length > 0 && (
                               <div style={{ borderTop: '1px dashed rgba(255,255,255,0.07)', paddingTop: '0.75rem', marginBottom: '0.75rem' }}>
@@ -975,12 +1126,47 @@ function DashboardContent() {
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1, minWidth: 'min(200px, 100%)' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                                   <h3 style={{ margin: 0, fontSize: '1.75rem', color: '#0A0A0A', fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontWeight: 600 }}>{m.title || 'Untitled Meeting'}</h3>
-                                  <span style={{ background: m.state === 'COMPLETED' ? '#0022FF' : '#FF3311', color: '#F7F5F0', padding: '0.2rem 0.5rem', fontSize: '0.7rem', fontWeight: 700, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', border: '1px solid #0A0A0A', boxShadow: '2px 2px 0 rgba(10,10,10,1)' }}>
+                                  <span style={{ background: m.state === 'COMPLETED' ? '#0022FF' : (m.state === 'CANCELLED' ? '#777' : (m.state === 'ONGOING' ? '#FF3311' : '#0A0A0A')), color: '#F7F5F0', padding: '0.2rem 0.5rem', fontSize: '0.7rem', fontWeight: 700, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', border: '1px solid #0A0A0A', boxShadow: '2px 2px 0 rgba(10,10,10,1)' }}>
                                     {m.state}
                                   </span>
+                                  {(() => {
+                                    const isMainHost = m.hostId === user?.id;
+                                    const participant = m.participants?.find(p => p.userId === user?.id);
+                                    const role = isMainHost ? 'HOST' : (participant?.role || 'PARTICIPANT');
+                                    return <RoleBadge role={role} />;
+                                  })()}
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                                  <code style={{ fontSize: '0.9rem', color: '#0022FF', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>ID: {m.meetingLink}</code>
+                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                                    <code style={{ fontSize: '0.9rem', color: '#0022FF', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>ID: {m.meetingLink}</code>
+                                    <button
+                                      onClick={() => {
+                                        const fullUrl = `${window.location.origin}/meeting/${m.meetingLink}`;
+                                        navigator.clipboard.writeText(fullUrl);
+                                        setCopiedCode(m.meetingLink);
+                                        setTimeout(() => setCopiedCode(null), 2000);
+                                      }}
+                                      title={copiedCode === m.meetingLink ? "Copied invite link!" : "Copy Invite Link"}
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.25rem',
+                                        background: copiedCode === m.meetingLink ? '#10b981' : '#F7F5F0',
+                                        color: copiedCode === m.meetingLink ? '#fff' : '#0A0A0A',
+                                        border: '1px solid #0A0A0A',
+                                        padding: '0.15rem 0.45rem',
+                                        fontSize: '0.72rem',
+                                        fontWeight: 600,
+                                        fontFamily: 'var(--font-mono)',
+                                        cursor: 'pointer',
+                                        boxShadow: '1px 1px 0 rgba(10,10,10,1)',
+                                        transition: 'all 0.1s'
+                                      }}
+                                    >
+                                      {copiedCode === m.meetingLink ? <Check size={12} /> : <Copy size={12} />}
+                                      <span>{copiedCode === m.meetingLink ? 'Copied' : 'Copy Link'}</span>
+                                    </button>
+                                  </div>
                                   <span style={{ color: '#5A5A5A', fontSize: '0.85rem' }}>Host: <strong style={{ color: '#0A0A0A' }}>{m.host?.name || 'Unknown'}</strong></span>
                                   <span style={{ color: '#5A5A5A', fontSize: '0.85rem' }}>{new Date(m.createdAt).toLocaleString()}</span>
                                 </div>
@@ -999,12 +1185,16 @@ function DashboardContent() {
                                       Report
                                     </Link>
                                   </>
+                                ) : m.state === 'CANCELLED' ? (
+                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: '#FF3311', fontWeight: 700, padding: '0.4rem 0.8rem', border: '1px solid #FF3311', textTransform: 'uppercase' }}>
+                                    Cancelled
+                                  </span>
                                 ) : (
                                   <Link href={`/meeting/${m.meetingLink}`} style={{ background: '#FF3311', color: '#F7F5F0', border: '2px solid #0A0A0A', padding: '0.5rem 2rem', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 700, fontFamily: 'var(--font-mono)', boxShadow: '4px 4px 0 rgba(10,10,10,1)', textTransform: 'uppercase', textDecoration: 'none' }}>
                                     {m.state === 'SCHEDULED' ? 'Start' : 'Join'}
                                   </Link>
                                 )}
-                                <button onClick={() => handleDeleteMeeting(m.id)} title="Remove" style={{ background: '#FF3311', color: '#F7F5F0', border: '2px solid #0A0A0A', padding: '0.5rem', cursor: 'pointer', display: 'flex', alignItems: 'center', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
+                                <button onClick={() => handleDeleteMeeting(m.id, m.state === 'SCHEDULED' && m.hostId === user?.id)} title={m.state === 'SCHEDULED' && m.hostId === user?.id ? "Cancel Meeting" : "Remove"} style={{ background: '#FF3311', color: '#F7F5F0', border: '2px solid #0A0A0A', padding: '0.5rem', cursor: 'pointer', display: 'flex', alignItems: 'center', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
                                   <Trash2 size={16} />
                                 </button>
                               </div>

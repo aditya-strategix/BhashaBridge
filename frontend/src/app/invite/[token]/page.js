@@ -1,19 +1,27 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import api from '../../../services/api';
 import useAuthStore from '../../../stores/authStore';
 
-export default function InvitePage({ params }) {
+export default function InvitePage() {
   const router = useRouter();
-  const { token } = params;
+  const params = useParams();
+  const token = params?.token;
   const [invite, setInvite] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [accepting, setAccepting] = useState(false);
-  const user = useAuthStore(state => state.user);
+  const [mounted, setMounted] = useState(false);
+  const { user, initialize } = useAuthStore();
 
   useEffect(() => {
+    setMounted(true);
+    initialize();
+  }, [initialize]);
+
+  useEffect(() => {
+    if (!token) return;
     const fetchInvite = async () => {
       try {
         const res = await api.get(`/organizations/invite/${token}`);
@@ -44,7 +52,7 @@ export default function InvitePage({ params }) {
     }
   };
 
-  if (loading) {
+  if (!mounted || loading) {
     return (
       <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-ivory, #FAF9F6)' }}>
         <p style={{ fontFamily: 'var(--font-mono, monospace)', textTransform: 'uppercase' }}>[ RETRIEVING DOSSIER ]</p>

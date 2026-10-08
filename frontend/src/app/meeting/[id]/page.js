@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { io } from 'socket.io-client';
 import Peer from 'simple-peer';
 import {
   Mic, MicOff, Video, VideoOff, PhoneOff, Send,
   Users, Settings, Shield, UserCheck, UserX,
-  MessageSquare, Globe, ChevronRight, VolumeX, MoreVertical, Star
+  MessageSquare, Globe, ChevronRight, VolumeX, MoreVertical, Star, Trash2, X,
+  Copy, Check, Clock, AlertCircle, FileText, ArrowLeft
 } from 'lucide-react';
 import useAuthStore from '../../../stores/authStore';
 import styles from './meeting.module.css';
@@ -43,7 +44,7 @@ function Avatar({ name, size = 36, color = '#0022FF', avatarUrl }) {
 }
 
 // -------- Video peer tile --------
-const VideoPeer = ({ peer, name, isAudioOn = true, isVideoOn = true, avatarUrl }) => {
+const VideoPeer = ({ peer, name, role, isAudioOn = true, isVideoOn = true, avatarUrl }) => {
   const ref = useRef();
   useEffect(() => {
     peer.on('stream', stream => { if (ref.current) ref.current.srcObject = stream; });
@@ -57,7 +58,23 @@ const VideoPeer = ({ peer, name, isAudioOn = true, isVideoOn = true, avatarUrl }
         </div>
       )}
       <div className={styles.tileOverlay}>
-        <span className={styles.tileName}>{name || 'Participant'}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <span className={styles.tileName}>{name || 'Participant'}</span>
+          {role && role !== 'PARTICIPANT' && (
+            <span style={{
+              background: role === 'HOST' ? '#FF3311' : '#0022FF',
+              color: '#F7F5F0',
+              padding: '0.15rem 0.45rem',
+              fontSize: '0.65rem',
+              fontWeight: 700,
+              fontFamily: 'var(--font-mono)',
+              border: '1px solid #0A0A0A',
+              boxShadow: '1px 1px 0 rgba(10,10,10,1)'
+            }}>
+              {role}
+            </span>
+          )}
+        </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           {!isAudioOn && <MicOff size={16} color="var(--vermilion, #FF3311)" />}
           {!isVideoOn && <VideoOff size={16} color="var(--vermilion, #FF3311)" />}
@@ -105,6 +122,15 @@ export default function MeetingRoom() {
     lobbyToastTimer.current = setTimeout(() => setLobbyToast(null), 6000);
   };
   const [alertMessage, setAlertMessage] = useState(null);
+  const [joinError, setJoinError] = useState(null);
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  const handleCopyInviteLink = () => {
+    const url = `${window.location.origin}/meeting/${meetingId}`;
+    navigator.clipboard.writeText(url);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
   const chatEndRef = useRef(null);
   const ttsEnabledRef = useRef(true);
   const userVideo = useRef();
@@ -116,6 +142,8 @@ export default function MeetingRoom() {
   const streamRef = useRef(null);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const moreMenuRef = useRef(null);
+  const sidebarRef = useRef(null);
+  const chatToggleBtnRef = useRef(null);
   
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -125,11 +153,46 @@ export default function MeetingRoom() {
     };
     if (showMoreMenu) {
       document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('touchstart', handleClickOutside);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
     };
   }, [showMoreMenu]);
+
+  useEffect(() => {
+    const handleSidebarClickOutside = (event) => {
+      if (!sidebarTab) return;
+      if (sidebarRef.current && sidebarRef.current.contains(event.target)) {
+        return;
+      }
+      if (chatToggleBtnRef.current && chatToggleBtnRef.current.contains(event.target)) {
+        return;
+      }
+      if (moreMenuRef.current && moreMenuRef.current.contains(event.target)) {
+        return;
+      }
+      setSidebarTab(null);
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setSidebarTab(null);
+      }
+    };
+
+    if (sidebarTab) {
+      document.addEventListener('mousedown', handleSidebarClickOutside);
+      document.addEventListener('touchstart', handleSidebarClickOutside);
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleSidebarClickOutside);
+      document.removeEventListener('touchstart', handleSidebarClickOutside);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [sidebarTab]);
   const audioLockedRef = useRef(false);
   const videoLockedRef = useRef(false);
   const [isAudioLocked, setIsAudioLocked] = useState(false);
@@ -176,11 +239,57 @@ export default function MeetingRoom() {
     const initializeMeeting = async () => {
       try {
         const token = localStorage.getItem('token');
+        if (!token) {
+          router.push(`/login?redirect=/meeting/${meetingId}`);
+          return;
+        }
+
         const res = await fetch(`${API_URL}/meetings/join/${meetingId}`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (!res.ok) throw new Error('Meeting ended, not found, or unauthorized');
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData.error || 'Meeting ended, not found, or unauthorized';
+
+          let errorType = 'ERROR';
+          let title = 'Unable to Join Meeting';
+          let description = errMsg;
+          let showReport = false;
+
+          const lowerMsg = errMsg.toLowerCase();
+          if (lowerMsg.includes('ended')) {
+            errorType = 'ENDED';
+            title = 'Meeting Has Ended';
+            description = 'This meeting has already concluded and is no longer active. You can view the meeting summary & report or return to your dashboard.';
+            showReport = true;
+          } else if (lowerMsg.includes('cancelled') || lowerMsg.includes('canceled')) {
+            errorType = 'CANCELLED';
+            title = 'Meeting Cancelled';
+            description = 'This scheduled meeting was cancelled by the host and is no longer available.';
+            showReport = false;
+          } else if (lowerMsg.includes('organization') || lowerMsg.includes('member') || lowerMsg.includes('unauthorized')) {
+            errorType = 'UNAUTHORIZED';
+            title = 'Access Restricted';
+            description = 'This meeting is restricted to organization members. Please request access or contact the organization host.';
+            showReport = false;
+          } else if (lowerMsg.includes('not found')) {
+            errorType = 'NOT_FOUND';
+            title = 'Meeting Not Found';
+            description = `No meeting was found with ID "${meetingId}". Please check the invite link and try again.`;
+            showReport = false;
+          }
+
+          setJoinError({
+            type: errorType,
+            title,
+            message: description,
+            rawError: errMsg,
+            showReport
+          });
+          return;
+        }
 
         const data = await res.json();
         setParticipantStatus(data.participantStatus);
@@ -210,15 +319,89 @@ export default function MeetingRoom() {
         setTimeout(() => newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current }), 2000);
           newSocket.emit('user:update_settings', useAuthStore.getState().user || {});
 
-                  newSocket.on('participant:promoted', ({ userId, role }) => {
+                  
+                    newSocket.on('participant:promoted', ({ userId, role }) => {
             if (userId === useAuthStore.getState().user?.id) {
               setParticipantRole(role);
-              // role updated to COHOST
-              // role updated to PARTICIPANT
-            } else {
-              setPeers(prev => prev.map(p => p.userId === userId ? { ...p, role } : p));
+              roleRef.current = role;
+            }
+            const idx = peersRef.current.findIndex(p => p.userId === userId); 
+            if (idx !== -1) { 
+              peersRef.current[idx] = { ...peersRef.current[idx], role }; 
+              setPeers([...peersRef.current]); 
             }
           });
+
+          newSocket.on('participant:removed', ({ userId }) => {
+            const currentUserId = useAuthStore.getState().user?.id;
+            if (userId === currentUserId) {
+              setAlertMessage('You have been removed from the meeting.');
+              if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+              peersRef.current.forEach(p => { if (p.peer) { try { p.peer.destroy(); } catch (e) {} } });
+              peersRef.current = [];
+              setPeers([]);
+              setTimeout(() => {
+                router.push('/dashboard');
+              }, 1200);
+            } else {
+              const peerToRemove = peersRef.current.find(p => p.userId === userId);
+              if (peerToRemove && peerToRemove.peer) {
+                try { peerToRemove.peer.destroy(); } catch (e) {}
+              }
+              peersRef.current = peersRef.current.filter(p => p.userId !== userId);
+              setPeers([...peersRef.current]);
+              setWaitingUsers(prev => prev.filter(u => u.userId !== userId));
+            }
+          });
+
+          newSocket.on('meeting:refresh', async () => {
+            try {
+              const token = localStorage.getItem('token');
+              const res = await fetch(`${API_URL}/meetings/${meetingId}/participants`, {
+                headers: { Authorization: `Bearer ${token}` }
+              });
+              if (res.ok) {
+                const data = await res.json();
+                const currentUserId = useAuthStore.getState().user?.id;
+                const admittedUserIds = new Set(data.map(p => p.userId));
+
+                // If current user is no longer admitted, redirect to dashboard
+                const myData = data.find(p => p.userId === currentUserId);
+                if (currentUserId && !myData && roleRef.current !== 'HOST') {
+                  if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+                  peersRef.current.forEach(p => { if (p.peer) { try { p.peer.destroy(); } catch (e) {} } });
+                  peersRef.current = [];
+                  setPeers([]);
+                  router.push('/dashboard');
+                  return;
+                }
+                if (myData) {
+                  setParticipantRole(myData.role);
+                  roleRef.current = myData.role;
+                }
+
+                // Remove peers not in admitted DB list
+                peersRef.current.forEach(p => {
+                  if (p.userId && !admittedUserIds.has(p.userId)) {
+                    if (p.peer) { try { p.peer.destroy(); } catch (e) {} }
+                  }
+                });
+                peersRef.current = peersRef.current.filter(p => !p.userId || admittedUserIds.has(p.userId));
+
+                // Update remaining peers with latest roles
+                data.forEach(dbPeer => {
+                  const idx = peersRef.current.findIndex(p => p.userId === dbPeer.userId);
+                  if (idx !== -1) {
+                    peersRef.current[idx] = { ...peersRef.current[idx], role: dbPeer.role, name: dbPeer.name, avatar: dbPeer.avatar };
+                  }
+                });
+                setPeers([...peersRef.current]);
+              }
+            } catch (err) {
+              console.error("Meeting refresh failed", err);
+            }
+          });
+
           newSocket.on('waiting:request', ({ userId, name, avatar }) => {
           setWaitingUsers(prev => prev.some(u => u.userId === userId) ? prev : [...prev, { userId, name, avatar }]);
           // Auto-show lobby panel for host
@@ -370,9 +553,13 @@ export default function MeetingRoom() {
             }
           });
       } catch (err) {
-        console.error(err);
-        setAlertMessage(err.message || 'Failed to join meeting.');
-        setTimeout(() => router.push('/dashboard'), 2000);
+        console.warn('[Meeting] Join error:', err.message);
+        setJoinError({
+          type: 'ERROR',
+          title: 'Connection Error',
+          message: err.message || 'Failed to connect to the meeting server. Please check your network and try again.',
+          showReport: false
+        });
       }
     };
 
@@ -437,7 +624,11 @@ export default function MeetingRoom() {
     if (socket) socket.emit('meeting:status_update', { isAudioOn: !audioRef.current, isVideoOn: videoRef.current });
   };
 
+
+  
+
   const authFetch = (path, opts = {}) =>
+
     fetch(`${API_URL}${path}`, {
       ...opts,
       headers: { Authorization: `Bearer ${localStorage.getItem('token')}`, 'Content-Type': 'application/json', ...opts.headers },
@@ -478,7 +669,36 @@ export default function MeetingRoom() {
 
 
 
-      const handleToggleMeetingCoHost = async (targetUserId, isCoHost) => {
+    
+  const handleRemoveParticipant = async (userId) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/meetings/${meetingId}/participant/${userId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const errorData = await res.json();
+        setAlertMessage(errorData.error || 'Failed to remove participant');
+      } else {
+        if (socket) {
+          socket.emit('meeting:remove_participant', { meetingId, targetUserId: userId });
+        }
+        const peerObj = peersRef.current.find(p => p.userId === userId);
+        if (peerObj && peerObj.peer) {
+          try { peerObj.peer.destroy(); } catch (e) {}
+        }
+        peersRef.current = peersRef.current.filter(p => p.userId !== userId);
+        setPeers([...peersRef.current]);
+      }
+    } catch (err) {
+      console.error(err);
+      setAlertMessage('Error removing participant');
+    }
+  };
+
+  const handleToggleMeetingCoHost = async (targetUserId, isCoHost) => {
+
     try {
       const token = localStorage.getItem('token');
       let res;
@@ -542,6 +762,179 @@ export default function MeetingRoom() {
 
   const isHost = participantRole === 'HOST';
   const isHostOrCoHost = isHost || participantRole === 'COHOST';
+
+  // ======= MEETING JOIN ERROR POPUP (Ended, Cancelled, Restricted, Not Found) =======
+  if (joinError) {
+    const isEnded = joinError.type === 'ENDED';
+    const isCancelled = joinError.type === 'CANCELLED';
+    const accentColor = isEnded ? '#0022FF' : (isCancelled ? '#777' : '#FF3311');
+
+    return (
+      <div style={{
+        position: 'fixed',
+        inset: 0,
+        background: '#FDFBF7',
+        backgroundImage: 'radial-gradient(rgba(10,10,10,0.08) 1px, transparent 0)',
+        backgroundSize: '24px 24px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '1.5rem',
+        zIndex: 99999,
+        fontFamily: 'var(--font-grotesk)'
+      }}>
+        {/* Brutalist modal box */}
+        <div style={{
+          background: '#F7F5F0',
+          border: '3px solid #0A0A0A',
+          boxShadow: '12px 12px 0 #0A0A0A',
+          maxWidth: 480,
+          width: '100%',
+          padding: '2.5rem',
+          textAlign: 'center',
+          position: 'relative'
+        }}>
+          {/* Top colored accent stripe */}
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 6,
+            background: accentColor
+          }} />
+
+          {/* Icon Badge */}
+          <div style={{
+            width: 72,
+            height: 72,
+            background: '#0A0A0A',
+            color: '#F7F5F0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1.5rem',
+            border: '2px solid #0A0A0A',
+            boxShadow: `6px 6px 0 ${accentColor}`
+          }}>
+            {isEnded ? (
+              <Clock size={36} color="#F7F5F0" />
+            ) : isCancelled ? (
+              <Trash2 size={36} color="#FF3311" />
+            ) : joinError.type === 'UNAUTHORIZED' ? (
+              <Shield size={36} color="#FF3311" />
+            ) : (
+              <AlertCircle size={36} color="#FF3311" />
+            )}
+          </div>
+
+          {/* Title */}
+          <h2 style={{
+            margin: '0 0 0.5rem',
+            color: '#0A0A0A',
+            fontSize: '2.2rem',
+            fontFamily: 'var(--font-serif)',
+            fontStyle: 'italic',
+            fontWeight: 700,
+            letterSpacing: '-0.02em',
+            lineHeight: 1.15
+          }}>
+            {joinError.title}
+          </h2>
+
+          {/* Meeting Code Badge */}
+          <div style={{ marginBottom: '1.25rem' }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.8rem',
+              color: '#0A0A0A',
+              background: 'transparent',
+              border: '1px solid #0A0A0A',
+              padding: '0.25rem 0.65rem',
+              fontWeight: 700,
+              textTransform: 'uppercase'
+            }}>
+              <span style={{ width: 8, height: 8, background: accentColor, display: 'inline-block' }} />
+              ID: {meetingId}
+            </span>
+          </div>
+
+          {/* Description message */}
+          <p style={{
+            margin: '0 0 2rem',
+            color: '#4A4A4A',
+            fontSize: '0.95rem',
+            lineHeight: 1.6,
+            fontFamily: 'var(--font-grotesk)'
+          }}>
+            {joinError.message}
+          </p>
+
+          {/* Action buttons */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {joinError.showReport && (
+              <button
+                onClick={() => router.push(`/meeting/${meetingId}/report`)}
+                style={{
+                  width: '100%',
+                  padding: '1rem',
+                  background: '#0022FF',
+                  color: '#F7F5F0',
+                  border: '2px solid #0A0A0A',
+                  cursor: 'pointer',
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  fontFamily: 'var(--font-mono)',
+                  textTransform: 'uppercase',
+                  boxShadow: '4px 4px 0 #0A0A0A',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  transition: 'transform 0.1s'
+                }}
+                onMouseEnter={e => e.currentTarget.style.transform = 'translate(-2px, -2px)'}
+                onMouseLeave={e => e.currentTarget.style.transform = 'none'}
+              >
+                <FileText size={16} />
+                <span>View Summary & Report</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => router.push('/dashboard')}
+              style={{
+                width: '100%',
+                padding: '1rem',
+                background: joinError.showReport ? '#F7F5F0' : '#0A0A0A',
+                color: joinError.showReport ? '#0A0A0A' : '#F7F5F0',
+                border: '2px solid #0A0A0A',
+                cursor: 'pointer',
+                fontWeight: 700,
+                fontSize: '0.9rem',
+                fontFamily: 'var(--font-mono)',
+                textTransform: 'uppercase',
+                boxShadow: '4px 4px 0 #0A0A0A',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                transition: 'transform 0.1s'
+              }}
+              onMouseEnter={e => e.currentTarget.style.transform = 'translate(-2px, -2px)'}
+              onMouseLeave={e => e.currentTarget.style.transform = 'none'}
+            >
+              <ArrowLeft size={16} />
+              <span>Back to Dashboard</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!user || !participantStatus) {
     return (
@@ -677,8 +1070,30 @@ export default function MeetingRoom() {
               <span style={{ fontWeight: 600, color: '#0A0A0A', fontSize: '1.5rem', fontFamily: 'var(--font-serif)', fontStyle: 'italic', letterSpacing: '-0.02em' }}>BhashaBridge</span>
             </div>
             <div style={{ height: 24, width: 2, background: '#0A0A0A' }} />
-            <div className='meetingHeaderRight' style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div className='meetingHeaderRight' style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
               <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.9rem', color: '#0022FF', fontWeight: 600 }}>{meetingId}</code>
+              <button
+                onClick={handleCopyInviteLink}
+                title={copiedLink ? "Copied invite link!" : "Copy Invite Link"}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  background: copiedLink ? '#10b981' : '#F7F5F0',
+                  color: copiedLink ? '#FFFFFF' : '#0A0A0A',
+                  border: '2px solid #0A0A0A',
+                  padding: '0.25rem 0.55rem',
+                  cursor: 'pointer',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  boxShadow: '2px 2px 0 rgba(10,10,10,1)',
+                  transition: 'all 0.1s'
+                }}
+              >
+                {copiedLink ? <Check size={13} /> : <Copy size={13} />}
+                <span>{copiedLink ? 'Copied' : 'Copy Invite Link'}</span>
+              </button>
               {participantRole && (
                 <span style={{ background: participantRole === 'HOST' ? '#FF3311' : '#0022FF', color: '#F7F5F0', padding: '0.25rem 0.5rem', fontSize: '0.7rem', fontWeight: 700, fontFamily: 'var(--font-mono)', border: '2px solid #0A0A0A', boxShadow: '2px 2px 0 rgba(10,10,10,1)' }}>
                   {participantRole}
@@ -722,7 +1137,23 @@ export default function MeetingRoom() {
                 </div>
               )}
               <div className={styles.tileOverlay}>
-                <span className={styles.tileName}>{user.name} (You)</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <span className={styles.tileName}>{user.name} (You)</span>
+                  {participantRole && participantRole !== 'PARTICIPANT' && (
+                    <span style={{
+                      background: participantRole === 'HOST' ? '#FF3311' : '#0022FF',
+                      color: '#F7F5F0',
+                      padding: '0.15rem 0.45rem',
+                      fontSize: '0.65rem',
+                      fontWeight: 700,
+                      fontFamily: 'var(--font-mono)',
+                      border: '1px solid #0A0A0A',
+                      boxShadow: '1px 1px 0 rgba(10,10,10,1)'
+                    }}>
+                      {participantRole}
+                    </span>
+                  )}
+                </div>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   {!isAudioOn && <MicOff size={16} color="var(--vermilion, #FF3311)" />}
                   {!isVideoOn && <VideoOff size={16} color="var(--vermilion, #FF3311)" />}
@@ -730,7 +1161,7 @@ export default function MeetingRoom() {
               </div>
             </div>
             {peers.map((peer, i) => (
-              <VideoPeer key={i} peer={peer.peer} name={`${peer.name || `Participant ${i + 1}`}`} isAudioOn={peer.isAudioOn} isVideoOn={peer.isVideoOn} avatarUrl={peer.avatar} />
+              <VideoPeer key={peer.peerID || i} peer={peer.peer} name={`${peer.name || `Participant ${i + 1}`}`} role={peer.role} isAudioOn={peer.isAudioOn} isVideoOn={peer.isVideoOn} avatarUrl={peer.avatar} />
             ))}
           </div>
 
@@ -759,6 +1190,7 @@ export default function MeetingRoom() {
               {isVideoOn ? <Video size={20} /> : <VideoOff size={20} />}
             </button>
             <button
+              ref={chatToggleBtnRef}
               onClick={() => setSidebarTab(t => t === 'CHAT' ? null : 'CHAT')}
               title="Chat"
               style={{ width: 48, height: 48, borderRadius: '0', border: '2px solid #0A0A0A', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: sidebarTab === 'CHAT' ? '#0022FF' : 'transparent', color: sidebarTab === 'CHAT' ? 'white' : '#0A0A0A' }}
@@ -822,15 +1254,36 @@ export default function MeetingRoom() {
         </div>
 
         {/* === SIDEBAR === */}
-        <aside className={`${styles.chatSection} ${sidebarTab ? styles.chatSectionOpen : ''}`}>
+        <aside ref={sidebarRef} className={`${styles.chatSection} ${sidebarTab ? styles.chatSectionOpen : ''}`}>
           {/* Sidebar tabs */}
-          <div style={{ display: 'flex', borderBottom: '2px solid #0A0A0A' }}>
+          <div style={{ display: 'flex', alignItems: 'center', borderBottom: '2px solid #0A0A0A' }}>
             {['CHAT', 'MEMBERS'].map(tab => (
-              <button key={tab} onClick={() => setSidebarTab(tab)} style={{ flex: 1, padding: '1rem', background: 'none', border: 'none', cursor: 'pointer', color: sidebarTab === tab ? '#0A0A0A' : '#5A5A5A', fontFamily: 'var(--font-grotesk)', borderBottom: sidebarTab === tab ? '2px solid #0A0A0A' : '3px solid transparent', fontSize: '0.9rem', transition: 'all 0.2s', position: 'relative' }}>
+              <button key={tab} onClick={() => setSidebarTab(tab)} style={{ flex: 1, padding: '1rem', background: 'none', border: 'none', cursor: 'pointer', color: sidebarTab === tab ? '#0A0A0A' : '#5A5A5A', fontFamily: 'var(--font-grotesk)', borderBottom: sidebarTab === tab ? '2px solid #0A0A0A' : '3px solid transparent', fontSize: '0.9rem', transition: 'all 0.2s', position: 'relative', fontWeight: sidebarTab === tab ? 600 : 400 }}>
                 {tab === 'CHAT' ? <><MessageSquare size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Chat</>
                   : <><Users size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Members ({peers.length + 1}){waitingUsers.length > 0 && isHostOrCoHost && <span style={{ position: 'absolute', top: 12, right: 12, width: 8, height: 8, borderRadius: '50%', background: 'var(--vermilion, #ff4500)' }} />}</>}
               </button>
             ))}
+            <button
+              onClick={() => setSidebarTab(null)}
+              title="Close panel"
+              style={{
+                background: 'none',
+                border: 'none',
+                borderLeft: '2px solid #0A0A0A',
+                padding: '0 1rem',
+                alignSelf: 'stretch',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                color: '#0A0A0A',
+                transition: 'background 0.15s'
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(10,10,10,0.06)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'none'}
+            >
+              <X size={18} />
+            </button>
           </div>
 
           {sidebarTab === 'CHAT' ? (
@@ -904,11 +1357,18 @@ export default function MeetingRoom() {
                     <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center', flexShrink: 0 }}>
                       {(peer.isAudioOn ?? true) ? <Mic size={14} color="#5A5A5A" /> : <MicOff size={14} color="#FF3311" />}
                       {(peer.isVideoOn ?? true) ? <Video size={14} color="#5A5A5A" /> : <VideoOff size={14} color="#FF3311" />}
+                      
                       {isHost && peer.role !== 'HOST' && (
                         <button onClick={() => handleToggleMeetingCoHost(peer.userId, peer.role === 'COHOST')} title={peer.role === 'COHOST' ? 'Remove Co-Host' : 'Make Co-Host'} style={{ background: 'none', border: 'none', color: peer.role === 'COHOST' ? '#FF3311' : '#5A5A5A', cursor: 'pointer', padding: '0.1rem', display: 'flex' }}>
                           <Star size={14} fill={peer.role === 'COHOST' ? '#FF3311' : 'none'} />
                         </button>
                       )}
+                      {((isHost && peer.role !== 'HOST') || (participantRole === 'COHOST' && peer.role === 'PARTICIPANT')) && (
+                        <button onClick={() => handleRemoveParticipant(peer.userId)} title="Remove Participant" style={{ background: 'none', border: 'none', color: '#FF3311', cursor: 'pointer', padding: '0.1rem', display: 'flex' }}>
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+
                     </div>
                   </div>
                 ))}
