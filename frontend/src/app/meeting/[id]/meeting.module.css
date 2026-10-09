@@ -286,15 +286,63 @@
 @media screen and (max-width: 768px) {
   .lobbyContainer {
     flex-direction: column;
+    height: auto;
+    min-height: 100vh;
   }
   .lobbyLeft {
     flex: auto;
     padding: 1.5rem;
+    width: 100%;
   }
   .lobbyRight {
     flex: auto;
     padding: 1.5rem;
     border-left: none;
     border-top: 2px solid #0A0A0A;
+    width: 100%;
+  }
+
+  /* Full screen chat drawer on mobile */
+  .chatSection {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-width: 100vw;
+    border-left: none;
+    z-index: 500;
+  }
+
+  /* Subtitles scaled for mobile viewport */
+  .captionsOverlay {
+    bottom: 5rem;
+    padding: 0 1rem;
+    max-width: 100%;
+  }
+
+  .captionText {
+    font-size: clamp(1rem, 4.5vw, 1.5rem);
+    background: rgba(10, 10, 10, 0.85);
+    padding: 0.4rem 0.8rem;
+    line-height: 1.3;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  /* Video grid adapts to single-column stack on phones */
+  .videoGrid {
+    grid-template-columns: 1fr;
+    grid-auto-rows: minmax(160px, 1fr);
+    padding: 3.5rem 2px 5.5rem 2px;
+    overflow-y: auto;
+  }
+
+  .tileOverlay {
+    padding: 0.75rem;
+  }
+
+  .tileName {
+    font-size: 0.85rem;
   }
 }

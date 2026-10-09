@@ -5,7 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   PlusCircle, Video, Link as LinkIcon, Clock, Users,
-  CalendarCheck2, LogOut, Trash2, User as UserIcon, Copy, Check
+  CalendarCheck2, LogOut, Trash2, User as UserIcon, Copy, Check,
+  Mail, Send, Building, Key, RefreshCw
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
@@ -65,13 +66,17 @@ const MODAL_STYLE = {
     position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
     background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)',
     display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+    padding: '1rem', boxSizing: 'border-box',
   },
   box: {
-    background: '#FDFBF7', border: '4px solid #111', borderRadius: '0',
-    padding: '2rem', borderRadius: '0',
+    background: '#FDFBF7',
+    padding: 'clamp(1.25rem, 5vw, 2rem)',
     border: '2px solid #111',
-    boxShadow: '10px 10px 0 #111',
-    maxWidth: '420px', width: '90%',
+    boxShadow: '6px 6px 0 #111',
+    maxWidth: '440px', width: '100%',
+    boxSizing: 'border-box',
+    maxHeight: '90vh',
+    overflowY: 'auto',
   },
 };
 
@@ -143,6 +148,13 @@ function DashboardContent() {
   const [transcriptModal, setTranscriptModal] = useState(null); // { loading, entries }
   const [summaryModal, setSummaryModal] = useState(null); // { loading, text }
 
+  // Email Invite modal state
+  const [emailInviteModal, setEmailInviteModal] = useState(null); // meeting object
+  const [inviteEmailInput, setInviteEmailInput] = useState('');
+  const [isSendingInvite, setIsSendingInvite] = useState(false);
+  const [inviteError, setInviteError] = useState(null);
+  const [inviteSuccess, setInviteSuccess] = useState(null);
+
   // Copy feedback
   const [copiedCode, setCopiedCode] = useState(null);
 
@@ -158,21 +170,27 @@ function DashboardContent() {
     }
   }, [searchParams]);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (retryCount = 0) => {
+    if (!useAuthStore.getState().user) return;
     try {
       const [meetRes, orgRes] = await Promise.all([
         api.get('/meetings'),
         api.get('/organizations/my'),
       ]);
-      setMeetings(meetRes.data.meetings || []);
-      const freshOrgs = orgRes.data.organizations || [];
+      setMeetings(meetRes.data?.meetings || []);
+      const freshOrgs = orgRes.data?.organizations || [];
       setOrganizations(freshOrgs);
       setShowAllMembersOrg(prev => {
         if (!prev) return null;
         return freshOrgs.find(o => o.id === prev.id) || prev;
       });
     } catch (err) {
+      if (err.response?.status === 401) return;
       console.error('Failed to fetch data', err);
+      // Auto-retry transient failures (e.g. PgBouncer reconnect)
+      if (retryCount < 2) {
+        setTimeout(() => fetchData(retryCount + 1), 1200 * (retryCount + 1));
+      }
     }
   }, []);
 
@@ -186,7 +204,10 @@ function DashboardContent() {
     fetchData();
   }, [user, router, fetchData]);
 
+  // Dual real-time sync: SSE + Socket.IO + Polling
   useEffect(() => {
+    if (!user) return;
+
     const sseUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/events`;
     const eventSource = new EventSource(sseUrl);
 
@@ -196,13 +217,30 @@ function DashboardContent() {
     });
 
     eventSource.onerror = (err) => {
-      console.warn('[SSE] EventSource connection status / reconnecting:', err);
+      console.warn('[SSE] EventSource status / reconnecting:', err);
     };
+
+    // Socket.IO real-time channel
+    const socket = io(SOCKET_URL);
+    socket.on('dashboard:refresh', () => {
+      console.log('[Socket] dashboard:refresh received -> refetching data');
+      fetchData();
+    });
+    if (user?.id) {
+      socket.emit('user:register', { userId: user.id });
+    }
+
+    // Periodic heartbeat sync every 20 seconds
+    const interval = setInterval(() => {
+      fetchData();
+    }, 20000);
 
     return () => {
       eventSource.close();
+      socket.disconnect();
+      clearInterval(interval);
     };
-  }, [fetchData]);
+  }, [fetchData, user]);
 
   // ------- copy helper -------
   const copyCode = (code) => {
@@ -246,7 +284,8 @@ function DashboardContent() {
         fetchData();
       }
     } catch (err) {
-      setAlertMessage(err.response?.data?.error || 'Failed to create meeting.');
+      console.error('Create meeting error:', err);
+      setAlertMessage(err.response?.data?.error || err.message || 'Failed to create meeting.');
     } finally {
       setIsCreating(false);
     }
@@ -554,13 +593,46 @@ function DashboardContent() {
     }
   };
 
+  const handleSendEmailInvite = async (e) => {
+    e.preventDefault();
+    if (!inviteEmailInput.trim() || !emailInviteModal) return;
+    setIsSendingInvite(true);
+    setInviteError(null);
+    setInviteSuccess(null);
+    try {
+      const res = await api.post(`/meetings/${emailInviteModal.meetingLink}/invite`, {
+        emails: inviteEmailInput.trim()
+      });
+      const count = res.data?.count || 1;
+      setInviteSuccess(`Invitation email successfully sent to ${count} recipient${count > 1 ? 's' : ''}!`);
+      setTimeout(() => {
+        setEmailInviteModal(null);
+        setInviteEmailInput('');
+        setInviteSuccess(null);
+      }, 1800);
+    } catch (err) {
+      console.error('Failed to send email invite', err);
+      const errMsg = err.response?.data?.error || err.response?.data?.message || 'Failed to send invitation. Please verify email addresses.';
+      setInviteError(errMsg);
+    } finally {
+      setIsSendingInvite(false);
+    }
+  };
+
   const handleLogout = () => { logout(); router.push('/'); };
 
   if (!user) return null;
 
   // ------- derived state -------
   const upcomingMeetings = meetings.filter(m => m.state === 'SCHEDULED' || m.state === 'ONGOING');
-  const historyMeetings  = meetings.filter(m => m.state === 'COMPLETED' || m.state === 'CANCELLED');
+  const historyMeetings  = meetings.filter(m => {
+    if (m.state !== 'COMPLETED' && m.state !== 'CANCELLED') return false;
+    // Host always sees their created meetings in history
+    if (m.hostId === user?.id) return true;
+    // Other participants only see the meeting if they were actually admitted/attended
+    const part = m.participants?.find(p => p.userId === user?.id);
+    return part && part.status === 'ADMITTED';
+  });
   const displayedHistory = showAllHistory ? historyMeetings : historyMeetings.slice(0, 3);
   const displayMeetings  = activeTab === 'upcoming' ? upcomingMeetings : displayedHistory;
 
@@ -584,7 +656,122 @@ function DashboardContent() {
                 {copiedCode === scheduledMeetingCode ? <><Check size={13} /> Copied!</> : <><Copy size={13} /> Copy</>}
               </button>
             </div>
-            <button onClick={() => setScheduledMeetingCode(null)} style={{ width: '100%', padding: '0.875rem', background: '#111', color: '#FDFBF7', border: 'none', borderRadius: '0', fontWeight: 600, cursor: 'pointer' }}>Done</button>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button
+                onClick={() => {
+                  const m = meetings.find(item => item.meetingLink === scheduledMeetingCode) || { meetingLink: scheduledMeetingCode, title: 'Scheduled Meeting' };
+                  setScheduledMeetingCode(null);
+                  setEmailInviteModal(m);
+                  setInviteEmailInput('');
+                  setInviteError(null);
+                  setInviteSuccess(null);
+                }}
+                style={{ flex: 1, padding: '0.875rem', background: '#0022FF', color: '#FDFBF7', border: '2px solid #111', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', boxShadow: '2px 2px 0 #111' }}
+              >
+                <Mail size={15} /> Send Invite
+              </button>
+              <button onClick={() => setScheduledMeetingCode(null)} style={{ flex: 1, padding: '0.875rem', background: '#111', color: '#FDFBF7', border: 'none', borderRadius: '0', fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '0.85rem' }}>Done</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Email Invite Modal */}
+      {emailInviteModal && (
+        <div style={MODAL_STYLE.overlay} onClick={() => { if (!isSendingInvite) { setEmailInviteModal(null); setInviteError(null); setInviteSuccess(null); } }}>
+          <div style={{ ...MODAL_STYLE.box, maxWidth: '520px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '2px solid #0A0A0A' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <div style={{ width: 10, height: 10, background: '#0022FF' }} />
+                <h2 style={{ margin: 0, color: '#0A0A0A', fontSize: '1.2rem', fontFamily: 'Georgia, serif', fontStyle: 'italic', fontWeight: 700 }}>
+                  Send Meeting Invitation
+                </h2>
+              </div>
+              <button
+                onClick={() => { setEmailInviteModal(null); setInviteError(null); setInviteSuccess(null); }}
+                style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: '1.5rem', lineHeight: 1 }}
+                disabled={isSendingInvite}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Meeting Preview Dossier */}
+            <div style={{ background: '#F7F5F0', border: '2px solid #0A0A0A', padding: '1rem', marginBottom: '1.25rem', boxShadow: '3px 3px 0 #0A0A0A' }}>
+              <div style={{ marginBottom: '0.5rem' }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', textTransform: 'uppercase', color: '#777', display: 'block' }}>Topic</span>
+                <span style={{ fontSize: '1.05rem', fontWeight: 700, color: '#0A0A0A', fontFamily: 'Georgia, serif', fontStyle: 'italic' }}>
+                  {emailInviteModal.title || 'Untitled Meeting'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', textTransform: 'uppercase', color: '#777', display: 'block' }}>Meeting ID</span>
+                  <code style={{ fontSize: '0.85rem', color: '#0022FF', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{emailInviteModal.meetingLink}</code>
+                </div>
+                {(emailInviteModal.startTime || emailInviteModal.scheduledTime) && (
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.7rem', textTransform: 'uppercase', color: '#777', display: 'block' }}>Scheduled For</span>
+                    <span style={{ fontSize: '0.82rem', color: '#0A0A0A', fontFamily: 'var(--font-mono)' }}>
+                      {new Date(emailInviteModal.startTime || emailInviteModal.scheduledTime).toLocaleString()}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {inviteSuccess && (
+              <div style={{ background: '#ecfdf5', border: '2px solid #10b981', color: '#065f46', padding: '0.75rem 1rem', marginBottom: '1.25rem', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', fontWeight: 600 }}>
+                ✓ {inviteSuccess}
+              </div>
+            )}
+
+            {inviteError && (
+              <div style={{ background: '#fef2f2', border: '2px solid #ef4444', color: '#991b1b', padding: '0.75rem 1rem', marginBottom: '1.25rem', fontFamily: 'var(--font-mono)', fontSize: '0.85rem' }}>
+                ⚠ {inviteError}
+              </div>
+            )}
+
+            <form onSubmit={handleSendEmailInvite}>
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.85rem', fontWeight: 600, color: '#0A0A0A', fontFamily: 'var(--font-mono)' }}>
+                  Recipient Email Address(es)
+                </label>
+                <input
+                  type="text"
+                  placeholder="colleague@example.com, team@partner.com"
+                  className={styles.input}
+                  value={inviteEmailInput}
+                  onChange={e => { setInviteEmailInput(e.target.value); setInviteError(null); }}
+                  required
+                  disabled={isSendingInvite}
+                  autoFocus
+                  style={{ width: '100%', background: '#fff', border: '2px solid #0A0A0A', padding: '0.75rem 1rem', fontSize: '0.9rem', color: '#0A0A0A', outline: 'none', fontFamily: 'var(--font-mono)', boxSizing: 'border-box' }}
+                />
+                <span style={{ display: 'block', marginTop: '0.4rem', fontSize: '0.75rem', color: '#666', lineHeight: 1.4 }}>
+                  Invitees will receive a branded BhashaBridge email with the meeting ID, scheduled timing, and a 1-click join link. Separate multiple emails with commas.
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button
+                  type="button"
+                  onClick={() => { setEmailInviteModal(null); setInviteError(null); setInviteSuccess(null); }}
+                  disabled={isSendingInvite}
+                  style={{ flex: 1, padding: '0.75rem', background: 'transparent', color: '#555', border: '2px solid #0A0A0A', fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSendingInvite || !inviteEmailInput.trim()}
+                  style={{ flex: 2, padding: '0.75rem', background: '#0022FF', color: '#F7F5F0', border: '2px solid #0A0A0A', fontWeight: 700, cursor: isSendingInvite ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', boxShadow: '3px 3px 0 #0A0A0A' }}
+                >
+                  <Send size={15} />
+                  <span>{isSendingInvite ? 'Sending...' : 'Send Invitation'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -605,22 +792,55 @@ function DashboardContent() {
       {/* Create Org Modal */}
       {showOrgModal && (
         <div style={MODAL_STYLE.overlay} onClick={() => setShowOrgModal(false)}>
-          <div style={MODAL_STYLE.box} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ margin: '0 0 1.5rem', color: '#111', textAlign: 'center' }}>Create Organization</h2>
+          <div style={{ ...MODAL_STYLE.box, maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '2px solid #0A0A0A' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <div style={{ width: 10, height: 10, background: '#0022FF' }} />
+                <h2 style={{ margin: 0, color: '#0A0A0A', fontSize: '1.25rem', fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontWeight: 700 }}>
+                  Create Organization
+                </h2>
+              </div>
+              <button
+                onClick={() => setShowOrgModal(false)}
+                style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: '1.5rem', lineHeight: 1 }}
+              >
+                ×
+              </button>
+            </div>
+            <p style={{ margin: '0 0 1.25rem', color: '#555', fontSize: '0.85rem', lineHeight: 1.5, fontFamily: 'var(--font-mono)' }}>
+              Set up a shared workspace for your company or team. As the creator, you will be the organization Host.
+            </p>
             <form onSubmit={handleCreateOrg}>
-              <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.85rem', color: '#555' }}>Organization Name</label>
-              <input
-                type="text"
-                placeholder="e.g. My Dream Team"
-                className={styles.input}
-                value={newOrgName}
-                onChange={e => setNewOrgName(e.target.value)}
-                required
-                style={{ width: '100%', background: 'transparent', border: '2px solid #111', marginBottom: '1.5rem', padding: '0.75rem 1rem', fontSize: '1rem', color: '#111', outline: 'none', fontFamily: 'var(--font-grotesk)' }}
-              />
-              <div style={{ display: 'flex', gap: '1rem' }}>
-                <button type="button" onClick={() => setShowOrgModal(false)} style={{ flex: 1, padding: '0.875rem', background: 'transparent', color: '#555', border: '2px solid #111', borderRadius: '0', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
-                <button type="submit" style={{ flex: 1, padding: '0.875rem', background: '#111', color: '#FDFBF7', border: 'none', borderRadius: '0', fontWeight: 600, cursor: 'pointer' }}>Create</button>
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.82rem', fontWeight: 700, color: '#0A0A0A', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
+                  Organization Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Acme Engineering, Design Studio"
+                  className={styles.input}
+                  value={newOrgName}
+                  onChange={e => setNewOrgName(e.target.value)}
+                  required
+                  autoFocus
+                  style={{ width: '100%', background: '#fff', border: '2px solid #0A0A0A', padding: '0.75rem 1rem', fontSize: '0.95rem', color: '#0A0A0A', outline: 'none', fontFamily: 'var(--font-mono)', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowOrgModal(false)}
+                  style={{ flex: 1, padding: '0.8rem', background: 'transparent', color: '#555', border: '2px solid #0A0A0A', fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  style={{ flex: 2, padding: '0.8rem', background: '#0022FF', color: '#F7F5F0', border: '2px solid #0A0A0A', fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', boxShadow: '3px 3px 0 #0A0A0A', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}
+                >
+                  <Building size={15} />
+                  <span>Create Organization</span>
+                </button>
               </div>
             </form>
           </div>
@@ -630,32 +850,60 @@ function DashboardContent() {
       {/* Join Org with Code Modal */}
       {showJoinOrgModal && (
         <div style={MODAL_STYLE.overlay} onClick={() => { setShowJoinOrgModal(false); setJoinOrgError(null); }}>
-          <div style={MODAL_STYLE.box} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ margin: '0 0 1rem', color: '#111', textAlign: 'center' }}>Join Organization</h2>
-            <p style={{ margin: '0 0 1.25rem', color: '#555', fontSize: '0.88rem', textAlign: 'center', lineHeight: 1.5 }}>
-              Enter the organization code (e.g. <code>BB-E01D16</code>) to request access. The host will review and approve your request.
+          <div style={{ ...MODAL_STYLE.box, maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '2px solid #0A0A0A' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <div style={{ width: 10, height: 10, background: '#FF3311' }} />
+                <h2 style={{ margin: 0, color: '#0A0A0A', fontSize: '1.25rem', fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontWeight: 700 }}>
+                  Join Organization
+                </h2>
+              </div>
+              <button
+                onClick={() => { setShowJoinOrgModal(false); setJoinOrgError(null); }}
+                style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: '1.5rem', lineHeight: 1 }}
+              >
+                ×
+              </button>
+            </div>
+            <p style={{ margin: '0 0 1.25rem', color: '#555', fontSize: '0.85rem', lineHeight: 1.5, fontFamily: 'var(--font-mono)' }}>
+              Enter the organization access pass (e.g. <code>BB-E01D16</code>). The host or co-host will review and approve your membership.
             </p>
             {joinOrgError && (
-              <div style={{ color: '#FF3311', background: 'rgba(255,51,17,0.08)', padding: '0.6rem 0.8rem', border: '1px solid #FF3311', marginBottom: '1.25rem', fontSize: '0.85rem', lineHeight: 1.4 }}>
-                {joinOrgError}
+              <div style={{ color: '#FF3311', background: 'rgba(255,51,17,0.06)', padding: '0.65rem 0.9rem', border: '2px solid #FF3311', marginBottom: '1.25rem', fontSize: '0.82rem', lineHeight: 1.4, fontFamily: 'var(--font-mono)' }}>
+                ⚠ {joinOrgError}
               </div>
             )}
             <form onSubmit={handleJoinOrgByCode}>
-              <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.85rem', color: '#555' }}>Organization Access Code</label>
-              <input
-                type="text"
-                placeholder="e.g. BB-E01D16"
-                className={styles.input}
-                value={joinOrgCodeInput}
-                onChange={e => { setJoinOrgCodeInput(e.target.value.toUpperCase()); setJoinOrgError(null); }}
-                required
-                style={{ width: '100%', background: 'transparent', border: '2px solid #111', marginBottom: '1.5rem', padding: '0.75rem 1rem', fontSize: '1rem', color: '#111', outline: 'none', fontFamily: 'var(--font-mono)' }}
-                autoFocus
-              />
-              <div style={{ display: 'flex', gap: '1rem' }}>
-                <button type="button" onClick={() => { setShowJoinOrgModal(false); setJoinOrgError(null); }} style={{ flex: 1, padding: '0.875rem', background: 'transparent', color: '#555', border: '2px solid #111', borderRadius: '0', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
-                <button type="submit" disabled={joinOrgLoading} style={{ flex: 1, padding: '0.875rem', background: '#111', color: '#FDFBF7', border: 'none', borderRadius: '0', fontWeight: 600, cursor: 'pointer' }}>
-                  {joinOrgLoading ? 'Sending...' : 'Send Request'}
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.82rem', fontWeight: 700, color: '#0A0A0A', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
+                  Organization Access Pass
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. BB-E01D16"
+                  className={styles.input}
+                  value={joinOrgCodeInput}
+                  onChange={e => { setJoinOrgCodeInput(e.target.value.toUpperCase()); setJoinOrgError(null); }}
+                  required
+                  autoFocus
+                  style={{ width: '100%', background: '#fff', border: '2px solid #0A0A0A', padding: '0.75rem 1rem', fontSize: '1.1rem', color: '#0022FF', fontWeight: 700, outline: 'none', fontFamily: 'var(--font-mono)', letterSpacing: '1.5px', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button
+                  type="button"
+                  onClick={() => { setShowJoinOrgModal(false); setJoinOrgError(null); }}
+                  style={{ flex: 1, padding: '0.8rem', background: 'transparent', color: '#555', border: '2px solid #0A0A0A', fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={joinOrgLoading || !joinOrgCodeInput.trim()}
+                  style={{ flex: 2, padding: '0.8rem', background: '#0022FF', color: '#F7F5F0', border: '2px solid #0A0A0A', fontWeight: 700, cursor: joinOrgLoading ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', boxShadow: '3px 3px 0 #0A0A0A', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}
+                >
+                  <Key size={15} />
+                  <span>{joinOrgLoading ? 'Sending Request...' : 'Submit Request'}</span>
                 </button>
               </div>
             </form>
@@ -717,12 +965,12 @@ function DashboardContent() {
         {/* Summary Modal */}
         {summaryModal && (
           <div style={{ ...MODAL_STYLE.overlay }} onClick={() => setSummaryModal(null)}>
-            <div style={{ background: '#FDFBF7', border: '4px solid #111', padding: '2rem', borderRadius: '0', border: '1px solid #262626', boxShadow: '10px 10px 0 #111', width: '90%', maxWidth: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ background: '#FDFBF7', border: '2px solid #111', padding: 'clamp(1rem, 4vw, 2rem)', boxShadow: '6px 6px 0 #111', width: '100%', maxWidth: '640px', maxHeight: '85vh', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid #262626' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
                     <h2 style={{ margin: 0, color: '#111', fontSize: '1.1rem' }}>✨ AI Meeting Summary</h2>
                     {!summaryModal.loading && summaryModal.text && (
-                      <button onClick={handleExportSummary} style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)', padding: '0.4rem 0.8rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <button onClick={handleExportSummary} style={{ background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)', padding: '0.35rem 0.75rem', borderRadius: '4px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                         Export TXT
                       </button>
@@ -750,12 +998,12 @@ function DashboardContent() {
         {/* Transcript Modal */}
       {transcriptModal && (
         <div style={{ ...MODAL_STYLE.overlay }} onClick={() => setTranscriptModal(null)}>
-          <div style={{ background: '#FDFBF7', border: '4px solid #111', borderRadius: '0', padding: '2rem', borderRadius: '0', border: '2px solid #111', boxShadow: '10px 10px 0 #111', width: '90%', maxWidth: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ background: '#FDFBF7', border: '2px solid #111', padding: 'clamp(1rem, 4vw, 2rem)', boxShadow: '6px 6px 0 #111', width: '100%', maxWidth: '640px', maxHeight: '85vh', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '2px solid #111' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
                 <h2 style={{ margin: 0, color: '#111', fontSize: '1.1rem' }}>📝 Meeting Transcript</h2>
                 {!transcriptModal.loading && transcriptModal.entries.length > 0 && (
-                  <button onClick={handleExportTranscript} style={{ background: 'rgba(59,130,246,0.1)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.3)', padding: '0.4rem 0.8rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <button onClick={handleExportTranscript} style={{ background: 'rgba(59,130,246,0.1)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.3)', padding: '0.35rem 0.75rem', borderRadius: '4px', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                     Export TXT
                   </button>
@@ -789,31 +1037,105 @@ function DashboardContent() {
       {/* All Members Modal */}
       {showAllMembersOrg && (
         <div style={MODAL_STYLE.overlay} onClick={() => setShowAllMembersOrg(null)}>
-          <div style={{ background: '#FDFBF7', border: '4px solid #111', borderRadius: '0', padding: '2rem', borderRadius: '0', border: '2px solid #111', boxShadow: '10px 10px 0 #111', width: '90%', maxWidth: '520px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '2px solid #111' }}>
-              <div>
-                <h2 style={{ margin: 0, color: '#111', fontSize: '1.1rem' }}>{showAllMembersOrg.name}</h2>
-                <p style={{ margin: '0.25rem 0 0', color: '#555', fontSize: '0.8rem' }}>{showAllMembersOrg.users?.length} member{showAllMembersOrg.users?.length !== 1 ? 's' : ''}</p>
-              </div>
-              <button onClick={() => setShowAllMembersOrg(null)} style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: '1.5rem', lineHeight: 1 }}>×</button>
-            </div>
-            <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-              {showAllMembersOrg.users?.map(u => (
-                <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'transparent', borderRadius: '0', gap: '1rem' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      <span style={{ fontWeight: 500, color: '#111', fontSize: '0.9rem' }}>{u.name}</span>
-                      <RoleBadge role={u.id === showAllMembersOrg.ownerId ? 'HOST' : (showAllMembersOrg.coHosts?.some(c => c.id === u.id) ? 'COHOST' : 'PARTICIPANT')} />
-                    </div>
-                    <p style={{ margin: '0.2rem 0 0', color: '#555', fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</p>
-                  </div>
-                  {showAllMembersOrg.ownerId === user.id && u.id !== user.id && (
-                    <button onClick={() => handleRemoveMember(showAllMembersOrg.id, u.id, u.name)} style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.25)', padding: '0.3rem 0.7rem', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer', flexShrink: 0 }}>
-                      Remove
-                    </button>
-                  )}
+          <div style={{ background: '#FDFBF7', border: '2px solid #0A0A0A', padding: 'clamp(1.25rem, 4vw, 2rem)', boxShadow: '6px 6px 0 #0A0A0A', width: '100%', maxWidth: '540px', maxHeight: '85vh', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '2px solid #0A0A0A' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <div style={{ width: 10, height: 10, background: '#0022FF' }} />
+                <div>
+                  <h2 style={{ margin: 0, color: '#0A0A0A', fontSize: '1.25rem', fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontWeight: 700 }}>
+                    {showAllMembersOrg.name} — Member Roster
+                  </h2>
+                  <p style={{ margin: '0.2rem 0 0', color: '#666', fontSize: '0.78rem', fontFamily: 'var(--font-mono)' }}>
+                    Total: {showAllMembersOrg.users?.length || 0} active member{showAllMembersOrg.users?.length !== 1 ? 's' : ''}
+                  </p>
                 </div>
-              ))}
+              </div>
+              <button
+                onClick={() => setShowAllMembersOrg(null)}
+                style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: '1.5rem', lineHeight: 1 }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '0.6rem', paddingRight: '0.25rem' }}>
+              {showAllMembersOrg.users?.map(u => {
+                const isOrgOwner = u.id === showAllMembersOrg.ownerId;
+                const isUserCoHost = showAllMembersOrg.coHosts?.some(c => c.id === u.id);
+                return (
+                  <div
+                    key={u.id}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '0.75rem 1rem',
+                      background: '#F7F5F0',
+                      border: '1px solid #0A0A0A',
+                      gap: '1rem',
+                      boxShadow: '1px 1px 0 #0A0A0A'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1, minWidth: 0 }}>
+                      {u.avatar ? (
+                        <img src={u.avatar} alt="" style={{ width: 34, height: 34, borderRadius: '50%', objectFit: 'cover', border: '1px solid #0A0A0A', flexShrink: 0 }} />
+                      ) : (
+                        <div style={{ width: 34, height: 34, borderRadius: '50%', background: isOrgOwner ? '#FF3311' : (isUserCoHost ? '#0022FF' : '#555'), color: '#F7F5F0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.82rem', fontWeight: 700, border: '1px solid #0A0A0A', flexShrink: 0 }}>
+                          {(u.name || '?').charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 700, color: '#0A0A0A', fontSize: '0.9rem' }}>{u.name}</span>
+                          <RoleBadge role={isOrgOwner ? 'HOST' : (isUserCoHost ? 'COHOST' : 'PARTICIPANT')} />
+                        </div>
+                        <p style={{ margin: '0.15rem 0 0', color: '#666', fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }}>
+                          {u.email}
+                        </p>
+                      </div>
+                    </div>
+
+                    {showAllMembersOrg.ownerId === user.id && u.id !== user.id && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0 }}>
+                        <button
+                          onClick={() => handleToggleOrgCoHost(showAllMembersOrg.id, u.id, isUserCoHost)}
+                          title={isUserCoHost ? "Revoke Co-Host" : "Promote to Co-Host"}
+                          style={{
+                            background: '#FDFBF7',
+                            color: isUserCoHost ? '#0022FF' : '#666',
+                            border: '1px solid #0A0A0A',
+                            padding: '0.3rem 0.6rem',
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            fontFamily: 'var(--font-mono)',
+                            cursor: 'pointer',
+                            boxShadow: '1px 1px 0 #0A0A0A'
+                          }}
+                        >
+                          {isUserCoHost ? '★ Co-Host' : '☆ Make Co-Host'}
+                        </button>
+                        <button
+                          onClick={() => handleRemoveMember(showAllMembersOrg.id, u.id, u.name)}
+                          title={`Remove ${u.name}`}
+                          style={{
+                            background: '#FDFBF7',
+                            color: '#FF3311',
+                            border: '1px solid #FF3311',
+                            padding: '0.3rem 0.6rem',
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            fontFamily: 'var(--font-mono)',
+                            cursor: 'pointer',
+                            boxShadow: '1px 1px 0 #FF3311'
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -908,21 +1230,23 @@ function DashboardContent() {
             <div className={styles.card} style={{ minHeight: '100%' }}>
 
               {/* Tabs */}
-              <div style={{ display: 'flex', marginBottom: '2.5rem', borderBottom: '2px solid #111' }}>
+              <div className={styles.tabsContainer}>
                 {['upcoming', 'history', 'organizations'].map(tab => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
+                    className={styles.tabBtn}
                     style={{
-                      flex: 1, padding: '1rem', background: 'none', border: 'none', cursor: 'pointer',
                       color: activeTab === tab ? 'var(--cobalt)' : 'rgba(0,0,0,0.4)',
-                      fontWeight: 700,
                       borderBottom: activeTab === tab ? '4px solid var(--cobalt)' : '4px solid transparent',
-                      fontSize: '1rem', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', transition: 'all 0.15s',
-                      marginBottom: '-3px'
                     }}
                   >
-                    {tab === 'upcoming' ? 'Upcoming' : tab === 'history' ? 'History' : 'Organizations'}
+                    {tab === 'upcoming' ? 'Upcoming' : tab === 'history' ? 'History' : (
+                      <>
+                        <span className={styles.tabDesktop}>Organizations</span>
+                        <span className={styles.tabMobile}>Orgs</span>
+                      </>
+                    )}
                   </button>
                 ))}
               </div>
@@ -930,134 +1254,385 @@ function DashboardContent() {
               {/* ===== ORGANIZATIONS TAB ===== */}
               {activeTab === 'organizations' && (
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
-                    <h3 style={{ margin: 0, color: '#111' }}>My Organizations</h3>
-                    <div style={{ display: 'flex', gap: '0.6rem' }}>
-                      <button onClick={() => setShowJoinOrgModal(true)} style={{ background: '#FDFBF7', color: '#111', border: '2px solid #111', padding: '0.5rem 1rem', borderRadius: '0', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem', boxShadow: '2px 2px 0 #111' }}>
-                        Join with Code
+                  {/* Tab Top Bar */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem', flexWrap: 'wrap', gap: '1.25rem', borderBottom: '2px solid #0A0A0A', paddingBottom: '1.25rem' }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                        <div style={{ width: 12, height: 12, background: '#0022FF' }} />
+                        <h3 style={{ margin: 0, color: '#0A0A0A', fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: '1.85rem', fontWeight: 600 }}>
+                          Team Organizations
+                        </h3>
+                      </div>
+                      <p style={{ margin: '0.35rem 0 0', color: '#5A5A5A', fontSize: '0.85rem', fontFamily: 'var(--font-mono)' }}>
+                        Collaborative spaces for team meetings, role delegations, and shared access passes.
+                      </p>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => setShowJoinOrgModal(true)}
+                        style={{
+                          background: '#F7F5F0',
+                          color: '#0A0A0A',
+                          border: '2px solid #0A0A0A',
+                          padding: '0.6rem 1.1rem',
+                          cursor: 'pointer',
+                          fontWeight: 700,
+                          fontSize: '0.85rem',
+                          fontFamily: 'var(--font-mono)',
+                          textTransform: 'uppercase',
+                          boxShadow: '3px 3px 0 #0A0A0A',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.45rem',
+                        }}
+                      >
+                        <Key size={14} />
+                        <span>Join with Code</span>
                       </button>
-                      <button onClick={() => setShowOrgModal(true)} style={{ background: '#111', color: '#FDFBF7', border: 'none', padding: '0.5rem 1rem', borderRadius: '0', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem', boxShadow: '2px 2px 0 #111' }}>
-                        + Create Org
+                      <button
+                        onClick={() => setShowOrgModal(true)}
+                        style={{
+                          background: '#0022FF',
+                          color: '#F7F5F0',
+                          border: '2px solid #0A0A0A',
+                          padding: '0.6rem 1.15rem',
+                          cursor: 'pointer',
+                          fontWeight: 700,
+                          fontSize: '0.85rem',
+                          fontFamily: 'var(--font-mono)',
+                          textTransform: 'uppercase',
+                          boxShadow: '3px 3px 0 #0A0A0A',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.45rem',
+                        }}
+                      >
+                        <Building size={14} />
+                        <span>+ Create Org</span>
                       </button>
                     </div>
                   </div>
 
+                  {/* Empty State */}
                   {organizations.length === 0 ? (
-                    <div className={styles.emptyState}>
-                      You don&apos;t belong to any organizations yet. Create one or accept an invite!
+                    <div style={{
+                      background: '#FDFBF7',
+                      border: '2px solid #0A0A0A',
+                      boxShadow: '6px 6px 0 #0A0A0A',
+                      padding: '3.5rem 2rem',
+                      textAlign: 'center',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '1.25rem'
+                    }}>
+                      <div style={{
+                        width: 68,
+                        height: 68,
+                        background: '#0022FF',
+                        color: '#F7F5F0',
+                        border: '2px solid #0A0A0A',
+                        boxShadow: '4px 4px 0 #0A0A0A',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}>
+                        <Building size={32} />
+                      </div>
+                      <div>
+                        <h4 style={{ margin: '0 0 0.5rem', color: '#0A0A0A', fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: '1.85rem', fontWeight: 600 }}>
+                          No Organizations Joined Yet
+                        </h4>
+                        <p style={{ margin: 0, color: '#555', maxWidth: 520, lineHeight: 1.6, fontSize: '0.88rem', fontFamily: 'var(--font-mono)' }}>
+                          Organizations unify team collaboration on BhashaBridge. Create an organization to schedule meetings with persistent access passes, delegate co-host powers, and manage participant rosters.
+                        </p>
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+                        <button
+                          onClick={() => setShowOrgModal(true)}
+                          style={{
+                            background: '#0022FF',
+                            color: '#F7F5F0',
+                            border: '2px solid #0A0A0A',
+                            padding: '0.75rem 1.5rem',
+                            fontWeight: 700,
+                            fontFamily: 'var(--font-mono)',
+                            textTransform: 'uppercase',
+                            fontSize: '0.85rem',
+                            cursor: 'pointer',
+                            boxShadow: '3px 3px 0 #0A0A0A',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.5rem'
+                          }}
+                        >
+                          <Building size={15} />
+                          <span>+ Create Organization</span>
+                        </button>
+                        <button
+                          onClick={() => setShowJoinOrgModal(true)}
+                          style={{
+                            background: '#F7F5F0',
+                            color: '#0A0A0A',
+                            border: '2px solid #0A0A0A',
+                            padding: '0.75rem 1.5rem',
+                            fontWeight: 700,
+                            fontFamily: 'var(--font-mono)',
+                            textTransform: 'uppercase',
+                            fontSize: '0.85rem',
+                            cursor: 'pointer',
+                            boxShadow: '3px 3px 0 #0A0A0A',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.5rem'
+                          }}
+                        >
+                          <Key size={15} />
+                          <span>Join with Code</span>
+                        </button>
+                      </div>
                     </div>
                   ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
                       {organizations.map(org => {
                         const isOwner = org.ownerId === user.id;
+                        const isCoHost = org.coHosts?.some(c => c.id === user.id);
+                        const hasJoinRequests = (isOwner || isCoHost) && org.joinRequests?.length > 0;
+                        const role = isOwner ? 'HOST' : (isCoHost ? 'COHOST' : 'PARTICIPANT');
+
                         return (
-                          <div key={org.id} style={{ padding: '1.25rem', background: 'transparent', borderRadius: '0', border: '2px solid #111' }}>
-
-                            {/* Org header */}
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', marginBottom: '1rem' }}>
-                              <div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-                                  <h4 style={{ margin: 0, color: '#111' }}>{org.name}</h4>
-                                  {isOwner && <RoleBadge role="HOST" />}
+                          <div
+                            key={org.id}
+                            style={{
+                              background: '#FDFBF7',
+                              border: '2px solid #0A0A0A',
+                              boxShadow: '5px 5px 0 #0A0A0A',
+                              padding: '1.75rem',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '1.5rem'
+                            }}
+                          >
+                            {/* Org Header Row */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1.25rem', flexWrap: 'wrap' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', flex: 1, minWidth: 'min(240px, 100%)' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                                  <div style={{ width: 10, height: 10, background: isOwner ? '#FF3311' : (isCoHost ? '#0022FF' : '#0A0A0A') }} />
+                                  <h4 style={{ margin: 0, color: '#0A0A0A', fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: '1.75rem', fontWeight: 600 }}>
+                                    {org.name}
+                                  </h4>
+                                  <RoleBadge role={role} />
                                 </div>
-                                <p style={{ margin: '0.3rem 0 0', fontSize: '0.82rem', color: '#555' }}>
-                                  Hosted by {isOwner ? 'You' : org.owner?.name}
-                                </p>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem', flexWrap: 'wrap', fontSize: '0.82rem', color: '#555', fontFamily: 'var(--font-mono)' }}>
+                                  <span>Hosted by: <strong style={{ color: '#0A0A0A' }}>{isOwner ? 'You (Owner)' : org.owner?.name}</strong></span>
+                                  <span>•</span>
+                                  <span>{org.users?.length || 0} Member{org.users?.length !== 1 ? 's' : ''}</span>
+                                  {hasJoinRequests && (
+                                    <>
+                                      <span>•</span>
+                                      <span style={{ color: '#FF3311', fontWeight: 700 }}>
+                                        ⚠ {org.joinRequests.length} Pending Request{org.joinRequests.length !== 1 ? 's' : ''}
+                                      </span>
+                                    </>
+                                  )}
+                                </div>
                               </div>
 
-                              {/* Owner: access code + controls | Member: leave button */}
-                              {isOwner ? (
-                                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem', justifyContent: 'flex-end' }}>
-                                    <span style={{ fontSize: '0.8rem', color: '#555' }}>Code:</span>
-                                    <code style={{ color: '#60a5fa', fontWeight: 700, fontSize: '0.9rem' }}>{org.accessCode}</code>
-                                    <button
-                                      onClick={() => copyCode(org.accessCode)}
-                                      title="Copy access code"
-                                      style={{ background: 'none', border: 'none', color: copiedCode === org.accessCode ? '#34d399' : '#6b7280', cursor: 'pointer', padding: '0.1rem', display: 'flex', alignItems: 'center' }}
-                                    >
-                                      {copiedCode === org.accessCode ? <Check size={13} /> : <Copy size={13} />}
-                                    </button>
-                                  </div>
-                                  <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-end' }}>
-                                    <button onClick={() => handleRegenerateCode(org.id)} style={{ background: 'rgba(255,255,255,0.07)', color: '#111', border: '2px solid #111', padding: '0.3rem 0.7rem', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer' }}>
-                                      Regenerate
-                                    </button>
-                                    <button onClick={() => handleDeleteOrg(org.id, org.name)} style={{ background: 'rgba(239,68,68,0.08)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)', padding: '0.3rem 0.7rem', borderRadius: '6px', fontSize: '0.75rem', cursor: 'pointer' }}>
-                                      Delete Org
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <button onClick={() => handleLeaveOrg(org.id, org.name)} style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)', padding: '0.4rem 0.9rem', borderRadius: '6px', fontSize: '0.78rem', cursor: 'pointer', flexShrink: 0 }}>
-                                  Leave Org
-                                </button>
-                              )}
-                            </div>
-
-                            {/* Members preview */}
-                            <div style={{ borderTop: '2px solid #111', paddingTop: '0.75rem', marginBottom: '0.75rem' }}>
-                              <p style={{ margin: '0 0 0.6rem', fontSize: '0.8rem', color: '#777', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                Members ({org.users?.length || 0})
-                              </p>
-                              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                                {org.users?.slice(0, 5).map(u => (
-                                  <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.25)', padding: '0.2rem 0.55rem', borderRadius: '999px', fontSize: '0.78rem', color: '#93c5fd' }}>
-                                    <span>{u.name}</span>
-                                    {u.id === org.ownerId ? <RoleBadge role="HOST" /> : (org.coHosts?.some(c => c.id === u.id) && <RoleBadge role="COHOST" />)}
-                                    {isOwner && u.id !== user.id && (
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', marginLeft: '0.2rem' }}>
-                                        <button onClick={() => handleToggleOrgCoHost(org.id, u.id, org.coHosts?.some(c => c.id === u.id))} title={org.coHosts?.some(c => c.id === u.id) ? "Remove Co-Host" : "Make Co-Host"} style={{ background: 'none', border: 'none', color: org.coHosts?.some(c => c.id === u.id) ? '#c084fc' : '#9ca3af', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: '0.9rem' }}>★</button>
-                                        <button onClick={() => handleRemoveMember(org.id, u.id, u.name)} title="Remove" style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: '1rem' }}>×</button>
-                                      </div>
-                                    )}
-                                  </div>
-                                ))}
-                                {(org.users?.length || 0) > 5 && (
-                                  <button onClick={() => setShowAllMembersOrg(org)} style={{ background: 'rgba(255,255,255,0.05)', color: '#555', border: '2px solid #111', padding: '0.2rem 0.6rem', borderRadius: '999px', fontSize: '0.75rem', cursor: 'pointer' }}>
-                                    +{org.users.length - 5} more
+                              {/* Access Code & Controls */}
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.6rem', flexShrink: 0 }}>
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.6rem',
+                                  background: '#F7F5F0',
+                                  border: '2px solid #0A0A0A',
+                                  padding: '0.4rem 0.75rem',
+                                  boxShadow: '2px 2px 0 #0A0A0A'
+                                }}>
+                                  <span style={{ fontSize: '0.72rem', fontFamily: 'var(--font-mono)', color: '#666', textTransform: 'uppercase', fontWeight: 700 }}>
+                                    Pass Code:
+                                  </span>
+                                  <code style={{ color: '#0022FF', fontWeight: 700, fontSize: '0.95rem', fontFamily: 'var(--font-mono)', letterSpacing: '1px' }}>
+                                    {org.accessCode}
+                                  </code>
+                                  <button
+                                    onClick={() => copyCode(org.accessCode)}
+                                    title={copiedCode === org.accessCode ? 'Copied code!' : 'Copy access code'}
+                                    style={{
+                                      background: copiedCode === org.accessCode ? '#10b981' : '#0A0A0A',
+                                      border: 'none',
+                                      color: '#F7F5F0',
+                                      cursor: 'pointer',
+                                      padding: '0.25rem 0.5rem',
+                                      fontSize: '0.72rem',
+                                      fontFamily: 'var(--font-mono)',
+                                      fontWeight: 700,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '0.25rem',
+                                    }}
+                                  >
+                                    {copiedCode === org.accessCode ? <Check size={12} /> : <Copy size={12} />}
+                                    <span>{copiedCode === org.accessCode ? 'Copied' : 'Copy'}</span>
                                   </button>
-                                )}
+                                </div>
+
+                                <div style={{ display: 'flex', gap: '0.4rem' }}>
+                                  {isOwner ? (
+                                    <>
+                                      <button
+                                        onClick={() => handleRegenerateCode(org.id)}
+                                        title="Generate a new access code. Old code will expire immediately."
+                                        style={{
+                                          background: '#F7F5F0',
+                                          color: '#0A0A0A',
+                                          border: '1px solid #0A0A0A',
+                                          padding: '0.3rem 0.65rem',
+                                          fontSize: '0.75rem',
+                                          fontWeight: 700,
+                                          fontFamily: 'var(--font-mono)',
+                                          cursor: 'pointer',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: '0.3rem',
+                                          boxShadow: '1px 1px 0 #0A0A0A'
+                                        }}
+                                      >
+                                        <RefreshCw size={11} /> Regenerate
+                                      </button>
+                                      <button
+                                        onClick={() => handleDeleteOrg(org.id, org.name)}
+                                        title="Permanently delete organization"
+                                        style={{
+                                          background: '#F7F5F0',
+                                          color: '#FF3311',
+                                          border: '1px solid #FF3311',
+                                          padding: '0.3rem 0.65rem',
+                                          fontSize: '0.75rem',
+                                          fontWeight: 700,
+                                          fontFamily: 'var(--font-mono)',
+                                          cursor: 'pointer',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: '0.3rem',
+                                          boxShadow: '1px 1px 0 #FF3311'
+                                        }}
+                                      >
+                                        <Trash2 size={11} /> Delete Org
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <button
+                                      onClick={() => handleLeaveOrg(org.id, org.name)}
+                                      style={{
+                                        background: '#F7F5F0',
+                                        color: '#FF3311',
+                                        border: '1px solid #FF3311',
+                                        padding: '0.35rem 0.75rem',
+                                        fontSize: '0.75rem',
+                                        fontWeight: 700,
+                                        fontFamily: 'var(--font-mono)',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.3rem',
+                                        boxShadow: '1px 1px 0 #FF3311'
+                                      }}
+                                    >
+                                      <LogOut size={12} /> Leave Org
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             </div>
 
-                            {/* Pending Join Requests (Host / Co-host) */}
-                            {(isOwner || org.coHosts?.some(c => c.id === user.id)) && org.joinRequests?.length > 0 && (
-                              <div style={{ borderTop: '2px solid #FF3311', paddingTop: '0.75rem', marginBottom: '0.75rem', background: 'rgba(255,51,17,0.03)', padding: '0.75rem', border: '1px solid #FF3311' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.6rem' }}>
-                                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#FF3311', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>
-                                    Pending Join Requests ({org.joinRequests.length})
-                                  </p>
-                                  <span style={{ fontSize: '0.72rem', color: '#555', fontFamily: 'var(--font-mono)' }}>Review & Approve</span>
+                            {/* Pending Join Requests (Host / Co-host Action Required) */}
+                            {hasJoinRequests && (
+                              <div style={{
+                                background: 'rgba(255,51,17,0.04)',
+                                border: '2px solid #FF3311',
+                                boxShadow: '3px 3px 0 #FF3311',
+                                padding: '1rem'
+                              }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                                    <span style={{ background: '#FF3311', color: '#F7F5F0', padding: '0.15rem 0.4rem', fontSize: '0.68rem', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                                      ACTION REQUIRED
+                                    </span>
+                                    <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#FF3311', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
+                                      Pending Join Requests ({org.joinRequests.length})
+                                    </span>
+                                  </div>
+                                  <span style={{ fontSize: '0.75rem', color: '#666', fontFamily: 'var(--font-mono)' }}>
+                                    Approve or reject applicant requests below
+                                  </span>
                                 </div>
+
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                                   {org.joinRequests.map(req => (
-                                    <div key={req.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#FDFBF7', border: '1px solid #111', padding: '0.5rem 0.75rem', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                                    <div
+                                      key={req.id}
+                                      style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        background: '#FDFBF7',
+                                        border: '1px solid #0A0A0A',
+                                        padding: '0.65rem 0.85rem',
+                                        gap: '0.75rem',
+                                        flexWrap: 'wrap',
+                                        boxShadow: '1px 1px 0 #0A0A0A'
+                                      }}
+                                    >
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
                                         {req.user?.avatar ? (
-                                          <img src={req.user.avatar} alt="" style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', border: '1px solid #111' }} />
+                                          <img src={req.user.avatar} alt="" style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', border: '1px solid #0A0A0A' }} />
                                         ) : (
-                                          <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#0022FF', color: '#FDFBF7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700 }}>
+                                          <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#0022FF', color: '#FDFBF7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', fontWeight: 700, border: '1px solid #0A0A0A' }}>
                                             {(req.user?.name || req.user?.email || '?').charAt(0).toUpperCase()}
                                           </div>
                                         )}
                                         <div>
-                                          <span style={{ fontWeight: 600, fontSize: '0.85rem', color: '#111' }}>{req.user?.name || req.user?.email}</span>
-                                          <span style={{ fontSize: '0.75rem', color: '#666', marginLeft: '0.4rem' }}>({req.user?.email})</span>
+                                          <span style={{ fontWeight: 700, fontSize: '0.88rem', color: '#0A0A0A' }}>{req.user?.name || 'Applicant'}</span>
+                                          <span style={{ fontSize: '0.78rem', color: '#666', marginLeft: '0.5rem', fontFamily: 'var(--font-mono)' }}>({req.user?.email})</span>
                                         </div>
                                       </div>
+
                                       <div style={{ display: 'flex', gap: '0.4rem' }}>
                                         <button
                                           onClick={() => handleApproveJoinRequest(req.id)}
-                                          style={{ background: '#10b981', color: '#FDFBF7', border: '1px solid #111', padding: '0.3rem 0.75rem', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
+                                          style={{
+                                            background: '#10b981',
+                                            color: '#F7F5F0',
+                                            border: '1px solid #0A0A0A',
+                                            padding: '0.35rem 0.85rem',
+                                            fontSize: '0.75rem',
+                                            fontWeight: 700,
+                                            cursor: 'pointer',
+                                            fontFamily: 'var(--font-mono)',
+                                            textTransform: 'uppercase',
+                                            boxShadow: '2px 2px 0 #0A0A0A'
+                                          }}
                                         >
-                                          Approve
+                                          ✓ Approve
                                         </button>
                                         <button
                                           onClick={() => handleRejectJoinRequest(req.id)}
-                                          style={{ background: '#ef4444', color: '#FDFBF7', border: '1px solid #111', padding: '0.3rem 0.75rem', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
+                                          style={{
+                                            background: '#FF3311',
+                                            color: '#F7F5F0',
+                                            border: '1px solid #0A0A0A',
+                                            padding: '0.35rem 0.85rem',
+                                            fontSize: '0.75rem',
+                                            fontWeight: 700,
+                                            cursor: 'pointer',
+                                            fontFamily: 'var(--font-mono)',
+                                            textTransform: 'uppercase',
+                                            boxShadow: '2px 2px 0 #0A0A0A'
+                                          }}
                                         >
-                                          Reject
+                                          ✕ Reject
                                         </button>
                                       </div>
                                     </div>
@@ -1066,39 +1641,207 @@ function DashboardContent() {
                               </div>
                             )}
 
-                            {/* Pending invitations */}
+                            {/* Members Roster Section */}
+                            <div style={{ borderTop: '2px solid #0A0A0A', paddingTop: '1rem' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                                <span style={{ fontSize: '0.78rem', color: '#555', textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                                  Membership Roster ({org.users?.length || 0})
+                                </span>
+                                {(org.users?.length || 0) > 6 && (
+                                  <button
+                                    onClick={() => setShowAllMembersOrg(org)}
+                                    style={{
+                                      background: 'transparent',
+                                      color: '#0022FF',
+                                      border: 'none',
+                                      cursor: 'pointer',
+                                      fontSize: '0.78rem',
+                                      fontWeight: 700,
+                                      fontFamily: 'var(--font-mono)',
+                                      textDecoration: 'underline'
+                                    }}
+                                  >
+                                    View All ({org.users.length}) &rarr;
+                                  </button>
+                                )}
+                              </div>
+
+                              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                                {org.users?.slice(0, 6).map(u => {
+                                  const isOrgOwner = u.id === org.ownerId;
+                                  const isUserCoHost = org.coHosts?.some(c => c.id === u.id);
+                                  return (
+                                    <div
+                                      key={u.id}
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem',
+                                        background: '#F7F5F0',
+                                        border: '1px solid #0A0A0A',
+                                        padding: '0.35rem 0.75rem',
+                                        fontSize: '0.82rem',
+                                        color: '#0A0A0A',
+                                        boxShadow: '1px 1px 0 #0A0A0A'
+                                      }}
+                                    >
+                                      {u.avatar ? (
+                                        <img src={u.avatar} alt="" style={{ width: 22, height: 22, borderRadius: '50%', objectFit: 'cover', border: '1px solid #0A0A0A' }} />
+                                      ) : (
+                                        <div style={{ width: 22, height: 22, borderRadius: '50%', background: isOrgOwner ? '#FF3311' : (isUserCoHost ? '#0022FF' : '#555'), color: '#F7F5F0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.68rem', fontWeight: 700 }}>
+                                          {(u.name || '?').charAt(0).toUpperCase()}
+                                        </div>
+                                      )}
+                                      <span style={{ fontWeight: 600 }}>{u.name}</span>
+                                      {isOrgOwner ? (
+                                        <RoleBadge role="HOST" />
+                                      ) : isUserCoHost ? (
+                                        <RoleBadge role="COHOST" />
+                                      ) : null}
+
+                                      {isOwner && u.id !== user.id && (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginLeft: '0.25rem', borderLeft: '1px solid #CCC', paddingLeft: '0.35rem' }}>
+                                          <button
+                                            onClick={() => handleToggleOrgCoHost(org.id, u.id, isUserCoHost)}
+                                            title={isUserCoHost ? "Revoke Co-Host privileges" : "Promote to Co-Host"}
+                                            style={{
+                                              background: 'none',
+                                              border: 'none',
+                                              color: isUserCoHost ? '#0022FF' : '#999',
+                                              cursor: 'pointer',
+                                              padding: 0,
+                                              fontSize: '0.95rem',
+                                              lineHeight: 1,
+                                            }}
+                                          >
+                                            ★
+                                          </button>
+                                          <button
+                                            onClick={() => handleRemoveMember(org.id, u.id, u.name)}
+                                            title={`Remove ${u.name} from organization`}
+                                            style={{
+                                              background: 'none',
+                                              border: 'none',
+                                              color: '#FF3311',
+                                              cursor: 'pointer',
+                                              padding: 0,
+                                              fontSize: '1rem',
+                                              lineHeight: 1
+                                            }}
+                                          >
+                                            ×
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+
+                                {(org.users?.length || 0) > 6 && (
+                                  <button
+                                    onClick={() => setShowAllMembersOrg(org)}
+                                    style={{
+                                      background: '#FDFBF7',
+                                      color: '#0A0A0A',
+                                      border: '1px solid #0A0A0A',
+                                      padding: '0.35rem 0.65rem',
+                                      fontSize: '0.78rem',
+                                      fontWeight: 700,
+                                      fontFamily: 'var(--font-mono)',
+                                      cursor: 'pointer',
+                                      boxShadow: '1px 1px 0 #0A0A0A'
+                                    }}
+                                  >
+                                    +{org.users.length - 6} more
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Pending Invitations Strip */}
                             {isOwner && org.invitations?.length > 0 && (
-                              <div style={{ borderTop: '1px dashed rgba(255,255,255,0.07)', paddingTop: '0.75rem', marginBottom: '0.75rem' }}>
-                                <p style={{ margin: '0 0 0.5rem', fontSize: '0.8rem', color: '#777', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                  Pending Invitations ({org.invitations.length})
+                              <div style={{ borderTop: '1px dashed #0A0A0A', paddingTop: '0.75rem' }}>
+                                <p style={{ margin: '0 0 0.5rem', fontSize: '0.75rem', color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                                  Pending Email Invitations ({org.invitations.length})
                                 </p>
                                 <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                                   {org.invitations.map(inv => (
-                                    <span key={inv.id} style={{ background: 'rgba(245,158,11,0.08)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.2)', padding: '0.2rem 0.6rem', borderRadius: '999px', fontSize: '0.75rem' }}>
-                                      ⏳ {inv.email}
+                                    <span
+                                      key={inv.id}
+                                      style={{
+                                        background: '#FEF9C3',
+                                        color: '#854D0E',
+                                        border: '1px solid #0A0A0A',
+                                        padding: '0.2rem 0.55rem',
+                                        fontSize: '0.75rem',
+                                        fontFamily: 'var(--font-mono)',
+                                        boxShadow: '1px 1px 0 #0A0A0A',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.3rem'
+                                      }}
+                                    >
+                                      <Clock size={11} />
+                                      <span>{inv.email}</span>
                                     </span>
                                   ))}
                                 </div>
                               </div>
                             )}
 
-                            {/* Invite form (owner only) */}
+                            {/* Invite Form (Owner Only) */}
                             {isOwner && (
-                              <form
-                                onSubmit={e => handleInviteMembers(e, org.id)}
-                                style={{ display: 'flex', gap: '0.5rem', alignItems: 'stretch' }}
-                              >
-                                <input
-                                  type="text"
-                                  placeholder="Email addresses separated by comma"
-                                  ref={el => { if (el) inviteEmailRefs.current[org.id] = el; }}
-                                  className={styles.input}
-                                  style={{ flex: 1, margin: 0, padding: '0.65rem 0.9rem', background: 'rgba(0,0,0,0.25)', border: '2px solid #111', fontSize: '0.85rem' }}
-                                />
-                                <button type="submit" style={{ background: '#111', color: '#FDFBF7', border: 'none', padding: '0.65rem 1.2rem', borderRadius: '0', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', fontSize: '0.85rem' }}>
-                                  Invite
-                                </button>
-                              </form>
+                              <div style={{ borderTop: '2px solid #0A0A0A', paddingTop: '1rem' }}>
+                                <span style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.75rem', color: '#555', textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                                  Invite Members via Email
+                                </span>
+                                <form
+                                  onSubmit={e => handleInviteMembers(e, org.id)}
+                                  style={{ display: 'flex', gap: '0.6rem', alignItems: 'stretch', flexWrap: 'wrap' }}
+                                >
+                                  <input
+                                    type="text"
+                                    placeholder="colleague@domain.com, partner@team.org"
+                                    ref={el => { if (el) inviteEmailRefs.current[org.id] = el; }}
+                                    className={styles.input}
+                                    style={{
+                                      flex: 1,
+                                      minWidth: 'min(240px, 100%)',
+                                      margin: 0,
+                                      padding: '0.65rem 0.9rem',
+                                      background: '#fff',
+                                      border: '2px solid #0A0A0A',
+                                      fontSize: '0.85rem',
+                                      fontFamily: 'var(--font-mono)',
+                                      color: '#0A0A0A',
+                                      boxShadow: '2px 2px 0 #0A0A0A',
+                                      boxSizing: 'border-box'
+                                    }}
+                                  />
+                                  <button
+                                    type="submit"
+                                    style={{
+                                      background: '#0022FF',
+                                      color: '#F7F5F0',
+                                      border: '2px solid #0A0A0A',
+                                      padding: '0.65rem 1.4rem',
+                                      fontWeight: 700,
+                                      fontFamily: 'var(--font-mono)',
+                                      cursor: 'pointer',
+                                      whiteSpace: 'nowrap',
+                                      fontSize: '0.85rem',
+                                      textTransform: 'uppercase',
+                                      boxShadow: '2px 2px 0 #0A0A0A',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.4rem'
+                                    }}
+                                  >
+                                    <Mail size={14} />
+                                    <span>Send Invite</span>
+                                  </button>
+                                </form>
+                              </div>
                             )}
                           </div>
                         );
@@ -1190,9 +1933,45 @@ function DashboardContent() {
                                     Cancelled
                                   </span>
                                 ) : (
-                                  <Link href={`/meeting/${m.meetingLink}`} style={{ background: '#FF3311', color: '#F7F5F0', border: '2px solid #0A0A0A', padding: '0.5rem 2rem', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 700, fontFamily: 'var(--font-mono)', boxShadow: '4px 4px 0 rgba(10,10,10,1)', textTransform: 'uppercase', textDecoration: 'none' }}>
-                                    {m.state === 'SCHEDULED' ? 'Start' : 'Join'}
-                                  </Link>
+                                  <>
+                                    {activeTab === 'upcoming' && (() => {
+                                      const isMainHost = m.hostId === user?.id;
+                                      const participant = m.participants?.find(p => p.userId === user?.id);
+                                      const isCoHost = participant?.role === 'COHOST';
+                                      return (isMainHost || isCoHost);
+                                    })() && (
+                                      <button
+                                        onClick={() => {
+                                          setEmailInviteModal(m);
+                                          setInviteEmailInput('');
+                                          setInviteError(null);
+                                          setInviteSuccess(null);
+                                        }}
+                                        title="Send invitation via email"
+                                        style={{
+                                          background: '#F7F5F0',
+                                          color: '#0022FF',
+                                          border: '2px solid #0A0A0A',
+                                          padding: '0.5rem 1rem',
+                                          cursor: 'pointer',
+                                          fontSize: '0.85rem',
+                                          fontWeight: 700,
+                                          fontFamily: 'var(--font-mono)',
+                                          boxShadow: '4px 4px 0 rgba(10,10,10,1)',
+                                          textTransform: 'uppercase',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '0.4rem',
+                                        }}
+                                      >
+                                        <Mail size={15} />
+                                        <span>Send Invite</span>
+                                      </button>
+                                    )}
+                                    <Link href={`/meeting/${m.meetingLink}`} style={{ background: '#FF3311', color: '#F7F5F0', border: '2px solid #0A0A0A', padding: '0.5rem 2rem', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 700, fontFamily: 'var(--font-mono)', boxShadow: '4px 4px 0 rgba(10,10,10,1)', textTransform: 'uppercase', textDecoration: 'none' }}>
+                                      {m.state === 'SCHEDULED' ? 'Start' : 'Join'}
+                                    </Link>
+                                  </>
                                 )}
                                 <button onClick={() => handleDeleteMeeting(m.id, m.state === 'SCHEDULED' && m.hostId === user?.id)} title={m.state === 'SCHEDULED' && m.hostId === user?.id ? "Cancel Meeting" : "Remove"} style={{ background: '#FF3311', color: '#F7F5F0', border: '2px solid #0A0A0A', padding: '0.5rem', cursor: 'pointer', display: 'flex', alignItems: 'center', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
                                   <Trash2 size={16} />

@@ -161,8 +161,10 @@ export default function NotificationBell() {
 
         return (
           <div style={{
-            position: 'fixed', top: '1.5rem', right: '1.5rem', zIndex: 99999,
-            width: 320,
+            position: 'fixed', top: '1.5rem', right: 'clamp(0.5rem, 3vw, 1.5rem)', zIndex: 99999,
+            width: 'min(320px, calc(100vw - 1rem))',
+            maxWidth: 'calc(100vw - 1rem)',
+            boxSizing: 'border-box',
             background: 'linear-gradient(145deg, #FDFBF7, #FDFBF7)',
             border: '2px solid #111',
             borderRadius: '0',
@@ -252,7 +254,8 @@ export default function NotificationBell() {
         {open && (
           <div style={{
             position: 'absolute', right: 0, top: 'calc(100% + 10px)',
-            width: 'min(360px, 90vw)', maxHeight: 480, overflowY: 'auto',
+            width: 'min(360px, calc(100vw - 2rem))', maxHeight: 480, overflowY: 'auto',
+            boxSizing: 'border-box',
             background: 'linear-gradient(135deg, #FDFBF7, #FDFBF7)',
             border: '2px solid #111',
             borderRadius: '0', zIndex: 9998,

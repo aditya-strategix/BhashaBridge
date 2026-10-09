@@ -1,5 +1,5 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../prisma');
+const { withDbRetry } = require('../prisma');
 const crypto = require('crypto');
 const generateMeetingCode = (orgAccessCode) => {
   const letters = 'abcdefghjkmnpqrstuvwxyz';
@@ -11,6 +11,7 @@ const generateMeetingCode = (orgAccessCode) => {
 };
 
 const AIService = require('../services/ai.service');
+const { sendMeetingInvitation } = require('../services/email.service');
 
 const { createClient } = require('redis');
 
@@ -33,32 +34,77 @@ const initRedis = async () => {
 
 
 
+const resolveMeetingEntity = async (link, includeOrg = true) => {
+  const cleanLink = (link || '').trim();
+  if (!cleanLink) return null;
+  const include = includeOrg ? { organization: { include: { coHosts: true } } } : undefined;
+  let meeting = await withDbRetry(p => p.meeting.findFirst({
+    where: {
+      OR: [
+        { meetingLink: cleanLink },
+        { meetingLink: { equals: cleanLink, mode: 'insensitive' } },
+        { id: cleanLink }
+      ]
+    },
+    include
+  }));
+  if (!meeting) {
+    const org = await withDbRetry(p => p.organization.findFirst({
+      where: {
+        OR: [
+          { accessCode: cleanLink },
+          { accessCode: { equals: cleanLink, mode: 'insensitive' } }
+        ]
+      }
+    }));
+    if (org) {
+      meeting = await withDbRetry(p => p.meeting.findFirst({
+        where: { organizationId: org.id },
+        orderBy: { createdAt: 'desc' },
+        include
+      }));
+    }
+  }
+  return meeting;
+};
+
 exports.createMeeting = async (req, res) => {
   try {
     const { title, startTime, state, organizationId } = req.body;
-    let meetingLink = generateMeetingCode();
-    
 
-    // Check if org belongs to user
+    // Check if org belongs to user (only if organizationId is non-empty)
     let orgData = {};
-    if (organizationId) {
-      const org = await prisma.organization.findFirst({
-        where: { id: organizationId, users: { some: { id: req.user.userId } } },
+    let orgAccessCode = null;
+    if (organizationId && typeof organizationId === 'string' && organizationId.trim()) {
+      const trimmedOrgId = organizationId.trim();
+      const org = await withDbRetry(p => p.organization.findFirst({
+        where: { id: trimmedOrgId, users: { some: { id: req.user.userId } } },
         include: { coHosts: true }
-      });
+      }));
       if (!org) return res.status(403).json({ error: 'Not a member of this organization' });
-      
+
       const isCoHost = org.coHosts.some(c => c.id === req.user.userId);
       if (org.ownerId !== req.user.userId && !isCoHost) {
         return res.status(403).json({ error: 'Only Organization Hosts and Co-Hosts can create organization meetings' });
       }
 
-      orgData = { organizationId };
-      if (org.accessCode) {
-        meetingLink = generateMeetingCode(org.accessCode);
-      }
+      orgData = { organizationId: org.id };
+      orgAccessCode = org.accessCode;
     }
 
+    // Generate unique meeting code
+    let meetingLink = generateMeetingCode(orgAccessCode);
+    let isUnique = false;
+    let attempts = 0;
+    while (!isUnique && attempts < 5) {
+      attempts++;
+      const existing = await withDbRetry(p => p.meeting.findUnique({ where: { meetingLink } }));
+      if (!existing) {
+        isUnique = true;
+      } else {
+        meetingLink = generateMeetingCode(orgAccessCode);
+      }
+    }
 
     let parsedStartTime = new Date();
     if (startTime) {
@@ -68,22 +114,31 @@ exports.createMeeting = async (req, res) => {
       }
     }
 
-    const meeting = await prisma.meeting.create({
+    const meeting = await withDbRetry(p => p.meeting.create({
       data: {
-        title,
+        title: title || 'Untitled Meeting',
         meetingLink,
         hostId: req.user.userId,
         startTime: parsedStartTime,
         state: state || 'ONGOING',
         ...orgData
       }
-    });
+    }));
 
-    if (global.io) global.io.emit('dashboard:refresh'); if(typeof meeting !== 'undefined' && meeting && meeting.meetingLink) global.io.to(meeting.meetingLink).emit('meeting:refresh'); if(global.sseEmit) global.sseEmit('dashboard:refresh');
+    if (global.io) {
+      global.io.emit('dashboard:refresh');
+      if (meeting && meeting.meetingLink) {
+        global.io.to(meeting.meetingLink).emit('meeting:refresh');
+      }
+    }
+    if (global.sseEmit) {
+      global.sseEmit('dashboard:refresh');
+    }
+
     res.status(201).json({ meeting });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Server error' });
+    console.error('createMeeting error:', error);
+    res.status(500).json({ error: error.message || 'Server error' });
   }
 };
 
@@ -201,19 +256,30 @@ exports.getSummary = async (req, res) => {
 
 exports.getMeetings = async (req, res) => {
   try {
-    const meetings = await prisma.meeting.findMany({
+    const userId = req.user.userId;
+    const meetings = await withDbRetry(p => p.meeting.findMany({
       where: {
-          NOT: {
-            hiddenForUserIds: {
-              has: req.user.userId
-            }
-          },
-          OR: [
-            { hostId: req.user.userId },
-            { participants: { some: { userId: req.user.userId } } },
-            { organization: { users: { some: { id: req.user.userId } } } }
-          ]
+        NOT: {
+          hiddenForUserIds: {
+            has: userId
+          }
         },
+        OR: [
+          // 1. Host sees all their meetings (SCHEDULED, ONGOING, COMPLETED, CANCELLED)
+          { hostId: userId },
+
+          // 2. Participants who were actually admitted see it (SCHEDULED, ONGOING, COMPLETED)
+          { participants: { some: { userId: userId, status: 'ADMITTED' } } },
+
+          // 3. Organization members ONLY see active meetings (SCHEDULED or ONGOING).
+          // Once a meeting ends, it is removed from upcoming and NOT placed in history
+          // for users who never attended!
+          {
+            organization: { users: { some: { id: userId } } },
+            state: { in: ['SCHEDULED', 'ONGOING'] }
+          }
+        ]
+      },
       include: { 
         host: { select: { name: true } },
         participants: { 
@@ -226,10 +292,10 @@ exports.getMeetings = async (req, res) => {
         reports: true
       },
       orderBy: { createdAt: 'desc' }
-    });
+    }));
     res.json({ meetings });
   } catch (error) {
-    console.error(error);
+    console.error('getMeetings error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 };
@@ -237,16 +303,33 @@ exports.getMeetings = async (req, res) => {
 exports.joinMeeting = async (req, res) => {
   try {
     const { link } = req.params;
-    let meeting = await prisma.meeting.findUnique({ where: { meetingLink: link } });
+    const cleanLink = (link || '').trim();
+
+    let meeting = await withDbRetry(p => p.meeting.findFirst({
+      where: {
+        OR: [
+          { meetingLink: cleanLink },
+          { meetingLink: { equals: cleanLink, mode: 'insensitive' } },
+          { id: cleanLink }
+        ]
+      }
+    }));
     
     // Fallback: If not found, check if this is an organization access code
     if (!meeting) {
-      const org = await prisma.organization.findUnique({ where: { accessCode: link } });
+      const org = await withDbRetry(p => p.organization.findFirst({
+        where: {
+          OR: [
+            { accessCode: cleanLink },
+            { accessCode: { equals: cleanLink, mode: 'insensitive' } }
+          ]
+        }
+      }));
       if (org) {
-        meeting = await prisma.meeting.findFirst({
+        meeting = await withDbRetry(p => p.meeting.findFirst({
           where: { organizationId: org.id, state: { in: ['ONGOING', 'SCHEDULED'] } },
           orderBy: { createdAt: 'desc' }
-        });
+        }));
       }
     }
 
@@ -257,10 +340,10 @@ exports.joinMeeting = async (req, res) => {
     let isOrgCoHost = false;
     let isOrgAdmin = false;
     if (meeting.organizationId) {
-      const org = await prisma.organization.findFirst({
+      const org = await withDbRetry(p => p.organization.findFirst({
         where: { id: meeting.organizationId, users: { some: { id: req.user.userId } } },
         include: { coHosts: { select: { id: true } } }
-      });
+      }));
       if (!org) return res.status(403).json({ error: 'You are not a member of this organization.' });
       if (org.coHosts.some(c => c.id === req.user.userId) || org.ownerId === req.user.userId) {
         isOrgCoHost = true;
@@ -272,10 +355,10 @@ exports.joinMeeting = async (req, res) => {
 
     // If SCHEDULED and host or org admin is joining, flip to ONGOING
     if (isHost && meeting.state === 'SCHEDULED') {
-      await prisma.meeting.update({
+      await withDbRetry(p => p.meeting.update({
         where: { id: meeting.id },
         data: { state: 'ONGOING', startTime: new Date() }
-      });
+      }));
       meeting.state = 'ONGOING';
       meeting.startTime = new Date();
       if (global.io) {
@@ -285,45 +368,77 @@ exports.joinMeeting = async (req, res) => {
       if (global.sseEmit) global.sseEmit('dashboard:refresh');
     }
 
-    let participant = await prisma.participant.findUnique({
+    let participant = await withDbRetry(p => p.participant.findUnique({
       where: { userId_meetingId: { userId: req.user.userId, meetingId: meeting.id } }
-    });
+    }));
 
     const isCoHost = isOrgCoHost || (participant && participant.role === 'COHOST');
     
     // Default: if you are host or cohost, you bypass waiting room.
     let finalStatus;
-      if (!participant) {
-        finalStatus = (isHost || isCoHost) ? 'ADMITTED' : 'WAITING';
-        participant = await prisma.participant.create({
-          data: {
-            userId: req.user.userId,
-            meetingId: meeting.id,
-            role: isHost ? 'HOST' : (isOrgCoHost ? 'COHOST' : 'PARTICIPANT'),
-            status: finalStatus
-          }
-        });
-      } else {
-        // If they already exist, keep their status unless they were upgraded to Host/CoHost
-        finalStatus = (isHost || isCoHost) ? 'ADMITTED' : participant.status;
-        const updatedRole = isHost ? 'HOST' : (isOrgCoHost ? 'COHOST' : participant.role);
-        participant = await prisma.participant.update({
-          where: { id: participant.id },
-          data: { joinTime: new Date(), status: finalStatus, role: updatedRole }
-        });
-      }
+    if (!participant) {
+      finalStatus = (isHost || isCoHost) ? 'ADMITTED' : 'WAITING';
+      participant = await withDbRetry(p => p.participant.create({
+        data: {
+          userId: req.user.userId,
+          meetingId: meeting.id,
+          role: isHost ? 'HOST' : (isOrgCoHost ? 'COHOST' : 'PARTICIPANT'),
+          status: finalStatus
+        }
+      }));
+    } else {
+      // If Host or CoHost, bypass lobby with ADMITTED.
+      // If participant was already ADMITTED by host, preserve ADMITTED for reconnects.
+      // If participant previously LEFT or was WAITING/REJECTED, they MUST be placed in WAITING room!
+      finalStatus = (isHost || isCoHost) ? 'ADMITTED' : (participant.status === 'ADMITTED' ? 'ADMITTED' : 'WAITING');
+      const updatedRole = isHost ? 'HOST' : (isOrgCoHost ? 'COHOST' : participant.role);
+      participant = await withDbRetry(p => p.participant.update({
+        where: { id: participant.id },
+        data: { joinTime: new Date(), status: finalStatus, role: updatedRole }
+      }));
+    }
 
     let waitingUsers = [];
-      if (participant.status === 'ADMITTED' && (participant.role === 'HOST' || participant.role === 'COHOST')) {
-        const waitingDb = await prisma.participant.findMany({
-          where: { meetingId: meeting.id, status: 'WAITING' },
-          include: { user: { select: { id: true, name: true, avatar: true } } }
-        });
-        waitingUsers = waitingDb.map(p => ({ userId: p.user.id, name: p.user.name, avatar: p.user.avatar }));
+    if (participant.status === 'ADMITTED' && (participant.role === 'HOST' || participant.role === 'COHOST')) {
+      const waitingDb = await withDbRetry(p => p.participant.findMany({
+        where: { meetingId: meeting.id, status: 'WAITING' },
+        include: { user: { select: { id: true, name: true, avatar: true } } }
+      }));
+
+      const connectedWaitingUserIds = new Set();
+      if (global.io) {
+        try {
+          const socketsInLink = await global.io.in(meeting.meetingLink).fetchSockets();
+          const socketsInId = await global.io.in(meeting.id).fetchSockets();
+          const socketsInClean = (cleanLink && cleanLink !== meeting.meetingLink) ? await global.io.in(cleanLink).fetchSockets() : [];
+          const allSockets = [...socketsInLink, ...socketsInId, ...socketsInClean];
+          for (const s of allSockets) {
+            if (s.isWaiting && s.userId) {
+              connectedWaitingUserIds.add(s.userId);
+            }
+          }
+        } catch (e) {
+          console.warn('Error fetching waiting sockets:', e.message);
+        }
       }
-      res.json({ meeting, participantStatus: participant.status, participantRole: participant.role, waitingUsers });
+
+      const activeWaiting = [];
+      for (const p of waitingDb) {
+        if (!connectedWaitingUserIds.has(p.userId)) {
+          // Prune ghost waiting record from DB
+          await withDbRetry(db => db.participant.update({
+            where: { id: p.id },
+            data: { status: 'LEFT', leaveTime: new Date() }
+          })).catch(() => {});
+        } else {
+          activeWaiting.push({ userId: p.user.id, name: p.user.name, avatar: p.user.avatar });
+        }
+      }
+      waitingUsers = activeWaiting;
+    }
+    res.json({ meeting, participantStatus: participant.status, participantRole: participant.role, waitingUsers });
   } catch (error) {
-    console.error(error);
+    console.error('joinMeeting error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 };
@@ -331,50 +446,161 @@ exports.joinMeeting = async (req, res) => {
 exports.endMeeting = async (req, res) => {
   try {
     const { link } = req.params;
-    const meeting = await prisma.meeting.findUnique({ where: { meetingLink: link } });
+    const cleanLink = (link || '').trim();
+
+    let meeting = await withDbRetry(p => p.meeting.findFirst({
+      where: {
+        OR: [
+          { meetingLink: cleanLink },
+          { meetingLink: { equals: cleanLink, mode: 'insensitive' } },
+          { id: cleanLink }
+        ]
+      }
+    }));
     
+    // Fallback: Check if link is an organization access code
+    if (!meeting) {
+      const org = await withDbRetry(p => p.organization.findFirst({
+        where: {
+          OR: [
+            { accessCode: cleanLink },
+            { accessCode: { equals: cleanLink, mode: 'insensitive' } }
+          ]
+        }
+      }));
+      if (org) {
+        meeting = await withDbRetry(p => p.meeting.findFirst({
+          where: { organizationId: org.id, state: { in: ['ONGOING', 'SCHEDULED'] } },
+          orderBy: { createdAt: 'desc' }
+        }));
+      }
+    }
+
     if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
     
-      let isOrgAdmin = false;
-      if (meeting.organizationId) {
-        const org = await prisma.organization.findUnique({
-          where: { id: meeting.organizationId },
-          include: { coHosts: true }
-        });
-        if (org && (org.ownerId === req.user.userId || org.coHosts.some(c => c.id === req.user.userId))) {
-          isOrgAdmin = true;
-        }
+    let isOrgAdmin = false;
+    if (meeting.organizationId) {
+      const org = await withDbRetry(p => p.organization.findUnique({
+        where: { id: meeting.organizationId },
+        include: { coHosts: true }
+      }));
+      if (org && (org.ownerId === req.user.userId || org.coHosts.some(c => c.id === req.user.userId))) {
+        isOrgAdmin = true;
       }
+    }
 
-      if (meeting.hostId !== req.user.userId && !isOrgAdmin) {
-        return res.status(403).json({ error: 'Only the host or org admins can end the meeting' });
-      }
+    const participant = await withDbRetry(p => p.participant.findUnique({
+      where: { userId_meetingId: { userId: req.user.userId, meetingId: meeting.id } }
+    }));
+    const isMeetingCoHost = participant && (participant.role === 'HOST' || participant.role === 'COHOST');
 
+    if (meeting.hostId !== req.user.userId && !isOrgAdmin && !isMeetingCoHost) {
+      return res.status(403).json({ error: 'Only the host or org admins/co-hosts can end the meeting' });
+    }
 
-    const updated = await prisma.meeting.update({
+    const updated = await withDbRetry(p => p.meeting.update({
       where: { id: meeting.id },
       data: { 
         state: 'COMPLETED',
         endTime: new Date(),
         startTime: meeting.startTime || meeting.createdAt
       }
-    });
+    }));
 
-    if (global.io) global.io.to(link).emit('meeting:ended');
-      if (global.io) global.io.emit('dashboard:refresh'); if(typeof meeting !== 'undefined' && meeting && meeting.meetingLink) global.io.to(meeting.meetingLink).emit('meeting:refresh'); if(global.sseEmit) global.sseEmit('dashboard:refresh');
-      res.json({ meeting: updated });
+    if (global.io) {
+      if (meeting.meetingLink) global.io.to(meeting.meetingLink).emit('meeting:ended');
+      if (cleanLink && cleanLink !== meeting.meetingLink) global.io.to(cleanLink).emit('meeting:ended');
+      if (meeting.id) global.io.to(meeting.id).emit('meeting:ended');
+      global.io.emit('dashboard:refresh');
+      if (meeting.meetingLink) global.io.to(meeting.meetingLink).emit('meeting:refresh');
+    }
+    if (global.sseEmit) {
+      global.sseEmit('dashboard:refresh');
+    }
+
+    res.json({ meeting: updated });
   } catch (error) {
-    console.error(error);
+    console.error('endMeeting error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 };
+
+exports.leaveWaitingRoom = async (req, res) => {
+  try {
+    const { link } = req.params;
+    const cleanLink = (link || '').trim();
+
+    let meeting = await withDbRetry(p => p.meeting.findFirst({
+      where: {
+        OR: [
+          { meetingLink: cleanLink },
+          { meetingLink: { equals: cleanLink, mode: 'insensitive' } },
+          { id: cleanLink }
+        ]
+      }
+    }));
+
+    if (!meeting) {
+      const org = await withDbRetry(p => p.organization.findFirst({
+        where: {
+          OR: [
+            { accessCode: cleanLink },
+            { accessCode: { equals: cleanLink, mode: 'insensitive' } }
+          ]
+        }
+      }));
+      if (org) {
+        meeting = await withDbRetry(p => p.meeting.findFirst({
+          where: { organizationId: org.id, state: { in: ['ONGOING', 'SCHEDULED'] } },
+          orderBy: { createdAt: 'desc' }
+        }));
+      }
+    }
+
+    if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
+
+    // Mark participant as LEFT
+    await withDbRetry(p => p.participant.updateMany({
+      where: {
+        userId: req.user.userId,
+        meetingId: meeting.id,
+        status: 'WAITING'
+      },
+      data: { status: 'LEFT', leaveTime: new Date() }
+    }));
+
+    if (global.io) {
+      const payload = { userId: req.user.userId };
+      if (meeting.meetingLink) {
+        global.io.to(meeting.meetingLink).emit('waiting:left', payload);
+        global.io.to(meeting.meetingLink).emit('meeting:refresh');
+      }
+      if (cleanLink && cleanLink !== meeting.meetingLink) {
+        global.io.to(cleanLink).emit('waiting:left', payload);
+        global.io.to(cleanLink).emit('meeting:refresh');
+      }
+      if (meeting.id) {
+        global.io.to(meeting.id).emit('waiting:left', payload);
+        global.io.to(meeting.id).emit('meeting:refresh');
+      }
+      global.io.emit('dashboard:refresh');
+    }
+    if (global.sseEmit) global.sseEmit('dashboard:refresh');
+
+    res.json({ success: true, message: 'Left waiting room' });
+  } catch (error) {
+    console.error('leaveWaitingRoom error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+
 exports.deleteMeeting = async (req, res) => {
     try {
       const { id } = req.params;
-      const meeting = await prisma.meeting.findUnique({
+      const meeting = await withDbRetry(p => p.meeting.findUnique({
         where: { id },
         include: { organization: { include: { coHosts: true } } }
-      });
+      }));
       
       if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
 
@@ -397,10 +623,10 @@ exports.deleteMeeting = async (req, res) => {
         updateData.state = 'CANCELLED';
       }
 
-      await prisma.meeting.update({
+      await withDbRetry(p => p.meeting.update({
         where: { id },
         data: updateData
-      });
+      }));
 
       if (global.io) {
         global.io.emit('dashboard:refresh');
@@ -408,12 +634,16 @@ exports.deleteMeeting = async (req, res) => {
           global.io.to(meeting.meetingLink).emit('meeting:ended');
           global.io.to(meeting.meetingLink).emit('meeting:refresh');
         }
+        if (meeting.id) {
+          global.io.to(meeting.id).emit('meeting:ended');
+          global.io.to(meeting.id).emit('meeting:refresh');
+        }
       }
       if (global.sseEmit) global.sseEmit('dashboard:refresh');
 
       res.json({ message: isHost && meeting.state === 'SCHEDULED' ? 'Scheduled meeting cancelled' : 'Meeting removed from your history' });
     } catch (error) {
-      console.error(error);
+      console.error('deleteMeeting error:', error);
       res.status(500).json({ error: 'Server error' });
     }
   };
@@ -422,10 +652,17 @@ exports.admitParticipant = async (req, res) => {
   try {
     const { link } = req.params;
     const { userId } = req.body;
-    const meeting = await prisma.meeting.findUnique({
-      where: { meetingLink: link },
+    const cleanLink = (link || '').trim();
+    let meeting = await withDbRetry(p => p.meeting.findFirst({
+      where: {
+        OR: [
+          { meetingLink: cleanLink },
+          { meetingLink: { equals: cleanLink, mode: 'insensitive' } },
+          { id: cleanLink }
+        ]
+      },
       include: { organization: { include: { coHosts: true } } }
-    });
+    }));
     if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
 
     let isOrgAdmin = false;
@@ -449,9 +686,8 @@ exports.admitParticipant = async (req, res) => {
     });
 
     if (global.io) {
-      global.io.to(link).emit('waiting:admitted', { userId });
-      global.io.to(`user_`).emit('waiting:admitted', { userId });
-      global.io.to(link).emit('meeting:refresh');
+      global.io.to(`user_${userId}`).emit('waiting:admitted', { userId });
+      global.io.to(meeting.id).emit('meeting:refresh');
       global.io.emit('dashboard:refresh');
     }
     if (global.sseEmit) global.sseEmit('dashboard:refresh');
@@ -467,10 +703,17 @@ exports.rejectParticipant = async (req, res) => {
   try {
     const { link } = req.params;
     const { userId } = req.body;
-    const meeting = await prisma.meeting.findUnique({
-      where: { meetingLink: link },
+    const cleanLink = (link || '').trim();
+    let meeting = await withDbRetry(p => p.meeting.findFirst({
+      where: {
+        OR: [
+          { meetingLink: cleanLink },
+          { meetingLink: { equals: cleanLink, mode: 'insensitive' } },
+          { id: cleanLink }
+        ]
+      },
       include: { organization: { include: { coHosts: true } } }
-    });
+    }));
     if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
     
     let isOrgAdmin = false;
@@ -492,9 +735,8 @@ exports.rejectParticipant = async (req, res) => {
     });
 
     if (global.io) {
-      global.io.to(link).emit('waiting:rejected', { userId });
-      global.io.to(`user_`).emit('waiting:rejected', { userId });
-      global.io.to(link).emit('meeting:refresh');
+      global.io.to(`user_${userId}`).emit('waiting:rejected', { userId });
+      global.io.to(meeting.id).emit('meeting:refresh');
       global.io.emit('dashboard:refresh');
     }
     if (global.sseEmit) global.sseEmit('dashboard:refresh');
@@ -510,10 +752,7 @@ exports.assignCoHost = async (req, res) => {
   try {
     const { link } = req.params;
     const { userId } = req.body;
-    const meeting = await prisma.meeting.findUnique({ 
-      where: { meetingLink: link },
-      include: { organization: { include: { coHosts: true } } }
-    });
+    const meeting = await resolveMeetingEntity(link, true);
     if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
 
     let isOrgAdmin = false;
@@ -527,15 +766,17 @@ exports.assignCoHost = async (req, res) => {
       return res.status(403).json({ error: 'Only main Host or Org Admins can assign Co-hosts' });
     }
 
-    const participant = await prisma.participant.update({
+    const participant = await withDbRetry(p => p.participant.update({
       where: { userId_meetingId: { userId, meetingId: meeting.id } },
       data: { role: 'COHOST' }
-    });
+    }));
     
     // Live meeting update via Socket.IO
     if (global.io) {
-      global.io.to(link).emit('participant:promoted', { userId, role: 'COHOST' });
-      global.io.to(link).emit('meeting:refresh');
+      const payload = { userId, role: 'COHOST' };
+      global.io.to(meeting.id).emit('participant:promoted', payload);
+      if (meeting.meetingLink) global.io.to(meeting.meetingLink).emit('participant:promoted', payload);
+      global.io.to(meeting.id).emit('meeting:refresh');
       global.io.emit('dashboard:refresh');
     }
     // Dashboard update via SSE
@@ -551,10 +792,7 @@ exports.assignCoHost = async (req, res) => {
 exports.removeCoHost = async (req, res) => {
   try {
     const { link, userId } = req.params;
-    const meeting = await prisma.meeting.findUnique({ 
-      where: { meetingLink: link },
-      include: { organization: { include: { coHosts: true } } }
-    });
+    const meeting = await resolveMeetingEntity(link, true);
     if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
 
     let isOrgAdmin = false;
@@ -574,15 +812,17 @@ exports.removeCoHost = async (req, res) => {
       return res.status(403).json({ error: 'Cannot demote a permanent Organization Co-Host.' });
     }
 
-    const participant = await prisma.participant.update({
+    const participant = await withDbRetry(p => p.participant.update({
       where: { userId_meetingId: { userId, meetingId: meeting.id } },
       data: { role: 'PARTICIPANT' }
-    });
+    }));
     
     // Live meeting update via Socket.IO
     if (global.io) {
-      global.io.to(link).emit('participant:promoted', { userId, role: 'PARTICIPANT' });
-      global.io.to(link).emit('meeting:refresh');
+      const payload = { userId, role: 'PARTICIPANT' };
+      global.io.to(meeting.id).emit('participant:promoted', payload);
+      if (meeting.meetingLink) global.io.to(meeting.meetingLink).emit('participant:promoted', payload);
+      global.io.to(meeting.id).emit('meeting:refresh');
       global.io.emit('dashboard:refresh');
     }
     // Dashboard update via SSE
@@ -598,51 +838,39 @@ exports.removeCoHost = async (req, res) => {
 exports.getTranscript = async (req, res) => {
   try {
     const { link } = req.params;
-    let meeting = await prisma.meeting.findUnique({ where: { meetingLink: link } });
-    
-    // Check if it's an org access code
-    if (!meeting) {
-      const org = await prisma.organization.findUnique({ where: { accessCode: link } });
-      if (org) {
-        meeting = await prisma.meeting.findFirst({
-          where: { organizationId: org.id },
-          orderBy: { createdAt: 'desc' }
-        });
-      }
-    }
+    const meeting = await resolveMeetingEntity(link, true);
 
     if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
     if (meeting.state === 'CANCELLED') return res.status(403).json({ error: 'This meeting was cancelled.' });
     if (meeting.state !== 'COMPLETED') return res.status(403).json({ error: 'This meeting is still ongoing. The transcript will be available once the host ends the session.' });
 
-    
-      let isOrgAdmin = false;
-      if (meeting.organizationId) {
-        const org = await prisma.organization.findUnique({
-          where: { id: meeting.organizationId },
-          include: { coHosts: true }
-        });
-        if (org && (org.ownerId === req.user.userId || org.coHosts.some(c => c.id === req.user.userId))) {
-          isOrgAdmin = true;
-        }
+    let isOrgAdmin = false;
+    if (meeting.organizationId) {
+      const org = meeting.organization || await withDbRetry(p => p.organization.findUnique({
+        where: { id: meeting.organizationId },
+        include: { coHosts: true }
+      }));
+      if (org && (org.ownerId === req.user.userId || org.coHosts.some(c => c.id === req.user.userId))) {
+        isOrgAdmin = true;
       }
+    }
 
-      const isHost = meeting.hostId === req.user.userId || isOrgAdmin;
-      const participant = await prisma.participant.findUnique({
-        where: { userId_meetingId: { userId: req.user.userId, meetingId: meeting.id } }
-      });
+    const isHost = meeting.hostId === req.user.userId || isOrgAdmin;
+    const participant = await withDbRetry(p => p.participant.findUnique({
+      where: { userId_meetingId: { userId: req.user.userId, meetingId: meeting.id } }
+    }));
 
-      if (!isHost && !participant) {
+    if (!isHost && !participant) {
       return res.status(403).json({ error: 'You are not authorized to view this transcript' });
     }
 
-    const captions = await prisma.caption.findMany({
+    const captions = await withDbRetry(p => p.caption.findMany({
       where: { meetingId: meeting.id },
       include: {
         speaker: { select: { name: true, email: true } }
       },
       orderBy: { timestamp: 'asc' }
-    });
+    }));
 
     res.json({ transcript: captions });
   } catch (error) {
@@ -651,20 +879,12 @@ exports.getTranscript = async (req, res) => {
   }
 };
 
-
-
-
-
-
 exports.removeParticipant = async (req, res) => {
   try {
     const { link, userId } = req.params;
-    const meeting = await prisma.meeting.findUnique({
-      where: { meetingLink: link },
-      include: { organization: { include: { coHosts: true } } }
-    });
+    const meeting = await resolveMeetingEntity(link, true);
     
-    if (!meeting) return res.status(404).json({error: 'Meeting not found'});
+    if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
 
     let isOrgAdmin = false;
     if (meeting.organization) {
@@ -673,9 +893,9 @@ exports.removeParticipant = async (req, res) => {
       }
     }
 
-    const requesterParticipant = await prisma.participant.findFirst({
+    const requesterParticipant = await withDbRetry(p => p.participant.findFirst({
       where: { meetingId: meeting.id, userId: req.user.userId }
-    });
+    }));
 
     const isMainHost = meeting.hostId === req.user.userId || isOrgAdmin;
     const isHost = isMainHost || (requesterParticipant && requesterParticipant.role === 'HOST');
@@ -685,9 +905,9 @@ exports.removeParticipant = async (req, res) => {
       return res.status(403).json({ error: 'Not authorized to remove participants' });
     }
 
-    const targetParticipant = await prisma.participant.findFirst({
+    const targetParticipant = await withDbRetry(p => p.participant.findFirst({
       where: { meetingId: meeting.id, userId: userId }
-    });
+    }));
 
     if (!targetParticipant) return res.status(404).json({ error: 'Participant not found' });
 
@@ -701,15 +921,18 @@ exports.removeParticipant = async (req, res) => {
       return res.status(403).json({ error: 'Co-hosts can only remove Participants' });
     }
 
-    await prisma.participant.update({
+    await withDbRetry(p => p.participant.update({
       where: { id: targetParticipant.id },
       data: { status: 'REJECTED' }
-    });
+    }));
 
     // Live meeting update via Socket.IO
     if (global.io) {
-      global.io.to(meeting.meetingLink).emit('participant:removed', { userId });
-      global.io.to(meeting.meetingLink).emit('meeting:refresh');
+      global.io.to(meeting.id).emit('participant:removed', { userId });
+      if (meeting.meetingLink) global.io.to(meeting.meetingLink).emit('participant:removed', { userId });
+      global.io.to(`user_${userId}`).emit('participant:removed', { userId });
+      global.io.to(`user:${userId}`).emit('participant:removed', { userId });
+      global.io.to(meeting.id).emit('meeting:refresh');
       global.io.emit('dashboard:refresh');
     }
     // Dashboard update via SSE
@@ -717,7 +940,7 @@ exports.removeParticipant = async (req, res) => {
 
     res.json({ message: 'Participant removed' });
   } catch (error) {
-    console.error(error);
+    console.error('removeParticipant error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 };
@@ -725,26 +948,109 @@ exports.removeParticipant = async (req, res) => {
 exports.getParticipants = async (req, res) => {
   try {
     const { link } = req.params;
-    const meeting = await prisma.meeting.findUnique({
-      where: { meetingLink: link }
-    });
-    if (!meeting) return res.status(404).json({error: 'Meeting not found'});
+    const meeting = await resolveMeetingEntity(link, false);
+    if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
 
-    const participants = await prisma.participant.findMany({
+    const participants = await withDbRetry(p => p.participant.findMany({
       where: { meetingId: meeting.id, status: 'ADMITTED' },
       include: { user: { select: { id: true, name: true, avatar: true } } }
-    });
+    }));
 
     const mapped = participants.map(p => ({
       userId: p.userId,
       role: p.role,
-      name: p.user.name,
-      avatar: p.user.avatar
+      name: p.user?.name || 'User',
+      avatar: p.user?.avatar
     }));
 
     res.json(mapped);
   } catch (error) {
-    console.error(error);
+    console.error('getParticipants error:', error);
     res.status(500).json({ error: 'Server error' });
+  }
+};
+
+exports.sendEmailInvite = async (req, res) => {
+  try {
+    const { link } = req.params;
+    const { email, emails } = req.body;
+    
+    // Support single email or array / comma-separated string
+    let recipientList = [];
+    if (Array.isArray(emails)) {
+      recipientList = emails;
+    } else if (typeof emails === 'string') {
+      recipientList = emails.split(',').map(e => e.trim()).filter(Boolean);
+    } else if (typeof email === 'string') {
+      recipientList = email.split(',').map(e => e.trim()).filter(Boolean);
+    }
+
+    if (recipientList.length === 0) {
+      return res.status(400).json({ error: 'Please provide at least one valid recipient email address' });
+    }
+
+    // Email regex validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const invalidEmails = recipientList.filter(e => !emailRegex.test(e));
+    if (invalidEmails.length > 0) {
+      return res.status(400).json({ error: `Invalid email address format: ${invalidEmails.join(', ')}` });
+    }
+
+    const meeting = await resolveMeetingEntity(link, true);
+    if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
+
+    if (meeting.state === 'COMPLETED' || meeting.state === 'CANCELLED') {
+      return res.status(400).json({ error: 'Cannot send invites for meetings that have already ended or been cancelled' });
+    }
+
+    let isOrgAdmin = false;
+    if (meeting.organization) {
+      if (meeting.organization.ownerId === req.user.userId || meeting.organization.coHosts.some(c => c.id === req.user.userId)) {
+        isOrgAdmin = true;
+      }
+    }
+
+    const caller = await withDbRetry(p => p.participant.findUnique({
+      where: { userId_meetingId: { userId: req.user.userId, meetingId: meeting.id } }
+    }));
+
+    const isHost = meeting.hostId === req.user.userId || isOrgAdmin || (caller && caller.role === 'HOST');
+    const isCoHost = caller && caller.role === 'COHOST';
+
+    if (!isHost && !isCoHost) {
+      return res.status(403).json({ error: 'Only the meeting host or co-hosts can send email invitations' });
+    }
+
+    const hostUser = await withDbRetry(p => p.user.findUnique({
+      where: { id: req.user.userId },
+      select: { name: true, email: true }
+    }));
+    const hostName = hostUser?.name || 'A BhashaBridge User';
+
+    const frontendBaseUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:3000');
+    const joinUrl = `${frontendBaseUrl}/meeting/${meeting.meetingLink}`;
+
+    const results = await Promise.all(
+      recipientList.map(recipientEmail =>
+        sendMeetingInvitation({
+          recipientEmail,
+          meetingTitle: meeting.title,
+          hostName,
+          meetingLink: meeting.meetingLink,
+          scheduledTime: meeting.startTime,
+          joinUrl
+        })
+      )
+    );
+
+    const sentCount = results.filter(r => r.success).length;
+    res.json({
+      success: true,
+      message: `Invitation email sent to ${sentCount} recipient(s)`,
+      count: sentCount
+    });
+  } catch (error) {
+    console.error('sendEmailInvite error:', error);
+    res.status(500).json({ error: 'Failed to send invitation email' });
   }
 };

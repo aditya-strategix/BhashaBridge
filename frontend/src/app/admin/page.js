@@ -85,7 +85,7 @@ export default function AdminDashboard() {
   if (!mounted || !user || (user.role !== 'ORG_ADMIN' && user.role !== 'PLATFORM_ADMIN')) return null;
 
   return (
-    <div style={{ backgroundColor: 'var(--bg-ivory, #FAF9F6)', minHeight: '100vh', padding: '1rem', fontFamily: 'var(--font-grotesk, sans-serif)', color: '#000' }}>
+    <div style={{ backgroundColor: 'var(--bg-ivory, #FAF9F6)', minHeight: '100vh', width: '100%', maxWidth: '100vw', boxSizing: 'border-box', overflowX: 'hidden', padding: 'clamp(1rem, 3vw, 2rem)', fontFamily: 'var(--font-grotesk, sans-serif)', color: '#000' }}>
       <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
         <header style={{ borderBottom: '2px solid #000', paddingBottom: '2rem', marginBottom: '4rem' }}>
           <h1 style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '2rem', margin: 0, fontWeight: 'normal', color: 'var(--cobalt, #0047AB)' }}>BhashaBridge Directory</h1>
@@ -115,9 +115,9 @@ export default function AdminDashboard() {
         )}
 
         <section>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '2rem', paddingBottom: '1rem', borderBottom: '1px solid #000' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '2rem', paddingBottom: '1rem', borderBottom: '1px solid #000' }}>
             <h2 style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '1rem', textTransform: 'uppercase', margin: 0 }}>[ ORGANIZATION INDEX ]</h2>
-            <form onSubmit={handleAddUser} style={{ display: 'flex' }}>
+            <form onSubmit={handleAddUser} style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', maxWidth: '100%' }}>
               <input 
                 type="email" 
                 placeholder="PROSPECT_EMAIL" 
@@ -134,15 +134,15 @@ export default function AdminDashboard() {
           {orgUsers.length === 0 ? (
             <p style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '1.2rem', color: '#666' }}>The registry is currently vacant.</p>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem', paddingBottom: '1rem', borderBottom: '1px solid #000', fontFamily: 'var(--font-mono, monospace)', fontSize: '0.8rem', textTransform: 'uppercase' }}>
+            <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}><div style={{ display: 'flex', flexDirection: 'column', minWidth: '540px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1.5fr 1fr', gap: '1rem', paddingBottom: '1rem', borderBottom: '1px solid #000', fontFamily: 'var(--font-mono, monospace)', fontSize: '0.8rem', textTransform: 'uppercase' }}>
                 <div>Identifier</div>
                 <div>Contact Route</div>
                 <div>Clearance</div>
                 <div style={{ textAlign: 'right' }}>Directives</div>
               </div>
               {orgUsers.map(u => (
-                <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem', padding: '1rem 0', borderBottom: '1px solid #000', alignItems: 'center' }}>
+                <div key={u.id} style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1.5fr 1fr', gap: '1rem', padding: '1rem 0', borderBottom: '1px solid #000', alignItems: 'center' }}>
                   <div style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '1.2rem' }}>{u.name}</div>
                   <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '0.9rem' }}>{u.email}</div>
                   <div>
@@ -165,9 +165,7 @@ export default function AdminDashboard() {
                     </button>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
+              ))}</div></div>)}
         </section>
 
         <div style={{ marginTop: '4rem' }}>

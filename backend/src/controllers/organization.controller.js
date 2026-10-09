@@ -1,5 +1,5 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../prisma');
+const { withDbRetry } = require('../prisma');
 const crypto = require('crypto');
 const { sendOrganizationInvitation } = require('../services/email.service');
 
@@ -38,7 +38,7 @@ exports.createOrganization = async (req, res) => {
 
 exports.getMyOrganizations = async (req, res) => {
   try {
-    const organizations = await prisma.organization.findMany({
+    const organizations = await withDbRetry(p => p.organization.findMany({
       where: {
         users: { some: { id: req.user.userId } }
       },
@@ -51,15 +51,15 @@ exports.getMyOrganizations = async (req, res) => {
           select: { id: true, email: true, status: true, createdAt: true }
         }
       }
-    });
+    }));
 
     const requestedEmails = [...new Set(organizations.flatMap(o => (o.invitations || []).filter(i => i.status === 'REQUESTED').map(i => i.email)))];
     let applicantMap = {};
     if (requestedEmails.length > 0) {
-      const applicants = await prisma.user.findMany({
+      const applicants = await withDbRetry(p => p.user.findMany({
         where: { email: { in: requestedEmails } },
         select: { id: true, name: true, email: true, avatar: true }
-      });
+      }));
       applicants.forEach(a => { applicantMap[a.email] = a; });
     }
 
@@ -197,34 +197,35 @@ exports.acceptInvitation = async (req, res) => {
   try {
     const { token } = req.params;
     // Note: This route requires authentication (req.user must exist)
-    const invite = await prisma.organizationInvitation.findUnique({ where: { token } });
+    const invite = await withDbRetry(p => p.organizationInvitation.findUnique({ where: { token } }));
 
     if (!invite) return res.status(404).json({ error: 'Invitation not found' });
     if (invite.status !== 'PENDING') return res.status(400).json({ error: 'Invitation is no longer valid' });
     if (invite.expiresAt < new Date()) return res.status(400).json({ error: 'Invitation has expired' });
     
     // Ensure the logged in user's email matches the invitation
-    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
-    if (user.email !== invite.email) {
+    const user = await withDbRetry(p => p.user.findUnique({ where: { id: req.user.userId } }));
+    if (!user || user.email !== invite.email) {
       return res.status(403).json({ error: 'This invitation was sent to a different email address' });
     }
 
     // Add user to org and update invite
-    await prisma.$transaction([
-      prisma.organization.update({
+    await withDbRetry(p => p.$transaction([
+      p.organization.update({
         where: { id: invite.organizationId },
         data: { users: { connect: { id: user.id } } }
       }),
-      prisma.organizationInvitation.update({
+      p.organizationInvitation.update({
         where: { id: invite.id },
         data: { status: 'ACCEPTED' }
       })
-    ]);
+    ]));
 
     res.json({ message: 'Successfully joined the organization' });
     if (global.sseEmit) global.sseEmit('dashboard:refresh');
     if (global.io) global.io.emit('dashboard:refresh');
   } catch (error) {
+    console.error('acceptInvitation error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 };
@@ -318,10 +319,10 @@ exports.removeMember = async (req, res) => {
 };
 exports.getMyInvitations = async (req, res) => {
   try {
-    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
+    const user = await withDbRetry(p => p.user.findUnique({ where: { id: req.user.userId } }));
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const invitations = await prisma.organizationInvitation.findMany({
+    const invitations = await withDbRetry(p => p.organizationInvitation.findMany({
       where: {
         email: user.email,
         status: 'PENDING',
@@ -338,7 +339,7 @@ exports.getMyInvitations = async (req, res) => {
         }
       },
       orderBy: { createdAt: 'desc' }
-    });
+    }));
 
     res.json({ invitations });
   } catch (error) {

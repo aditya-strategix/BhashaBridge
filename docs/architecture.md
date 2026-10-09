@@ -59,6 +59,20 @@ The auth store holds:
 
 **Important pattern:** Settings are mutated **in-place** on the user object (`useAuthStore.getState().user.ttsLang = 'hi'`) rather than replacing the whole object. This prevents React `useEffect` hooks from seeing a new object reference and triggering unnecessary socket reconnections.
 
+### Pre-Authentication Landing Page Architecture (`/`)
+
+The public entry page (`frontend/src/app/page.js` and `page.module.css`) delivers a high-impact editorial Neo-Brutalist experience before users log in or register:
+- **Sticky Brutalist Navigation Bar**: Brand emblem, live version badge (`v2.4 Live`), in-page anchor links (`Live Demo`, `Features`, `Languages`, `How It Works`), and quick-action links to `/login` and `/register`.
+- **Hero & Fast-Track Guest Join**:
+  - Editorial headline: *"Say it in your tongue. Feel understood across the globe."*
+  - Dual CTAs: *"Launch Meeting Free"* and *"Enter Dashboard"*.
+  - Direct Guest Meeting Join Card: Allows external guests with an invite code or organization access pass (e.g. `BB-E01D16`) to bypass registration and join directly into the meeting room.
+- **Metric Verification Strip**: 4-column counter displaying 10+ supported languages, sub-350ms translation latency, 0 client installations (100% in-browser), and Gemini AI intelligence.
+- **Interactive Translation Pipeline Demo**: Visual simulated conversation between a Hindi speaker (New Delhi) and an English listener (New York), highlighting real-time STT, neural interpretation, dynamic captions, and audio synthesis.
+- **Core Capabilities Grid**: 6 dossier cards explaining Speech-to-Speech, WebRTC P2P Mesh, Gemini 3.7 Flash AI, Dynamic Subtitles, Host Lobbies, and Transactional Email Invitations.
+- **Supported Language Matrix**: Interactive roster displaying native scripts and language codes for Hindi, English, Bengali, Tamil, Telugu, Marathi, Gujarati, Spanish, French, and German.
+- **Workflow Guide & Brutalist Footer**: 3-step timeline (Create/Join -> Choose Dialect -> Converse Naturally) paired with an architectural technical footer.
+
 ---
 
 ## 3. Backend Architecture
@@ -484,3 +498,167 @@ TURN is a public relay server. Instead of connecting directly, both connect outw
 * **TURN:** A relay service that carries the call when direct connection fails.
 * **Signaling server:** The messenger that helps browsers exchange connection details.
 
+
+---
+
+### 10. Meeting Lifecycle, Waiting Room & History Architecture
+
+#### 10.1 Meeting State Machine
+Every meeting follows a deterministic state progression:
+1. **`SCHEDULED`**: Created in advance (standalone or attached to an Organization).
+   - Visible under **"Upcoming"** tab for the Host and all members of the Organization so they can join when the time comes.
+2. **`ONGOING`**: When the Host (or Co-host / Org Admin) joins, the state automatically transitions from `SCHEDULED` to `ONGOING`.
+   - Real-time events (`dashboard:refresh`) broadcast across WebSocket and SSE to keep all participants informed.
+3. **`COMPLETED`**: Triggered when the Host clicks *"End Meeting for All"*.
+   - Meeting is immediately terminated across all peers via `meeting:ended` broadcast.
+   - Meeting state becomes `COMPLETED` and recorded with `endTime`.
+4. **`CANCELLED`**: If the Host deletes a scheduled meeting before it begins.
+
+#### 10.2 Strict History vs. Upcoming Visibility Filtering
+To prevent non-attending members from seeing meetings they never joined in their History:
+- **Database Query (`GET /api/meetings`)**:
+  ```sql
+  WHERE (
+    hostId = :userId
+    OR participants.some(userId = :userId AND status = 'ADMITTED')
+    OR (
+      organization.users.some(id = :userId)
+      AND state IN ('SCHEDULED', 'ONGOING')
+    )
+  )
+  ```
+  - **Upcoming Tab**: Displays meetings with `state = 'SCHEDULED'` or `state = 'ONGOING'`.
+  - **History Tab**: Displays meetings with `state = 'COMPLETED'` or `state = 'CANCELLED'`.
+  - **Rule**: If an organization member was NOT the host and NEVER attended (never admitted into the meeting), the meeting disappears from Upcoming once ended and does **NOT** appear in their History.
+  - **Host & Admitted Participants**: Always retain the ended meeting in their History with full access to transcripts, AI summaries, and reports.
+
+#### 10.3 Database Resilience & Connection Pooler Architecture
+- **Supabase PgBouncer Singleton**: Replaced fragmented `new PrismaClient()` instantiations across controllers with a centralized singleton (`backend/src/prisma.js`).
+- **Automatic Reconnection (`withDbRetry`)**: Transparently catches transient connection terminations (`P1017`, `P1001`, `ECONNRESET`), safely disconnects stale pool sockets, backs off exponentially, and retries the query without bubbling 500 errors to the client.
+- **Dual Real-time Dashboard Synchronization**:
+  - **Socket.IO**: Immediate push notification on `dashboard:refresh` and `meeting:ended`.
+  - **Server-Sent Events (SSE)**: Secondary push pipeline on `/api/events`.
+  - **Background Heartbeat**: 12-second periodic fallback refresh with client-side retry for maximum fault tolerance.
+
+#### 10.4 Waiting Room (Lobby) Lifecycle, Multi-Rejoin State Machine & WebRTC Peer Deduplication
+
+##### 10.4.1 The Challenge
+In real-world meeting usage, users frequently enter the waiting room, leave (or disconnect), and re-enter multiple times before or after the host starts the session. Naive implementations suffer from two critical failure modes:
+1. **Lobby Bypass / Accidental Direct Entry**: When a participant leaves the waiting room, their status becomes `LEFT`. When they attempt to rejoin after the host starts the meeting, retaining `status = participant.status` (`'LEFT'`) would bypass the waiting room check because `'LEFT'` is not `'WAITING'`.
+2. **Duplicate Peer Explosion (Grid of 16+ identical tiles)**: If `waiting:admitted` or `participant:joined` is broadcast across overlapping room identifiers (`cleanLink`, `meetingLink`, `id`, `user_${id}`), or if multiple admissions fire, each event invokes `peersRef.current.push(createPeer(...))`. This creates duplicate WebRTC connections and cascades duplicate video tiles for the same participant.
+
+##### 10.4.2 Architectural Solution
+
+###### A. Deterministic Participant State Machine
+When a participant requests to join (`POST /api/meetings/join/:link`):
+```javascript
+// Host and Co-Hosts always bypass the lobby
+finalStatus = (isHost || isCoHost)
+  ? 'ADMITTED'
+  // Already admitted participants preserve their admission across transient reconnections:
+  : (participant?.status === 'ADMITTED' ? 'ADMITTED' : 'WAITING');
+```
+* **Lobby Enforcement**: Any non-host user whose status was `LEFT`, `WAITING`, or `REJECTED` is deterministically returned to `WAITING` status.
+* **Frontend Screen Guard**: The frontend strictly gates the meeting room:
+  ```javascript
+  if (participantStatus === 'WAITING' || (participantStatus !== 'ADMITTED' && !isHostOrCoHost)) {
+    return <WaitingRoom />;
+  }
+  ```
+
+###### B. Targeted Single-Channel Signal Emission
+* **Admit/Reject Targeting**: `waiting:admitted` and `waiting:rejected` are emitted **strictly to the user's private notification channel** (`user_${targetUserId}`), never broadcast to shared meeting rooms.
+* **Single Joined Broadcast**: When an admitted participant connects, `participant:joined` is emitted once to `socket.to(meeting.id)` (since all participants join `meeting.id`), avoiding duplicate event receipt.
+
+###### C. WebRTC Peer Deduplication (One User = One Tile)
+* **Peer Registry Deduplication**: In `participant:joined` and `audio:signal`, the registry checks for existing peers by `userId` or `socketId`:
+  ```javascript
+  const existingIdx = peersRef.current.findIndex(p => p.userId === userId || p.peerID === socketId);
+  if (existingIdx !== -1) {
+    peersRef.current[existingIdx].peer?.destroy();
+    peersRef.current.splice(existingIdx, 1);
+  }
+  ```
+* **Render-Time Idempotency**: The video grid filters peers so each `userId` can only render once:
+  ```javascript
+  {peers
+    .filter((peer, index, self) => index === self.findIndex(p => (p.userId && p.userId === peer.userId) || p.peerID === peer.peerID))
+    .map(peer => <VideoPeer key={peer.userId || peer.peerID} ... />)}
+  ```
+* **Lifecycle Teardown**: SPA page unmount resets `socketInitialized.current = false` and destroys active peer instances, guaranteeing that repeated lobby entries and exits start from a pristine connection state.
+* **In-Flight Signal Invalidation & Exception Safety**: In `simple-peer`, calling `.signal()` on a peer instance whose connection is closing or destroyed throws `cannot signal after peer is destroyed`. All signaling handlers check `!peer.destroyed`, purge dead peer records from the registry, and wrap `.signal()` dispatches in exception-safe blocks to gracefully handle asynchronous network packet arrival races.
+
+#### 10.5 Meeting Lifecycle Resilience, STT Loop Suppression & Multi-Format Resolution
+
+##### 10.5.1 Universal Meeting-Ended Interceptor
+* **Lobby & Room Termination**: Previously, the `meetingEnded` modal was nested only inside the main room JSX. If the host ended the meeting while a user was waiting in the lobby (`participantStatus === 'WAITING'`), the user remained trapped on the lobby screen indefinitely.
+* **Architecture Fix**: `meetingEnded` is now intercepted as a top-level early return preceding the waiting room guard. When a meeting ends, all local media stream tracks are immediately stopped (`streamRef.current.getTracks().forEach(t => t.stop())`), and a clear dialog directs the user to either the meeting summary/report or their dashboard.
+
+##### 10.5.2 Speech Recognition (STT) Flood Suppression & State Guarding
+* **Silence Loop Prevention**: In Chromium-based browsers, continuous Web Speech API instances fire `no-speech` errors during silence. Unconditional immediate restarts generated dozens of rapid restarts per minute, flooding the console and dev server logs.
+* **Admission Guarding**: STT execution is strictly gated by `participantStatus === 'ADMITTED' || isHostOrCoHost` and `!meetingEnded`. Users in the lobby or terminated meetings never have active speech recognition running.
+* **Debounced Restarts & Error Filtering**: Informational `no-speech` events are ignored without error logging, and engine restarts are debounced by 400ms to eliminate CPU spin.
+
+##### 10.5.3 Unified Entity Resolution & Database Fault Tolerance
+* **Multi-Format Identifier Resolution**: Endpoints (`/participants`, `/cohost`, `/transcript`, `/participant/:userId`) previously performed rigid `meetingLink` lookups that failed with 404 when clients passed internal UUIDs or lowercase alias codes. The centralized `resolveMeetingEntity` resolves meetings flexibly by link, case-insensitive link, UUID, or organization access code.
+* **PgBouncer Resilience across Endpoints**: Organization invitation acceptance and participant management queries are wrapped with `withDbRetry` to transparently recover from transient Supabase pool drops.
+
+##### 10.5.4 Dual-Convention Socket Notification Rooms
+* Both `user:${userId}` (colon notation) and `user_${userId}` (underscore notation) are joined upon `user:register` and `meeting:join`, ensuring instant delivery of notifications, promotions, and admissions regardless of emitter convention.
+
+#### 10.6 Email Invitation System (Standalone & Scheduled Meetings)
+
+##### 10.6.1 Motivation & Overview
+While organization-scoped meetings automatically notify or list for enrolled organization members, ad-hoc and standalone scheduled meetings require an effortless mechanism to invite external collaborators. The Email Invitation System empowers hosts and co-hosts to dispatch branded, styled invitation emails to any recipient email address directly from their dashboard.
+
+##### 10.6.2 Architecture & Flow
+```
+Host/Co-host Dashboard (Upcoming Tab / Post-Schedule Modal)
+         │
+         │ [Click "Send Invite"] -> Enter comma-separated emails
+         ▼
+POST /api/meetings/:link/invite { emails: "alice@org.com, bob@org.com" }
+         │
+         ├── 1. Identifier & State Resolution (resolveMeetingEntity)
+         │      - Rejects COMPLETED / CANCELLED meetings (400)
+         │
+         ├── 2. Authorization Check
+         │      - Caller must be host (hostId / org owner) or COHOST participant (403)
+         │
+         ├── 3. Input Sanitization & Multi-Email Regex Validation
+         │      - Splits strings / arrays, checks RFC 5322 regex (400 if invalid)
+         │
+         ├── 4. Resend API Dispatch (sendMeetingInvitation)
+         │      - High-deliverability transactional email via `bhashabridge@aditya-kumar.in`
+         │      - Brutalist template (Georgia italics, Cobalt button, meeting dossier)
+         │
+         ▼
+Response: { success: true, count: 2, message: "Invitation email sent to 2 recipient(s)" }
+```
+
+##### 10.6.3 Security & Authorization Constraints
+- **Role Scoping**: Only verified meeting hosts or designated co-hosts can trigger invite emails for a given meeting ID.
+- **State Enforcement**: Invitations are strictly disallowed for ended (`COMPLETED`) or cancelled (`CANCELLED`) meetings to prevent outdated join links.
+- **Rate-Safety & Batching**: Recipient arrays are resolved asynchronously via `Promise.all` with individual error catching, reporting the exact number of successfully delivered invitations back to the client.
+
+##### 10.6.4 Brutalist Visual Language & Email Design
+Emails sent through `sendMeetingInvitation` adhere to BhashaBridge's signature Neo-Brutalist design language:
+- Georgia serif italics for headings and branding.
+- Monospace tags and high-contrast `#0A0A0A` borders with bold shadows.
+- Distinct dossier card highlighting Meeting Topic, Scheduled Date/Time, and alphanumeric Meeting ID.
+- Prominent Cobalt CTA button (`#0022FF`) with a direct one-click deep link to `/meeting/:meetingLink`.
+- Zero-install browser callout reassuring recipients that no desktop client or plugin installation is required.
+
+#### 10.7 Team Organizations UI & Membership Management Architecture
+
+##### 10.7.1 Overview & Design Unification
+The Organizations module provides persistent collaborative spaces that tie meetings, rosters, and administrative delegations together. In previous builds, the tab suffered from disparate styles (dark-mode leftovers, washed-out blue rounded pills, raw unstyled inputs). The updated architecture unifies the module with BhashaBridge’s Neo-Brutalist visual design:
+- **Paper Cream Canvas (`#FDFBF7`)**: High-contrast `#0A0A0A` borders with bold offset drop shadows (`5px 5px 0 #0A0A0A`).
+- **Editorial Typography**: Georgia serif italic typography for organization identities paired with high-legibility monospace badges for roles and metadata.
+- **Dedicated Access Pass Tickets**: Formatted access codes with instant copy visual state, lifecycle regeneration, and deletion safety guards.
+
+##### 10.7.2 Membership Lifecycle & Role Delegation
+- **Access Passes**: Each organization features an alphanumeric pass code (e.g. `BB-E01D16`). Users requesting to join enter the code, which creates a `PENDING` join request.
+- **Action Required Review Alerts**: Hosts and co-hosts receive prominent, high-priority alert cards highlighting pending join requests with one-click **Approve** (Emerald) and **Reject** (Crimson) actions.
+- **Roster & Co-Host Privileges**: Organization owners can directly promote members to `COHOST` (or revoke back to `PARTICIPANT`) via the interactive star toggle (★), enabling decentralized meeting management.
+- **Brutalist Roster Modals**: Expanded roster inspection with full user avatars, verified email records, and removal controls.

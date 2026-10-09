@@ -89,8 +89,91 @@ const sendPasswordResetOtp = async (email, otp, userName) => {
   }
 };
 
+const sendMeetingInvitation = async ({ recipientEmail, meetingTitle, hostName, meetingLink, scheduledTime, joinUrl }) => {
+  try {
+    const formattedDate = scheduledTime
+      ? new Date(scheduledTime).toLocaleString('en-US', {
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZoneName: 'short'
+        })
+      : 'Happening Now / Flexible';
+
+    const data = await resend.emails.send({
+      from: 'BhashaBridge <bhashabridge@aditya-kumar.in>',
+      to: recipientEmail,
+      subject: `Invitation: ${meetingTitle || 'Meeting'} on BhashaBridge`,
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 580px; margin: 0 auto; padding: 32px 24px; background: #FDFBF7; border: 3px solid #0A0A0A; box-shadow: 8px 8px 0 #0A0A0A;">
+          <!-- Brand Header -->
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 24px;">
+            <div style="width: 14px; height: 14px; background: #FF3311; display: inline-block; vertical-align: middle;"></div>
+            <h1 style="color: #0A0A0A; font-family: Georgia, serif; font-style: italic; font-size: 26px; margin: 0; display: inline-block; vertical-align: middle;">BhashaBridge</h1>
+          </div>
+
+          <div style="font-family: monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #0022FF; margin-bottom: 8px;">
+            [ MEETING INVITATION ]
+          </div>
+          
+          <h2 style="color: #0A0A0A; font-size: 22px; font-weight: 700; margin: 0 0 16px; font-family: Georgia, serif; font-style: italic; line-height: 1.3;">
+            You're invited to a meeting by ${hostName || 'The Host'}
+          </h2>
+
+          <p style="color: #4A4A4A; font-size: 15px; line-height: 1.6; margin: 0 0 24px;">
+            Hello,<br>
+            <strong>${hostName || 'The Host'}</strong> has scheduled a session on BhashaBridge and invited you to participate.
+          </p>
+
+          <!-- Meeting Dossier Box -->
+          <div style="background: #F7F5F0; border: 2px solid #0A0A0A; padding: 20px 24px; margin: 20px 0; box-shadow: 4px 4px 0 #0022FF;">
+            <div style="margin-bottom: 14px;">
+              <span style="font-family: monospace; font-size: 11px; text-transform: uppercase; color: #777; display: block; margin-bottom: 4px;">Meeting Title</span>
+              <span style="font-size: 18px; font-weight: 700; color: #0A0A0A;">${meetingTitle || 'Untitled Meeting'}</span>
+            </div>
+
+            <div style="margin-bottom: 14px;">
+              <span style="font-family: monospace; font-size: 11px; text-transform: uppercase; color: #777; display: block; margin-bottom: 4px;">Scheduled Time</span>
+              <span style="font-size: 15px; font-weight: 600; color: #0022FF; font-family: monospace;">${formattedDate}</span>
+            </div>
+
+            <div>
+              <span style="font-family: monospace; font-size: 11px; text-transform: uppercase; color: #777; display: block; margin-bottom: 4px;">Meeting ID</span>
+              <span style="font-size: 14px; font-family: monospace; background: #0A0A0A; color: #F7F5F0; padding: 3px 8px; display: inline-block;">${meetingLink}</span>
+            </div>
+          </div>
+
+          <!-- Join CTA Button -->
+          <div style="text-align: center; margin: 32px 0 24px;">
+            <a href="${joinUrl}" style="background-color: #0022FF; color: #F7F5F0; padding: 14px 36px; text-decoration: none; border: 2px solid #0A0A0A; font-weight: 700; font-family: monospace; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; display: inline-block; box-shadow: 4px 4px 0 #0A0A0A;">
+              Join Meeting &rarr;
+            </a>
+          </div>
+
+          <p style="color: #666; font-size: 13px; line-height: 1.5; margin: 0; text-align: center;">
+            No software installation required. BhashaBridge runs directly in your browser with real-time multilingual speech translation.
+          </p>
+
+          <hr style="border: none; border-top: 1px solid #DDD; margin: 28px 0 16px;">
+          <p style="color: #999; font-size: 11px; margin: 0; font-family: monospace; text-align: center;">
+            &mdash; BhashaBridge &bull; Breaking Language Barriers in Real-Time
+          </p>
+        </div>
+      `
+    });
+    return { success: true, data };
+  } catch (error) {
+    console.error('Error sending meeting invitation email:', error);
+    return { success: false, error: error.message };
+  }
+};
+
 module.exports = {
   sendOrganizationInvitation,
-  sendPasswordResetOtp
+  sendPasswordResetOtp,
+  sendMeetingInvitation
 };
 

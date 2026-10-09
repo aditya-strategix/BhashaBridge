@@ -141,7 +141,7 @@ fetchReport();
         </div>
       )}
 
-      <div style={{ minHeight: '100vh', backgroundColor: 'var(--bg-ivory, #FAF9F6)', color: '#000', padding: '2rem', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ minHeight: '100vh', width: '100%', maxWidth: '100vw', boxSizing: 'border-box', backgroundColor: 'var(--bg-ivory, #FAF9F6)', color: '#000', padding: 'clamp(1rem, 3vw, 2rem)', position: 'relative', overflowX: 'hidden' }}>
         
         <header style={{ position: 'relative', zIndex: 10, display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #000', paddingBottom: '1rem', marginBottom: '2rem' }}>
           <div>
@@ -153,7 +153,7 @@ fetchReport();
           </Link>
         </header>
 
-        <div style={{ position: 'relative', height: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ position: 'relative', minHeight: '70vh', padding: '2rem 0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           
           <div className='hide-on-mobile' style={{ position: 'absolute', top: '10%', left: '-5%', fontSize: '20vw', fontFamily: 'var(--font-grotesk, sans-serif)', fontWeight: 'bold', color: 'rgba(0, 71, 171, 0.05)', lineHeight: 0.8, letterSpacing: '-0.05em', zIndex: 1 }}>
             {data?.totalParticipants || 0}
@@ -162,7 +162,7 @@ fetchReport();
             {formatDuration(data?.totalDurationSeconds || 0)}
           </div>
 
-          <div style={{ position: 'relative', zIndex: 10, display: 'grid', gridTemplateColumns: '1fr', gap: '4rem', width: '100%', maxWidth: '1200px' }}>
+          <div style={{ position: 'relative', zIndex: 10, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '2.5rem', width: '100%', maxWidth: '1200px' }}>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4rem' }}>
               <div>

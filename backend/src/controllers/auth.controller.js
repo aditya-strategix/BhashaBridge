@@ -1,7 +1,7 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../prisma');
+const { withDbRetry } = require('../prisma');
 const { sendPasswordResetOtp } = require('../services/email.service');
 const otpService = require('../services/otp.service');
 

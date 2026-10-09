@@ -61,7 +61,7 @@ export default function InvitePage() {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-ivory, #FAF9F6)', padding: '2rem', color: '#000', fontFamily: 'var(--font-grotesk, sans-serif)' }}>
+    <div style={{ display: 'flex', minHeight: '100vh', height: 'auto', width: '100%', maxWidth: '100vw', boxSizing: 'border-box', overflowX: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-ivory, #FAF9F6)', padding: 'clamp(1.25rem, 5vw, 2rem)', color: '#000', fontFamily: 'var(--font-grotesk, sans-serif)' }}>
       <div style={{ maxWidth: '600px', width: '100%', textAlign: 'center' }}>
         {error ? (
           <>
@@ -75,7 +75,7 @@ export default function InvitePage() {
         ) : (
           <>
             <div style={{ fontFamily: 'var(--font-mono, monospace)', color: 'var(--cobalt, #0047AB)', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '1rem' }}>BhashaBridge Summons</div>
-            <h1 style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '3rem', fontWeight: 'normal', lineHeight: 1.2, margin: '0 0 2rem' }}>
+            <h1 style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: 'clamp(1.8rem, 6vw, 3rem)', fontWeight: 'normal', lineHeight: 1.2, margin: '0 0 2rem' }}>
               An invocation to commune.
             </h1>
             

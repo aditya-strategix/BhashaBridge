@@ -7,8 +7,8 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_for_dev';
 
 const authMiddleware = (req, res, next) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: 'No token provided' });
-  const token = authHeader.split(' ')[1];
+  const token = authHeader ? authHeader.split(' ')[1] : (req.query?.token || req.body?.token);
+  if (!token) return res.status(401).json({ error: 'No token provided' });
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
@@ -24,6 +24,7 @@ router.post('/', meetingController.createMeeting);
 router.get('/', meetingController.getMeetings);
 router.post('/join/:link', meetingController.joinMeeting);
 router.post('/:link/end', meetingController.endMeeting);
+router.post('/:link/leave-waiting', meetingController.leaveWaitingRoom);
 router.delete('/:id', meetingController.deleteMeeting);
 router.post('/:link/admit', meetingController.admitParticipant);
 router.post('/:link/reject', meetingController.rejectParticipant);
@@ -34,5 +35,6 @@ router.get('/:link/summary', meetingController.getSummary);
 
 router.delete('/:link/participant/:userId', meetingController.removeParticipant);
 router.get('/:link/participants', meetingController.getParticipants);
+router.post('/:link/invite', meetingController.sendEmailInvite);
 
 module.exports = router;

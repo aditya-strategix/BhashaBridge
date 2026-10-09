@@ -106,6 +106,8 @@ export default function MeetingRoom() {
   const [isTtsEnabled, setIsTtsEnabled] = useState(true);
   const [participantStatus, setParticipantStatus] = useState(null);
   const [participantRole, setParticipantRole] = useState(null);
+  const isHost = participantRole === 'HOST';
+  const isHostOrCoHost = isHost || participantRole === 'COHOST';
   const [waitingUsers, setWaitingUsers] = useState([]);
   const [sidebarTab, setSidebarTab] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -200,10 +202,52 @@ export default function MeetingRoom() {
   const [roomAudioLocked, setRoomAudioLocked] = useState(false);
   const [roomVideoLocked, setRoomVideoLocked] = useState(false);
 
+  const statusRef = useRef(participantStatus);
+  const socketRef = useRef(socket);
+  const userRef = useRef(user);
+
+  useEffect(() => { statusRef.current = participantStatus; }, [participantStatus]);
+  useEffect(() => { socketRef.current = socket; }, [socket]);
+  useEffect(() => { userRef.current = user; }, [user]);
   useEffect(() => { roleRef.current = participantRole; }, [participantRole]);
   useEffect(() => { audioRef.current = isAudioOn; }, [isAudioOn]);
   useEffect(() => { videoRef.current = isVideoOn; }, [isVideoOn]);
   useEffect(() => { streamRef.current = stream; }, [stream]);
+
+  useEffect(() => {
+    const handleUnload = () => {
+      if (statusRef.current === 'WAITING') {
+        const token = localStorage.getItem('token');
+        if (token && meetingId) {
+          try {
+            fetch(`${API_URL}/meetings/${meetingId}/leave-waiting`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+              keepalive: true
+            }).catch(() => {});
+          } catch (_) {}
+          try {
+            if (navigator.sendBeacon) {
+              navigator.sendBeacon(`${API_URL}/meetings/${meetingId}/leave-waiting?token=${encodeURIComponent(token)}`);
+            }
+          } catch (_) {}
+        }
+        if (socketRef.current) {
+          try {
+            socketRef.current.emit('waiting:leave', { meetingId, userId: userRef.current?.id });
+            socketRef.current.disconnect();
+          } catch (_) {}
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleUnload);
+    window.addEventListener('pagehide', handleUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleUnload);
+      window.removeEventListener('pagehide', handleUnload);
+    };
+  }, [meetingId]);
 
   const iceServers = {
     iceServers: [
@@ -215,7 +259,12 @@ export default function MeetingRoom() {
   const createPeer = (userToSignal, callerID, stream, currentSocket, userName, userRole) => {
     const peer = new Peer({ initiator: true, trickle: false, stream, config: iceServers });
     peer.on('signal', signal => {
-      currentSocket.emit('audio:signal', { targetSocketId: userToSignal, callerId: callerID, signal, name: userName, role: userRole, userId: user.id, avatar: user.avatar });
+      if (currentSocket) {
+        currentSocket.emit('audio:signal', { targetSocketId: userToSignal, callerId: callerID, signal, name: userName, role: userRole, userId: user.id, avatar: user.avatar });
+      }
+    });
+    peer.on('error', err => {
+      console.warn('[WebRTC] Peer warning (createPeer):', err.message);
     });
     return peer;
   };
@@ -223,9 +272,18 @@ export default function MeetingRoom() {
   const addPeer = (incomingSignal, callerID, stream, currentSocket, userName, userRole) => {
     const peer = new Peer({ initiator: false, trickle: false, stream, config: iceServers });
     peer.on('signal', signal => {
-      currentSocket.emit('audio:signal', { signal, targetSocketId: callerID, callerId: currentSocket.id, name: userName, role: userRole, userId: user.id, avatar: user.avatar });
+      if (currentSocket) {
+        currentSocket.emit('audio:signal', { signal, targetSocketId: callerID, callerId: currentSocket.id, name: userName, role: userRole, userId: user.id, avatar: user.avatar });
+      }
     });
-    peer.signal(incomingSignal);
+    peer.on('error', err => {
+      console.warn('[WebRTC] Peer warning (addPeer):', err.message);
+    });
+    try {
+      peer.signal(incomingSignal);
+    } catch (err) {
+      console.warn('[WebRTC] Signal error in addPeer:', err.message);
+    }
     return peer;
   };
 
@@ -293,8 +351,13 @@ export default function MeetingRoom() {
 
         const data = await res.json();
         setParticipantStatus(data.participantStatus);
+        statusRef.current = data.participantStatus;
         setParticipantRole(data.participantRole);
-        if (data.waitingUsers) setWaitingUsers(data.waitingUsers);
+        roleRef.current = data.participantRole;
+        if (data.waitingUsers) {
+          setWaitingUsers(data.waitingUsers);
+          if (data.waitingUsers.length > 0) setShowLobby(true);
+        }
 
         let currentStream;
         try {
@@ -409,40 +472,94 @@ export default function MeetingRoom() {
         });
         newSocket.on('waiting:admitted', ({ userId }) => {
           if (userId === user.id) {
-            setParticipantStatus('ADMITTED');
-            newSocket.emit('meeting:join', { meetingId, userId: user.id, peerId: newSocket.id, language: user.language });
-        setTimeout(() => newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current }), 2000);
+            if (statusRef.current !== 'ADMITTED') {
+              setParticipantStatus('ADMITTED');
+              statusRef.current = 'ADMITTED';
+              newSocket.emit('meeting:join', { meetingId, userId: user.id, peerId: newSocket.id, language: user.language });
+              setTimeout(() => newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current }), 2000);
+            }
           } else {
-            setWaitingUsers(prev => prev.filter(u => u.userId !== userId));
+            setWaitingUsers(prev => {
+              const updated = prev.filter(u => u.userId !== userId);
+              if (updated.length === 0) setShowLobby(false);
+              return updated;
+            });
           }
         });
         newSocket.on('waiting:rejected', ({ userId }) => {
           if (userId === user.id) setParticipantStatus('REJECTED');
-          else setWaitingUsers(prev => prev.filter(u => u.userId !== userId));
-        });
-                  newSocket.on('meeting:ended', () => {
-            setMeetingEnded(true);
+          else setWaitingUsers(prev => {
+            const updated = prev.filter(u => u.userId !== userId);
+            if (updated.length === 0) setShowLobby(false);
+            return updated;
           });
-          newSocket.on('participant:joined', ({ userId, socketId, name, role, avatar }) => {
+        });
+        newSocket.on('waiting:left', ({ userId }) => {
+          setWaitingUsers(prev => {
+            const updated = prev.filter(u => u.userId !== userId);
+            if (updated.length === 0) setShowLobby(false);
+            return updated;
+          });
+        });
+        newSocket.on('meeting:ended', () => {
+          setMeetingEnded(true);
+          if (streamRef.current) {
+            try { streamRef.current.getTracks().forEach(t => t.stop()); } catch (_) {}
+          }
+        });
+        newSocket.on('participant:joined', ({ userId, socketId, name, role, avatar }) => {
+          if (!userId || userId === user.id) return;
           newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current });
+
+          // Destroy any existing peer instance for this user or socket
+          const existingIdx = peersRef.current.findIndex(p => p.userId === userId || p.peerID === socketId);
+          if (existingIdx !== -1) {
+            try { peersRef.current[existingIdx].peer?.destroy(); } catch (_) {}
+            peersRef.current.splice(existingIdx, 1);
+          }
+
           const peer = createPeer(socketId, newSocket.id, currentStream, newSocket, user.name, data.participantRole);
           peersRef.current.push({ peerID: socketId, userId, peer, name, role, avatar });
           setPeers([...peersRef.current]);
         });
-        newSocket.on('participant:left', ({ socketId }) => {
-          const obj = peersRef.current.find(p => p.peerID === socketId);
-          if (obj) obj.peer.destroy();
-          peersRef.current = peersRef.current.filter(p => p.peerID !== socketId);
+        newSocket.on('participant:left', ({ socketId, userId }) => {
+          const toRemove = peersRef.current.filter(p => (socketId && p.peerID === socketId) || (userId && p.userId === userId));
+          toRemove.forEach(p => {
+            if (p.peer) {
+              try { p.peer.destroy(); } catch (_) {}
+            }
+          });
+          peersRef.current = peersRef.current.filter(p => (!socketId || p.peerID !== socketId) && (!userId || p.userId !== userId));
           setPeers([...peersRef.current]);
         });
         newSocket.on('audio:signal', payload => {
+          if (!payload.userId || payload.userId === user.id) return;
           const item = peersRef.current.find(p => p.peerID === payload.callerId);
-          if (item) {
-            item.peer.signal(payload.signal);
+          if (item && item.peer && !item.peer.destroyed) {
+            try {
+              item.peer.signal(payload.signal);
+            } catch (err) {
+              console.warn('[WebRTC] Stale signal ignored:', err.message);
+            }
           } else {
-            const peer = addPeer(payload.signal, payload.callerId, currentStream, newSocket, user.name, data.participantRole);
-            peersRef.current.push({ peerID: payload.callerId, userId: payload.userId, peer, name: payload.name, role: payload.role, avatar: payload.avatar });
-            setPeers([...peersRef.current]);
+            // Destroy any previous stale or destroyed peer for this userId or callerId
+            const staleIndices = peersRef.current
+              .map((p, idx) => ((p.userId === payload.userId || p.peerID === payload.callerId || p.peer?.destroyed) ? idx : -1))
+              .filter(idx => idx !== -1)
+              .reverse();
+
+            staleIndices.forEach(idx => {
+              try { peersRef.current[idx].peer?.destroy(); } catch (_) {}
+              peersRef.current.splice(idx, 1);
+            });
+
+            try {
+              const peer = addPeer(payload.signal, payload.callerId, currentStream, newSocket, user.name, data.participantRole);
+              peersRef.current.push({ peerID: payload.callerId, userId: payload.userId, peer, name: payload.name, role: payload.role, avatar: payload.avatar });
+              setPeers([...peersRef.current]);
+            } catch (err) {
+              console.warn('[WebRTC] addPeer error:', err.message);
+            }
           }
         });
         newSocket.on('participant:status_update', ({ socketId, isAudioOn, isVideoOn }) => {
@@ -565,63 +682,116 @@ export default function MeetingRoom() {
 
     initializeMeeting();
     return () => { 
-        if (newSocket) newSocket.disconnect(); 
-        peersRef.current.forEach(p => p.peer.destroy()); 
+        socketInitialized.current = false;
+        if (statusRef.current === 'WAITING') {
+          const t = localStorage.getItem('token');
+          if (t && meetingId) {
+            try {
+              fetch(`${API_URL}/meetings/${meetingId}/leave-waiting`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' },
+                keepalive: true
+              }).catch(() => {});
+            } catch (_) {}
+          }
+          if (socketRef.current) {
+            try {
+              socketRef.current.emit('waiting:leave', { meetingId, userId: userRef.current?.id });
+            } catch (_) {}
+          }
+        }
+        if (socketRef.current) {
+          try { socketRef.current.disconnect(); } catch (_) {}
+        }
+        peersRef.current.forEach(p => { if (p.peer) { try { p.peer.destroy(); } catch (_) {} } }); 
         peersRef.current = []; 
         if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop()); 
       };
   }, [user, meetingId]);
 
-  // Speech recognition - starts when mic is unmuted
+  // Speech recognition - starts when mic is unmuted and participant is admitted
   useEffect(() => {
     if (!socket || !user) return;
     if (!isAudioOn) return;
+    if (meetingEnded) return;
+    if (participantStatus !== 'ADMITTED' && !isHostOrCoHost) return;
+
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { console.error('[STT] SpeechRecognition not supported'); return; }
+    if (!SR) return;
     const rec = new SR();
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = spokenLanguage;
     let stopped = false;
-    rec.onstart = () => { console.log('[STT] STARTED - now listening to mic'); };
+    let restartTimer = null;
+
     rec.onresult = (ev) => {
       for (let i = ev.resultIndex; i < ev.results.length; ++i) {
         if (ev.results[i].isFinal) {
           const txt = ev.results[i][0].transcript.trim();
           if (txt) {
-            console.log('[STT] CAPTURED:', txt);
             socket.emit('caption:text', { meetingId, speakerId: user.id, text: txt, language: spokenLanguage });
           }
         }
       }
     };
-    rec.onerror = (e) => { console.warn('[STT] ERROR:', e.error); };
-    rec.onend = () => {
-      console.log('[STT] ENDED, stopped=', stopped);
-      if (!stopped) { try { rec.start(); } catch(e) { console.error('[STT] restart failed', e); } }
+    rec.onerror = (e) => {
+      if (e.error === 'no-speech') {
+        // Normal silence event from browser; do not spam logs
+        return;
+      }
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        stopped = true;
+        return;
+      }
     };
-    console.log('[STT] Calling rec.start() for lang:', spokenLanguage);
-    try { rec.start(); } catch(e) { console.error('[STT] initial start failed:', e); }
-    return () => { stopped = true; try { rec.stop(); } catch(e) {} };
-  }, [socket, user, isAudioOn, spokenLanguage, meetingId]);
+    rec.onend = () => {
+      if (!stopped) {
+        restartTimer = setTimeout(() => {
+          if (!stopped) {
+            try { rec.start(); } catch (_) {}
+          }
+        }, 400);
+      }
+    };
+    try { rec.start(); } catch (_) {}
+    return () => {
+      stopped = true;
+      if (restartTimer) clearTimeout(restartTimer);
+      try { rec.stop(); } catch (_) {}
+    };
+  }, [socket, user, isAudioOn, spokenLanguage, meetingId, participantStatus, isHostOrCoHost, meetingEnded]);
 
   const toggleVideo = () => {
     if (videoLockedRef.current) {
       setAlertMessage('Camera is disabled by Host');
       return;
     }
-    stream?.getVideoTracks().forEach(t => { t.enabled = !isVideoOn; });
-    setIsVideoOn(v => !v);
-    if (socket) socket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: !videoRef.current });
+    const nextVideo = !isVideoOn;
+    videoRef.current = nextVideo;
+    setIsVideoOn(nextVideo);
+    stream?.getVideoTracks().forEach(t => { t.enabled = nextVideo; });
+    if (socket) socket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: nextVideo });
   };
   const toggleAudio = () => {
     if (audioLockedRef.current) {
       setAlertMessage('Microphone is disabled by Host');
       return;
     }
-    stream?.getAudioTracks().forEach(t => { t.enabled = !isAudioOn; });
-    setIsAudioOn(a => !a);
-    if (socket) socket.emit('meeting:status_update', { isAudioOn: !audioRef.current, isVideoOn: videoRef.current });
+    const nextAudio = !isAudioOn;
+    audioRef.current = nextAudio;
+    setIsAudioOn(nextAudio);
+    stream?.getAudioTracks().forEach(t => { t.enabled = nextAudio; });
+    if (socket) socket.emit('meeting:status_update', { isAudioOn: nextAudio, isVideoOn: videoRef.current });
+  };
+
+  const updateUserSettings = (key, value) => {
+    const currentUser = useAuthStore.getState().user;
+    if (!currentUser) return;
+    const updated = { ...currentUser, [key]: value };
+    const token = localStorage.getItem('token');
+    useAuthStore.getState().updateUser(token, updated);
+    if (socket) socket.emit('user:update_settings', updated);
   };
 
 
@@ -636,18 +806,57 @@ export default function MeetingRoom() {
 
   const handleAdmit = async (targetUserId) => {
     try {
-      await authFetch(`/meetings/${meetingId}/admit`, { method: 'POST', body: JSON.stringify({ userId: targetUserId }) });
-      socket.emit('meeting:admit', { meetingId, targetUserId });
-      setWaitingUsers(prev => prev.filter(u => u.userId !== targetUserId));
+      setWaitingUsers(prev => {
+        const next = prev.filter(u => u.userId !== targetUserId);
+        if (next.length === 0) setShowLobby(false);
+        return next;
+      });
+      if (socketRef.current) {
+        socketRef.current.emit('meeting:admit', { meetingId, targetUserId });
+      } else {
+        await authFetch(`/meetings/${meetingId}/admit`, { method: 'POST', body: JSON.stringify({ userId: targetUserId }) });
+      }
     } catch (err) { console.error('Failed to admit', err); }
   };
 
   const handleReject = async (targetUserId) => {
     try {
-      await authFetch(`/meetings/${meetingId}/reject`, { method: 'POST', body: JSON.stringify({ userId: targetUserId }) });
-      socket.emit('meeting:reject', { meetingId, targetUserId });
-      setWaitingUsers(prev => prev.filter(u => u.userId !== targetUserId));
+      setWaitingUsers(prev => {
+        const next = prev.filter(u => u.userId !== targetUserId);
+        if (next.length === 0) setShowLobby(false);
+        return next;
+      });
+      if (socketRef.current) {
+        socketRef.current.emit('meeting:reject', { meetingId, targetUserId });
+      } else {
+        await authFetch(`/meetings/${meetingId}/reject`, { method: 'POST', body: JSON.stringify({ userId: targetUserId }) });
+      }
     } catch (err) { console.error('Failed to reject', err); }
+  };
+
+  const handleLeaveWaitingRoom = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (token && meetingId) {
+        await fetch(`${API_URL}/meetings/${meetingId}/leave-waiting`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          keepalive: true
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to call leave-waiting API', e);
+    }
+    if (socketRef.current) {
+      try {
+        socketRef.current.emit('waiting:leave', { meetingId, userId: userRef.current?.id });
+        socketRef.current.disconnect();
+      } catch (_) {}
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+    }
+    router.push('/dashboard');
   };
 
   const leaveMeeting = () => {
@@ -659,7 +868,14 @@ export default function MeetingRoom() {
   };
 
   const confirmEndMeeting = async () => {
-    try { await authFetch(`/meetings/${meetingId}/end`, { method: 'POST' }); } catch {}
+    try {
+      await authFetch(`/meetings/${meetingId}/end`, { method: 'POST' });
+    } catch (e) {
+      console.error('Failed to end meeting via API', e);
+    }
+    if (socket) {
+      socket.emit('meeting:end', { meetingId });
+    }
     router.push(`/meeting/${meetingId}/report`);
   };
 
@@ -759,9 +975,6 @@ export default function MeetingRoom() {
 
     return () => clearInterval(interval);
   }, [isDemoActive, socket, meetingId, user, spokenLanguage]);
-
-  const isHost = participantRole === 'HOST';
-  const isHostOrCoHost = isHost || participantRole === 'COHOST';
 
   // ======= MEETING JOIN ERROR POPUP (Ended, Cancelled, Restricted, Not Found) =======
   if (joinError) {
@@ -960,8 +1173,146 @@ export default function MeetingRoom() {
     );
   }
 
+  // ======= MEETING ENDED SCREEN =======
+  if (meetingEnded) {
+    return (
+      <div style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(10,10,10,0.92)',
+        backdropFilter: 'blur(8px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '1.5rem',
+        zIndex: 99999,
+        fontFamily: 'var(--font-grotesk)'
+      }}>
+        <div style={{
+          background: '#F7F5F0',
+          border: '3px solid #0A0A0A',
+          boxShadow: '12px 12px 0 #0A0A0A',
+          maxWidth: 480,
+          width: '100%',
+          padding: '2.5rem',
+          textAlign: 'center',
+          position: 'relative'
+        }}>
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 6,
+            background: '#0022FF'
+          }} />
+          <div style={{
+            width: 72,
+            height: 72,
+            background: '#0A0A0A',
+            color: '#F7F5F0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1.5rem',
+            border: '2px solid #0A0A0A',
+            boxShadow: '6px 6px 0 #0022FF'
+          }}>
+            <Clock size={36} color="#F7F5F0" />
+          </div>
+          <h2 style={{
+            margin: '0 0 0.5rem',
+            color: '#0A0A0A',
+            fontSize: '2.2rem',
+            fontFamily: 'var(--font-serif)',
+            fontStyle: 'italic',
+            fontWeight: 700,
+            letterSpacing: '-0.02em',
+            lineHeight: 1.15
+          }}>
+            Meeting Ended
+          </h2>
+          <div style={{ marginBottom: '1.25rem' }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.8rem',
+              color: '#0A0A0A',
+              border: '1px solid #0A0A0A',
+              padding: '0.25rem 0.65rem',
+              fontWeight: 700,
+              textTransform: 'uppercase'
+            }}>
+              <span style={{ width: 8, height: 8, background: '#0022FF', display: 'inline-block' }} />
+              ID: {meetingId}
+            </span>
+          </div>
+          <p style={{
+            margin: '0 0 2rem',
+            color: '#4A4A4A',
+            fontSize: '0.95rem',
+            lineHeight: 1.6,
+            fontFamily: 'var(--font-grotesk)'
+          }}>
+            The host has ended this meeting for everyone.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <button
+              onClick={() => router.push(`/meeting/${meetingId}/report`)}
+              style={{
+                width: '100%',
+                padding: '1rem',
+                background: '#0022FF',
+                color: '#F7F5F0',
+                border: '2px solid #0A0A0A',
+                cursor: 'pointer',
+                fontWeight: 700,
+                fontSize: '0.9rem',
+                fontFamily: 'var(--font-mono)',
+                textTransform: 'uppercase',
+                boxShadow: '4px 4px 0 #0A0A0A',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem'
+              }}
+            >
+              <FileText size={16} />
+              <span>View Summary & Report</span>
+            </button>
+            <button
+              onClick={() => router.push('/dashboard')}
+              style={{
+                width: '100%',
+                padding: '1rem',
+                background: '#F7F5F0',
+                color: '#0A0A0A',
+                border: '2px solid #0A0A0A',
+                cursor: 'pointer',
+                fontWeight: 700,
+                fontSize: '0.9rem',
+                fontFamily: 'var(--font-mono)',
+                textTransform: 'uppercase',
+                boxShadow: '4px 4px 0 #0A0A0A',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem'
+              }}
+            >
+              <ArrowLeft size={16} />
+              <span>Back to Dashboard</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ======= WAITING ROOM =======
-  if (participantStatus === 'WAITING') {
+  if (participantStatus === 'WAITING' || (participantStatus !== 'ADMITTED' && !isHostOrCoHost)) {
     return (
       <div className={styles.lobbyContainer}>
 
@@ -1011,7 +1362,7 @@ export default function MeetingRoom() {
             </div>
 
             <button
-              onClick={() => router.push('/dashboard')}
+              onClick={handleLeaveWaitingRoom}
               style={{ width: '100%', padding: '1rem', background: '#0A0A0A', color: '#F7F5F0', border: 'none', borderRadius: '0', fontWeight: 600, cursor: 'pointer', fontSize: '0.95rem', transition: 'transform 0.2s', boxShadow: '4px 4px 0 #FF3311', fontFamily: 'var(--font-grotesk)' }}
               onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; }}
               onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
@@ -1063,15 +1414,15 @@ export default function MeetingRoom() {
         )}
 
         {/* === HEADER === */}
-        <header style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 1rem', gap: '1rem', background: '#F7F5F0', borderBottom: '2px solid #0A0A0A', zIndex: 10, fontFamily: 'var(--font-grotesk)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-              <div style={{ width: 12, height: 12, borderRadius: '0', background: '#FF3311' }} />
-              <span style={{ fontWeight: 600, color: '#0A0A0A', fontSize: '1.5rem', fontFamily: 'var(--font-serif)', fontStyle: 'italic', letterSpacing: '-0.02em' }}>BhashaBridge</span>
+        <header style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 1rem', gap: '0.75rem', background: '#F7F5F0', borderBottom: '2px solid #0A0A0A', zIndex: 10, fontFamily: 'var(--font-grotesk)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <div style={{ width: 10, height: 10, borderRadius: '0', background: '#FF3311' }} />
+              <span style={{ fontWeight: 600, color: '#0A0A0A', fontSize: '1.35rem', fontFamily: 'var(--font-serif)', fontStyle: 'italic', letterSpacing: '-0.02em' }}>BhashaBridge</span>
             </div>
-            <div style={{ height: 24, width: 2, background: '#0A0A0A' }} />
-            <div className='meetingHeaderRight' style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-              <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.9rem', color: '#0022FF', fontWeight: 600 }}>{meetingId}</code>
+            <div style={{ height: 20, width: 2, background: '#0A0A0A' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: '#0022FF', fontWeight: 600 }}>{meetingId}</code>
               <button
                 onClick={handleCopyInviteLink}
                 title={copiedLink ? "Copied invite link!" : "Copy Invite Link"}
@@ -1082,7 +1433,7 @@ export default function MeetingRoom() {
                   background: copiedLink ? '#10b981' : '#F7F5F0',
                   color: copiedLink ? '#FFFFFF' : '#0A0A0A',
                   border: '2px solid #0A0A0A',
-                  padding: '0.25rem 0.55rem',
+                  padding: '0.2rem 0.5rem',
                   cursor: 'pointer',
                   fontFamily: 'var(--font-mono)',
                   fontSize: '0.72rem',
@@ -1091,35 +1442,35 @@ export default function MeetingRoom() {
                   transition: 'all 0.1s'
                 }}
               >
-                {copiedLink ? <Check size={13} /> : <Copy size={13} />}
-                <span>{copiedLink ? 'Copied' : 'Copy Invite Link'}</span>
+                {copiedLink ? <Check size={12} /> : <Copy size={12} />}
+                <span>{copiedLink ? 'Copied' : 'Copy Link'}</span>
               </button>
               {participantRole && (
-                <span style={{ background: participantRole === 'HOST' ? '#FF3311' : '#0022FF', color: '#F7F5F0', padding: '0.25rem 0.5rem', fontSize: '0.7rem', fontWeight: 700, fontFamily: 'var(--font-mono)', border: '2px solid #0A0A0A', boxShadow: '2px 2px 0 rgba(10,10,10,1)' }}>
+                <span style={{ background: participantRole === 'HOST' ? '#FF3311' : '#0022FF', color: '#F7F5F0', padding: '0.2rem 0.45rem', fontSize: '0.68rem', fontWeight: 700, fontFamily: 'var(--font-mono)', border: '2px solid #0A0A0A', boxShadow: '2px 2px 0 rgba(10,10,10,1)' }}>
                   {participantRole}
                 </span>
               )}
             </div>
           </div>
 
-          <div className='meetingHeaderRight' style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div className='meetingHeaderRight' style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
             {isHostOrCoHost && waitingUsers.length > 0 && (
               <button
                 onClick={() => setShowLobby(l => !l)}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#F7F5F0', border: '2px solid #0A0A0A', color: '#0A0A0A', cursor: 'pointer', fontFamily: 'var(--font-grotesk)', fontSize: '0.9rem', padding: '0.5rem 1rem', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: '#F7F5F0', border: '2px solid #0A0A0A', color: '#0A0A0A', cursor: 'pointer', fontFamily: 'var(--font-grotesk)', fontSize: '0.82rem', padding: '0.35rem 0.75rem', boxShadow: '2px 2px 0 rgba(10,10,10,1)' }}
               >
                 <div style={{ width: 8, height: 8, borderRadius: '0', background: '#FF3311', animation: 'pulse 1s infinite' }} />
                 <span style={{ fontWeight: 700 }}>Lobby ({waitingUsers.length})</span>
               </button>
             )}
-            <button onClick={fetchLiveSummary} style={{ background: '#F7F5F0', border: '2px solid #0A0A0A', color: '#0A0A0A', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.9rem', padding: '0.5rem 1rem', boxShadow: '4px 4px 0 rgba(10,10,10,1)', fontWeight: 600 }}>
+            <button onClick={fetchLiveSummary} style={{ background: '#F7F5F0', border: '2px solid #0A0A0A', color: '#0A0A0A', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.82rem', padding: '0.35rem 0.75rem', boxShadow: '2px 2px 0 rgba(10,10,10,1)', fontWeight: 600 }}>
               ✨ Summary
             </button>
-            <button onClick={() => setShowSettings(true)} style={{ background: '#0A0A0A', border: '2px solid #0A0A0A', color: '#F7F5F0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.9rem', padding: '0.5rem 1rem', boxShadow: '4px 4px 0 rgba(10,10,10,1)', fontWeight: 600 }}>
-              <Settings size={16} /> Settings
+            <button onClick={() => setShowSettings(true)} style={{ background: '#0A0A0A', border: '2px solid #0A0A0A', color: '#F7F5F0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.82rem', padding: '0.35rem 0.75rem', boxShadow: '2px 2px 0 rgba(10,10,10,1)', fontWeight: 600 }}>
+              <Settings size={14} /> Settings
             </button>
-            <button onClick={() => setIsDemoActive(!isDemoActive)} style={{ background: isDemoActive ? '#FF3311' : '#0022FF', border: '2px solid #0A0A0A', color: '#F7F5F0', padding: '0.5rem 1.5rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
-              {isDemoActive ? 'Stop Demo' : 'Start Demo'}
+            <button onClick={() => setIsDemoActive(!isDemoActive)} style={{ background: isDemoActive ? '#FF3311' : '#0022FF', border: '2px solid #0A0A0A', color: '#F7F5F0', padding: '0.35rem 0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', boxShadow: '2px 2px 0 rgba(10,10,10,1)' }}>
+              {isDemoActive ? 'Stop Demo' : 'Demo'}
             </button>
           </div>
         </header>
@@ -1160,8 +1511,10 @@ export default function MeetingRoom() {
                 </div>
               </div>
             </div>
-            {peers.map((peer, i) => (
-              <VideoPeer key={peer.peerID || i} peer={peer.peer} name={`${peer.name || `Participant ${i + 1}`}`} role={peer.role} isAudioOn={peer.isAudioOn} isVideoOn={peer.isVideoOn} avatarUrl={peer.avatar} />
+            {peers
+              .filter((peer, index, self) => index === self.findIndex(p => (p.userId && p.userId === peer.userId) || p.peerID === peer.peerID))
+              .map((peer, i) => (
+                <VideoPeer key={peer.userId || peer.peerID || i} peer={peer.peer} name={`${peer.name || `Participant ${i + 1}`}`} role={peer.role} isAudioOn={peer.isAudioOn} isVideoOn={peer.isVideoOn} avatarUrl={peer.avatar} />
             ))}
           </div>
 
@@ -1404,10 +1757,10 @@ export default function MeetingRoom() {
         )}
 
         {/* === SETTINGS MODAL === */}        {showLeaveModal && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowLeaveModal(false)}>
-            <div style={{ background: '#F7F5F0', border: '2px solid #0A0A0A', borderRadius: '0', padding: '3rem', width: 440, fontFamily: 'var(--font-grotesk)', boxShadow: '12px 12px 0 rgba(10,10,10,1)' }} onClick={(e) => e.stopPropagation()}>
-              <h2 style={{ margin: '0 0 1rem 0', color: '#0A0A0A', fontSize: '2rem', fontWeight: 600, fontFamily: 'var(--font-serif)', fontStyle: 'italic' }}>Leave Meeting</h2>
-              <p style={{ margin: '0 0 2rem 0', color: '#5A5A5A', fontSize: '1rem', lineHeight: 1.5 }}>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }} onClick={() => setShowLeaveModal(false)}>
+            <div style={{ background: '#F7F5F0', border: '2px solid #0A0A0A', borderRadius: '0', padding: 'clamp(1.5rem, 5vw, 3rem)', width: '100%', maxWidth: 440, boxSizing: 'border-box', fontFamily: 'var(--font-grotesk)', boxShadow: '8px 8px 0 rgba(10,10,10,1)' }} onClick={(e) => e.stopPropagation()}>
+              <h2 style={{ margin: '0 0 1rem 0', color: '#0A0A0A', fontSize: '1.8rem', fontWeight: 600, fontFamily: 'var(--font-serif)', fontStyle: 'italic' }}>Leave Meeting</h2>
+              <p style={{ margin: '0 0 2rem 0', color: '#5A5A5A', fontSize: '0.95rem', lineHeight: 1.5 }}>
                 You are the host. Do you want to end the meeting for everyone, or just leave?
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -1417,7 +1770,7 @@ export default function MeetingRoom() {
                 <button onClick={confirmLeaveMeeting} style={{ padding: '1rem', background: '#0A0A0A', color: '#F7F5F0', border: '2px solid #0A0A0A', fontWeight: 600, cursor: 'pointer', fontSize: '1rem', textTransform: 'uppercase', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
                   Just Leave
                 </button>
-                <button onClick={() => setShowLeaveModal(false)} style={{ padding: '1rem', background: 'transparent', color: '#0A0A0A', border: 'none', fontWeight: 600, cursor: 'pointer', fontSize: '0.9rem', textDecoration: 'underline' }}>
+                <button onClick={() => setShowLeaveModal(false)} style={{ padding: '0.75rem', background: 'transparent', color: '#0A0A0A', border: 'none', fontWeight: 600, cursor: 'pointer', fontSize: '0.9rem', textDecoration: 'underline' }}>
                   Cancel
                 </button>
               </div>
@@ -1426,8 +1779,8 @@ export default function MeetingRoom() {
         )}
 
         {showSettings && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowSettings(false)}>
-            <div style={{ background: '#F7F5F0', border: '2px solid #0A0A0A', borderRadius: '0', padding: '3rem', width: 480, fontFamily: 'var(--font-grotesk)', boxShadow: '12px 12px 0 rgba(10,10,10,1)' }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }} onClick={() => setShowSettings(false)}>
+            <div style={{ background: '#F7F5F0', border: '2px solid #0A0A0A', borderRadius: '0', padding: 'clamp(1.5rem, 5vw, 3rem)', width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto', boxSizing: 'border-box', fontFamily: 'var(--font-grotesk)', boxShadow: '8px 8px 0 rgba(10,10,10,1)' }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
                 <h2 style={{ margin: 0, color: '#0A0A0A', fontSize: '2rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 600, fontFamily: 'var(--font-serif)', fontStyle: 'italic' }}>
                   <Settings size={20} color="#0A0A0A" /> <span style={{color: "#0A0A0A"}}>Settings</span>
@@ -1468,14 +1821,14 @@ export default function MeetingRoom() {
                         <p style={{ margin: 0, color: '#5A5A5A', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', marginTop: '0.2rem' }}>Read out audio translations</p>
                       </div>
                       <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={user.ttsEnabled ?? true} onChange={e => { useAuthStore.getState().user.ttsEnabled = e.target.checked; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ display: 'none' }} />
+                        <input type="checkbox" checked={user.ttsEnabled ?? true} onChange={e => updateUserSettings('ttsEnabled', e.target.checked)} style={{ display: 'none' }} />
                         <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.ttsEnabled ?? true) ? '#0022FF' : 'rgba(10,10,10,0.2)', transition: 'background 0.2s', position: 'relative' }}>
                           <div style={{ position: 'absolute', top: 2, left: (user.ttsEnabled ?? true) ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
                         </div>
                       </label>
                     </div>
                     {(user.ttsEnabled ?? true) && (
-                      <select value={user.ttsLang || 'original'} onChange={e => { useAuthStore.getState().user.ttsLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'transparent', color: '#0A0A0A', border: '1px solid #0A0A0A', borderRadius: '0', fontSize: '0.9rem', outline: 'none' }}>
+                      <select value={user.ttsLang || 'original'} onChange={e => updateUserSettings('ttsLang', e.target.value)} style={{ width: '100%', padding: '0.75rem 1rem', background: 'transparent', color: '#0A0A0A', border: '1px solid #0A0A0A', borderRadius: '0', fontSize: '0.9rem', outline: 'none' }}>
                         <option value="original" style={{ background: '#F7F5F0', color: '#0A0A0A' }}>Original</option>
                         {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#F7F5F0', color: '#0A0A0A' }}>{l.label}</option>)}
                       </select>
@@ -1489,14 +1842,14 @@ export default function MeetingRoom() {
                         <p style={{ margin: 0, fontWeight: 600, color: '#0A0A0A', fontSize: '0.9rem' }}>Message Chat Translation</p>
                       </div>
                       <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={user.chatEnabled ?? true} onChange={e => { useAuthStore.getState().user.chatEnabled = e.target.checked; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ display: 'none' }} />
+                        <input type="checkbox" checked={user.chatEnabled ?? true} onChange={e => updateUserSettings('chatEnabled', e.target.checked)} style={{ display: 'none' }} />
                         <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.chatEnabled ?? true) ? '#0022FF' : 'rgba(10,10,10,0.2)', transition: 'background 0.2s', position: 'relative' }}>
                           <div style={{ position: 'absolute', top: 2, left: (user.chatEnabled ?? true) ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
                         </div>
                       </label>
                     </div>
                     {(user.chatEnabled ?? true) && (
-                      <select value={user.chatLang || 'original'} onChange={e => { useAuthStore.getState().user.chatLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'transparent', color: '#0A0A0A', border: '1px solid #0A0A0A', borderRadius: '0', fontSize: '0.9rem', outline: 'none' }}>
+                      <select value={user.chatLang || 'original'} onChange={e => updateUserSettings('chatLang', e.target.value)} style={{ width: '100%', padding: '0.75rem 1rem', background: 'transparent', color: '#0A0A0A', border: '1px solid #0A0A0A', borderRadius: '0', fontSize: '0.9rem', outline: 'none' }}>
                         <option value="original" style={{ background: '#F7F5F0', color: '#0A0A0A' }}>Original</option>
                         {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#F7F5F0', color: '#0A0A0A' }}>{l.label}</option>)}
                       </select>
@@ -1510,14 +1863,14 @@ export default function MeetingRoom() {
                         <p style={{ margin: 0, fontWeight: 600, color: '#0A0A0A', fontSize: '0.9rem' }}>Speech to Caption</p>
                       </div>
                       <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
-                        <input type="checkbox" checked={user.captionEnabled ?? true} onChange={e => { useAuthStore.getState().user.captionEnabled = e.target.checked; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ display: 'none' }} />
+                        <input type="checkbox" checked={user.captionEnabled ?? true} onChange={e => updateUserSettings('captionEnabled', e.target.checked)} style={{ display: 'none' }} />
                         <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.captionEnabled ?? true) ? '#0022FF' : 'rgba(10,10,10,0.2)', transition: 'background 0.2s', position: 'relative' }}>
                           <div style={{ position: 'absolute', top: 2, left: (user.captionEnabled ?? true) ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
                         </div>
                       </label>
                     </div>
                     {(user.captionEnabled ?? true) && (
-                      <select value={user.captionLang || 'original'} onChange={e => { useAuthStore.getState().user.captionLang = e.target.value; setMessages([...messages]); if (socket) socket.emit("user:update_settings", useAuthStore.getState().user); }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'transparent', color: '#0A0A0A', border: '1px solid #0A0A0A', borderRadius: '0', fontSize: '0.9rem', outline: 'none' }}>
+                      <select value={user.captionLang || 'original'} onChange={e => updateUserSettings('captionLang', e.target.value)} style={{ width: '100%', padding: '0.75rem 1rem', background: 'transparent', color: '#0A0A0A', border: '1px solid #0A0A0A', borderRadius: '0', fontSize: '0.9rem', outline: 'none' }}>
                         <option value="original" style={{ background: '#F7F5F0', color: '#0A0A0A' }}>Original</option>
                         {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#F7F5F0', color: '#0A0A0A' }}>{l.label}</option>)}
                       </select>
@@ -1549,11 +1902,11 @@ export default function MeetingRoom() {
         }}>
           <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--vermilion, #ff4500)', flexShrink: 0, animation: 'pulse 1s infinite' }} />
           <div style={{ flex: 1 }}>
-            <p style={{ margin: 0, fontWeight: 400, color: '#0A0A0A', fontSize: '0.9rem' }}>
+            <p style={{ margin: 0, fontWeight: 600, color: '#F7F5F0', fontSize: '0.9rem' }}>
               Someone is waiting
             </p>
-            <p style={{ margin: 0, color: '#0A0A0A', fontSize: '0.8rem', marginTop: '0.15rem' }}>
-              <span style={{ color: 'var(--cobalt, #a3c4f3)' }}>{lobbyToast.name}</span> is in the lobby
+            <p style={{ margin: 0, color: '#DDD', fontSize: '0.8rem', marginTop: '0.15rem' }}>
+              <span style={{ color: '#0022FF', fontWeight: 600 }}>{lobbyToast.name}</span> is in the lobby
             </p>
           </div>
           <button
@@ -1564,22 +1917,12 @@ export default function MeetingRoom() {
           </button>
           <button
             onClick={() => setLobbyToast(null)}
-            style={{ background: 'none', border: 'none', color: '#0A0A0A', cursor: 'pointer', fontSize: '1.1rem', padding: '0.1rem', flexShrink: 0 }}
+            style={{ background: 'none', border: 'none', color: '#F7F5F0', cursor: 'pointer', fontSize: '1.1rem', padding: '0.1rem', flexShrink: 0 }}
           >
             ×
           </button>
         </div>
       )}
-
-      {/* === MEETING ENDED MODAL === */}
-        {meetingEnded && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ background: '#F7F5F0', padding: '3rem', borderRadius: '0', border: '2px solid #0A0A0A', boxShadow: '8px 8px 0 rgba(10,10,10,1)', maxWidth: 380, width: '90%', textAlign: 'center' }}>
-              <p style={{ margin: '0 0 1.5rem', color: '#0A0A0A', fontFamily: 'var(--font-mono)', lineHeight: 1.6 }}>The host has ended this meeting for everyone.</p>
-              <button onClick={() => router.push('/meeting/' + meetingId + '/report')} style={{ width: '100%', padding: '0.875rem', background: '#0022FF', color: '#F7F5F0', border: 'none', borderRadius: '0', fontWeight: 700, cursor: 'pointer' }}>OK</button>
-            </div>
-          </div>
-        )}
 
         {/* === ALERT MODAL === */}
       {alertMessage && (

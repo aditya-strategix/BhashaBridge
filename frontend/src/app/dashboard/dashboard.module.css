@@ -6,12 +6,15 @@
   --cobalt: #0047AB;
   --vermilion: #E34234;
   
+  width: 100%;
+  max-width: 100vw;
   min-height: 100vh;
   background-color: var(--bg-ivory);
   color: #111;
   font-family: var(--font-grotesk);
   padding: 4rem;
   box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 .header {
@@ -21,6 +24,8 @@
   border-bottom: 3px solid #111;
   padding-bottom: 2rem;
   margin-bottom: 4rem;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .title {
@@ -80,16 +85,23 @@
   grid-template-columns: 400px 1fr;
   gap: 6rem;
   align-items: start;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .leftCol {
   border-right: 1px solid #111;
   padding-right: 4rem;
   height: 100%;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .rightCol {
   padding-top: 0;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .card {
@@ -206,43 +218,178 @@
   padding: 3rem 0;
 }
 
-/* SMARTPHONE RESPONSIVENESS */
-@media screen and (max-width: 768px) {
+/* TABS */
+.tabsContainer {
+  display: flex;
+  margin-bottom: 2.5rem;
+  border-bottom: 2px solid #111;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tabsContainer::-webkit-scrollbar {
+  display: none;
+}
+
+.tabBtn {
+  flex: 1;
+  min-width: 0;
+  padding: 1rem 0.6rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: clamp(0.78rem, 2vw, 1rem);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  transition: all 0.15s;
+  margin-bottom: -3px;
+  white-space: nowrap;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.tabDesktop {
+  display: inline;
+}
+
+.tabMobile {
+  display: none;
+}
+
+/* TABLET RESPONSIVENESS */
+@media screen and (max-width: 1024px) {
   .container {
-    padding: 1rem;
+    padding: 2rem 1.5rem;
+    width: 100%;
+    max-width: 100vw;
   }
-  .header { flex-wrap: wrap; align-items: center; gap: 1rem;
-    padding-bottom: 1.5rem;
-    margin-bottom: 2rem;
+  .header {
+    margin-bottom: 2.5rem;
   }
-  .title {
-    font-size: clamp(2rem, 8vw, 3rem);
-  }
-  .title::after {
-    font-size: 2rem;
-    display: block;
-    margin-top: 0.5rem;
-  }
-  .userInfo { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.75rem; width: 100%; }
   .grid {
     grid-template-columns: 1fr;
-    gap: 3rem;
+    gap: 2.5rem;
+    width: 100%;
   }
   .leftCol {
     border-right: none;
-    border-bottom: 1px solid #111;
+    border-bottom: 2px solid #111;
     padding-right: 0;
-    padding-bottom: 3rem;
+    padding-bottom: 2.5rem;
     height: auto;
+    width: 100%;
+  }
+  .rightCol {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* SMARTPHONE RESPONSIVENESS */
+@media screen and (max-width: 768px) {
+  .container {
+    padding: 1.25rem 1rem;
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1.25rem;
+    padding-bottom: 1.25rem;
+    margin-bottom: 2rem;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .title {
+    font-size: clamp(2rem, 9vw, 3.2rem);
+    width: 100%;
+    word-break: break-word;
+  }
+  .title::after {
+    font-size: clamp(1.4rem, 6vw, 2rem);
+    display: block;
+    margin-top: 0.35rem;
+  }
+  .userInfo {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    font-size: 0.8rem;
+  }
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+    width: 100%;
+  }
+  .leftCol {
+    border-right: none;
+    border-bottom: 2px solid #111;
+    padding-right: 0;
+    padding-bottom: 2rem;
+    height: auto;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .rightCol {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+  .card {
+    margin-bottom: 2rem;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .cardTitle {
+    font-size: 1.75rem;
+    margin-bottom: 1.25rem;
+    word-break: break-word;
   }
   .meetingItem {
     grid-template-columns: 1fr;
-    gap: 1.5rem;
-    padding: 2rem 0;
+    gap: 1.25rem;
+    padding: 1.5rem 0;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .meetingInfo h4 {
+    font-size: 1.4rem;
+    word-break: break-word;
   }
   .btnJoin {
     text-align: center;
     width: 100%;
+    box-sizing: border-box;
+  }
+  .tabsContainer {
+    margin-bottom: 1.75rem;
+  }
+  .tabBtn {
+    padding: 0.75rem 0.35rem;
+    font-size: clamp(0.72rem, 2.5vw, 0.88rem);
+    letter-spacing: -0.02em;
+  }
+}
+
+@media screen and (max-width: 400px) {
+  .tabDesktop {
+    display: none;
+  }
+  .tabMobile {
+    display: inline;
+  }
+  .tabBtn {
+    padding: 0.65rem 0.2rem;
+    font-size: 0.75rem;
+    letter-spacing: 0;
   }
 }
 
