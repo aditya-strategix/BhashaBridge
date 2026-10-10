@@ -8,7 +8,7 @@ import {
   Mic, MicOff, Video, VideoOff, PhoneOff, Send,
   Users, Settings, Shield, UserCheck, UserX,
   MessageSquare, Globe, ChevronRight, VolumeX, MoreVertical, Star, Trash2, X,
-  Copy, Check, Clock, AlertCircle, FileText, ArrowLeft
+  Copy, Check, Clock, AlertCircle, FileText, ArrowLeft, RefreshCw
 } from 'lucide-react';
 import useAuthStore from '../../../stores/authStore';
 import styles from './meeting.module.css';
@@ -47,7 +47,13 @@ function Avatar({ name, size = 36, color = '#0022FF', avatarUrl }) {
 const VideoPeer = ({ peer, name, role, isAudioOn = true, isVideoOn = true, avatarUrl }) => {
   const ref = useRef();
   useEffect(() => {
-    peer.on('stream', stream => { if (ref.current) ref.current.srcObject = stream; });
+    const handleStream = stream => {
+      if (ref.current) ref.current.srcObject = stream;
+    };
+    peer.on('stream', handleStream);
+    return () => {
+      try { peer.off('stream', handleStream); } catch (_) {}
+    };
   }, [peer]);
   return (
     <div className={`${styles.videoTile} ${isAudioOn ? styles.activeSpeaker : ''}`}>
@@ -125,7 +131,17 @@ export default function MeetingRoom() {
   };
   const [alertMessage, setAlertMessage] = useState(null);
   const [joinError, setJoinError] = useState(null);
+  const [retryCount, setRetryCount] = useState(0);
   const [copiedLink, setCopiedLink] = useState(false);
+
+  const isTtsPlayingRef = useRef(false);
+  const recentTtsMapRef = useRef(new Map());
+  const lastSpeechEmitRef = useRef({ text: '', timestamp: 0 });
+  const myLastSpokenTextRef = useRef('');
+  const myLastSpokenTimeRef = useRef(0);
+  const isJoiningInProgressRef = useRef(false);
+  const processedCaptionIdsRef = useRef(new Set());
+  const activeSpeechRecRef = useRef(null);
 
   const handleCopyInviteLink = () => {
     const url = `${window.location.origin}/meeting/${meetingId}`;
@@ -289,10 +305,11 @@ export default function MeetingRoom() {
 
   useEffect(() => {
     if (!user) return;
-    if (socketInitialized.current) return;
-    socketInitialized.current = true;
+    if (socketInitialized.current || isJoiningInProgressRef.current) return;
+    isJoiningInProgressRef.current = true;
 
     let newSocket;
+    let isCancelled = false;
 
     const initializeMeeting = async () => {
       try {
@@ -302,14 +319,32 @@ export default function MeetingRoom() {
           return;
         }
 
-        const res = await fetch(`${API_URL}/meetings/join/${meetingId}`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        // Retry loop for transient network or server pool spikes
+        let res = null;
+        let lastErr = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          if (isCancelled) return;
+          try {
+            res = await fetch(`${API_URL}/meetings/join/${meetingId}`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (res.ok) break;
+            // Immediate stop if permission denied or meeting ended/not found
+            if (res.status === 403 || res.status === 404) break;
+            // Otherwise wait briefly before retrying
+            await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+          } catch (fetchErr) {
+            lastErr = fetchErr;
+            await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+          }
+        }
 
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          const errMsg = errData.error || 'Meeting ended, not found, or unauthorized';
+        if (isCancelled) return;
+
+        if (!res || !res.ok) {
+          const errData = res ? await res.json().catch(() => ({})) : {};
+          const errMsg = errData.error || lastErr?.message || 'Unable to connect to meeting';
 
           let errorType = 'ERROR';
           let title = 'Unable to Join Meeting';
@@ -337,6 +372,9 @@ export default function MeetingRoom() {
             title = 'Meeting Not Found';
             description = `No meeting was found with ID "${meetingId}". Please check the invite link and try again.`;
             showReport = false;
+          } else if (lowerMsg.includes('server error') || lowerMsg.includes('failed to connect')) {
+            title = 'Server Syncing';
+            description = 'The meeting session is syncing. Please click "Try Joining Again" below to connect.';
           }
 
           setJoinError({
@@ -346,8 +384,12 @@ export default function MeetingRoom() {
             rawError: errMsg,
             showReport
           });
+          isJoiningInProgressRef.current = false;
           return;
         }
+
+        socketInitialized.current = true;
+        isJoiningInProgressRef.current = false;
 
         const data = await res.json();
         setParticipantStatus(data.participantStatus);
@@ -376,7 +418,25 @@ export default function MeetingRoom() {
         setStream(currentStream);
         if (userVideo.current) userVideo.current.srcObject = currentStream;
 
-        newSocket = io(SOCKET_URL);
+        if (isCancelled) {
+          if (currentStream) currentStream.getTracks().forEach(t => t.stop());
+          return;
+        }
+
+        // Evict any existing socket before creating a new one to prevent duplicate listeners
+        if (socketRef.current) {
+          try {
+            socketRef.current.removeAllListeners();
+            socketRef.current.disconnect();
+          } catch (_) {}
+          socketRef.current = null;
+        }
+
+        newSocket = io(SOCKET_URL, {
+          forceNew: true,
+          transports: ['websocket', 'polling']
+        });
+        socketRef.current = newSocket;
         setSocket(newSocket);
         newSocket.emit('meeting:join', { meetingId, userId: user.id, peerId: newSocket.id, language: user.language });
         setTimeout(() => newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current }), 2000);
@@ -633,13 +693,25 @@ export default function MeetingRoom() {
             }));
           });
           newSocket.on('caption:translated', data => {
+            // Drop duplicate emissions of the exact same speech translation packet
+            if (data?.id) {
+              if (processedCaptionIdsRef.current.has(data.id)) {
+                return;
+              }
+              processedCaptionIdsRef.current.add(data.id);
+              if (processedCaptionIdsRef.current.size > 200) {
+                const arr = Array.from(processedCaptionIdsRef.current);
+                processedCaptionIdsRef.current = new Set(arr.slice(100));
+              }
+            }
+
             const u = useAuthStore.getState().user || {};
             
             const captionEnabled = u.captionEnabled ?? true;
             const captionLang = u.captionLang || 'original';
             
             if (captionEnabled) {
-              const textToShow = captionLang === 'original' ? data.text : (data.translations[captionLang] || `[Rate Limited] ${data.text}`);
+              const textToShow = captionLang === 'original' ? data.text : (data.translations?.[captionLang] || `[Rate Limited] ${data.text}`);
               if (textToShow) {
                 setCurrentCaption(textToShow);
                 setTimeout(() => setCurrentCaption(null), 4000);
@@ -649,22 +721,55 @@ export default function MeetingRoom() {
             const ttsEnabled = u.ttsEnabled ?? true;
             const ttsLang = u.ttsLang || 'original';
             
-            console.log("Caption arrived! ttsEnabled:", ttsEnabled, "speakerSocket:", data.senderSocketId, "mySocket:", newSocket.id);
-              if (ttsEnabled && data.speakerId !== u.id) {
-              console.log("TTS condition passed! Preparing to speak via Backend Proxy API...");
-              const textToSpeak = ttsLang === 'original' ? data.text : (data.translations[ttsLang] || data.text);
-              if (textToSpeak) {
+            // Do not play TTS for own speech
+            if (ttsEnabled && data.speakerId !== u.id) {
+              const textToSpeak = ttsLang === 'original' ? data.text : (data.translations?.[ttsLang] || data.text);
+              if (textToSpeak && textToSpeak.trim()) {
+                const cleanText = textToSpeak.trim();
                 const targetLangCode = ttsLang === 'original' ? (data.sourceLanguage || 'en') : ttsLang;
-                
-                // Try native browser TTS first (much faster, bypasses some strict MP3 autoplay rules)
+                const normKey = `${targetLangCode}:${cleanText.toLowerCase()}`;
+                const now = Date.now();
+
+                // 1. Deduplication: Don't repeat identical audio within 5 seconds
+                const lastPlayed = recentTtsMapRef.current.get(normKey) || 0;
+                if (now - lastPlayed < 5000) {
+                  return;
+                }
+                recentTtsMapRef.current.set(normKey, now);
+
+                // 2. Self-echo suppression: If this sentence matches what I just spoke, skip
+                if (myLastSpokenTextRef.current && cleanText.toLowerCase().includes(myLastSpokenTextRef.current) && (now - myLastSpokenTimeRef.current < 6000)) {
+                  return;
+                }
+
+                // 3. Mark TTS as active so local mic SpeechRecognition suppresses audio input during playback
+                isTtsPlayingRef.current = true;
+
+                // Try native browser TTS first (much faster, bypasses strict MP3 autoplay rules)
                 if ('speechSynthesis' in window) {
-                  const utterance = new SpeechSynthesisUtterance(textToSpeak);
+                  try { window.speechSynthesis.cancel(); } catch (_) {}
+                  const utterance = new SpeechSynthesisUtterance(cleanText);
                   utterance.lang = targetLangCode;
+                  utterance.onend = () => {
+                    setTimeout(() => { isTtsPlayingRef.current = false; }, 600);
+                  };
+                  utterance.onerror = () => {
+                    setTimeout(() => { isTtsPlayingRef.current = false; }, 300);
+                  };
                   window.speechSynthesis.speak(utterance);
                 } else {
-                  const url = `${API_URL}/tts?text=${encodeURIComponent(textToSpeak)}&lang=${targetLangCode.split("-")[0]}`;
+                  const url = `${API_URL}/tts?text=${encodeURIComponent(cleanText)}&lang=${targetLangCode.split("-")[0]}`;
                   const audio = new Audio(url);
-                  audio.play().catch(e => setAlertMessage('Browser blocked audio playback. Please click anywhere on the page first.'));
+                  audio.onended = () => {
+                    setTimeout(() => { isTtsPlayingRef.current = false; }, 600);
+                  };
+                  audio.onerror = () => {
+                    setTimeout(() => { isTtsPlayingRef.current = false; }, 300);
+                  };
+                  audio.play().catch(e => {
+                    isTtsPlayingRef.current = false;
+                    setAlertMessage('Browser blocked audio playback. Please click anywhere on the page first.');
+                  });
                 }
               }
             }
@@ -682,6 +787,8 @@ export default function MeetingRoom() {
 
     initializeMeeting();
     return () => { 
+        isCancelled = true;
+        isJoiningInProgressRef.current = false;
         socketInitialized.current = false;
         if (statusRef.current === 'WAITING') {
           const t = localStorage.getItem('token');
@@ -700,14 +807,32 @@ export default function MeetingRoom() {
             } catch (_) {}
           }
         }
+        if (newSocket) {
+          try {
+            newSocket.removeAllListeners();
+            newSocket.disconnect();
+          } catch (_) {}
+        }
         if (socketRef.current) {
-          try { socketRef.current.disconnect(); } catch (_) {}
+          try {
+            socketRef.current.removeAllListeners();
+            socketRef.current.disconnect();
+          } catch (_) {}
+          socketRef.current = null;
         }
         peersRef.current.forEach(p => { if (p.peer) { try { p.peer.destroy(); } catch (_) {} } }); 
         peersRef.current = []; 
-        if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop()); 
+        setPeers([]);
+        if (streamRef.current) {
+          try { streamRef.current.getTracks().forEach(t => t.stop()); } catch (_) {}
+          streamRef.current = null;
+        }
+        if (activeSpeechRecRef.current) {
+          try { activeSpeechRecRef.current.abort(); } catch (_) {}
+          activeSpeechRecRef.current = null;
+        } 
       };
-  }, [user, meetingId]);
+  }, [user, meetingId, retryCount]);
 
   // Speech recognition - starts when mic is unmuted and participant is admitted
   useEffect(() => {
@@ -718,7 +843,12 @@ export default function MeetingRoom() {
 
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
+    if (activeSpeechRecRef.current) {
+      try { activeSpeechRecRef.current.abort(); } catch (_) {}
+      activeSpeechRecRef.current = null;
+    }
     const rec = new SR();
+    activeSpeechRecRef.current = rec;
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = spokenLanguage;
@@ -726,10 +856,25 @@ export default function MeetingRoom() {
     let restartTimer = null;
 
     rec.onresult = (ev) => {
+      // Acoustic echo suppression: If TTS is speaking, suppress local mic recognition!
+      if (isTtsPlayingRef.current || (typeof window !== 'undefined' && window.speechSynthesis?.speaking)) {
+        return;
+      }
+
       for (let i = ev.resultIndex; i < ev.results.length; ++i) {
         if (ev.results[i].isFinal) {
           const txt = ev.results[i][0].transcript.trim();
           if (txt) {
+            const norm = txt.toLowerCase();
+            const now = Date.now();
+            // Outgoing deduplication: Do not re-emit duplicate sentence within 3.5 seconds
+            if (lastSpeechEmitRef.current.text === norm && (now - lastSpeechEmitRef.current.timestamp < 3500)) {
+              continue;
+            }
+            lastSpeechEmitRef.current = { text: norm, timestamp: now };
+            myLastSpokenTextRef.current = norm;
+            myLastSpokenTimeRef.current = now;
+
             socket.emit('caption:text', { meetingId, speakerId: user.id, text: txt, language: spokenLanguage });
           }
         }
@@ -746,19 +891,21 @@ export default function MeetingRoom() {
       }
     };
     rec.onend = () => {
-      if (!stopped) {
+      if (!stopped && audioRef.current) {
         restartTimer = setTimeout(() => {
-          if (!stopped) {
+          if (!stopped && audioRef.current) {
             try { rec.start(); } catch (_) {}
           }
-        }, 400);
+        }, 350);
       }
     };
     try { rec.start(); } catch (_) {}
     return () => {
       stopped = true;
       if (restartTimer) clearTimeout(restartTimer);
-      try { rec.stop(); } catch (_) {}
+      try { rec.abort(); } catch (_) {
+        try { rec.stop(); } catch (_) {}
+      }
     };
   }, [socket, user, isAudioOn, spokenLanguage, meetingId, participantStatus, isHostOrCoHost, meetingEnded]);
 
@@ -850,11 +997,23 @@ export default function MeetingRoom() {
     if (socketRef.current) {
       try {
         socketRef.current.emit('waiting:leave', { meetingId, userId: userRef.current?.id });
+        socketRef.current.removeAllListeners();
         socketRef.current.disconnect();
       } catch (_) {}
+      socketRef.current = null;
     }
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
+      try { streamRef.current.getTracks().forEach(t => t.stop()); } catch (_) {}
+      streamRef.current = null;
+    }
+    peersRef.current.forEach(p => { if (p.peer) { try { p.peer.destroy(); } catch (_) {} } });
+    peersRef.current = [];
+    setPeers([]);
+    socketInitialized.current = false;
+    isJoiningInProgressRef.current = false;
+    if (activeSpeechRecRef.current) {
+      try { activeSpeechRecRef.current.abort(); } catch (_) {}
+      activeSpeechRecRef.current = null;
     }
     router.push('/dashboard');
   };
@@ -957,23 +1116,15 @@ export default function MeetingRoom() {
 
   useEffect(() => {
     if (!isDemoActive || !socket || !user) return;
-    const phrases = [
-      "Hello, this is a test of the speech translation system.",
-      "I am speaking in my native language right now.",
-      "Technology makes communication so much easier."
-    ];
-    let count = 0;
+    const phrase = "Hello, this is a live test of the BhashaBridge translation system.";
+    socket.emit('caption:text', { meetingId, speakerId: user.id, text: phrase, language: spokenLanguage });
     
-    // Fire the first one immediately
-    socket.emit('caption:text', { meetingId, speakerId: user.id, text: phrases[0], language: spokenLanguage });
-    
-    const interval = setInterval(() => {
-      count++;
-      const text = phrases[count % phrases.length];
-      socket.emit('caption:text', { meetingId, speakerId: user.id, text, language: spokenLanguage });
-    }, 6000); // every 6 seconds
+    // Automatically reset Demo so it doesn't loop infinitely in the background
+    const stopTimer = setTimeout(() => {
+      setIsDemoActive(false);
+    }, 2500);
 
-    return () => clearInterval(interval);
+    return () => clearTimeout(stopTimer);
   }, [isDemoActive, socket, meetingId, user, spokenLanguage]);
 
   // ======= MEETING JOIN ERROR POPUP (Ended, Cancelled, Restricted, Not Found) =======
@@ -1114,6 +1265,40 @@ export default function MeetingRoom() {
               >
                 <FileText size={16} />
                 <span>View Summary & Report</span>
+              </button>
+            )}
+
+            {!isEnded && !isCancelled && (
+              <button
+                onClick={() => {
+                  setJoinError(null);
+                  socketInitialized.current = false;
+                  isJoiningInProgressRef.current = false;
+                  setRetryCount(prev => prev + 1);
+                }}
+                style={{
+                  width: '100%',
+                  padding: '1rem',
+                  background: '#0022FF',
+                  color: '#F7F5F0',
+                  border: '2px solid #0A0A0A',
+                  cursor: 'pointer',
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  fontFamily: 'var(--font-mono)',
+                  textTransform: 'uppercase',
+                  boxShadow: '4px 4px 0 #0A0A0A',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  transition: 'transform 0.1s'
+                }}
+                onMouseEnter={e => e.currentTarget.style.transform = 'translate(-2px, -2px)'}
+                onMouseLeave={e => e.currentTarget.style.transform = 'none'}
+              >
+                <RefreshCw size={16} />
+                <span>Try Joining Again</span>
               </button>
             )}
 
@@ -1469,8 +1654,32 @@ export default function MeetingRoom() {
             <button onClick={() => setShowSettings(true)} style={{ background: '#0A0A0A', border: '2px solid #0A0A0A', color: '#F7F5F0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.82rem', padding: '0.35rem 0.75rem', boxShadow: '2px 2px 0 rgba(10,10,10,1)', fontWeight: 600 }}>
               <Settings size={14} /> Settings
             </button>
-            <button onClick={() => setIsDemoActive(!isDemoActive)} style={{ background: isDemoActive ? '#FF3311' : '#0022FF', border: '2px solid #0A0A0A', color: '#F7F5F0', padding: '0.35rem 0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', boxShadow: '2px 2px 0 rgba(10,10,10,1)' }}>
-              {isDemoActive ? 'Stop Demo' : 'Demo'}
+            <button
+              onClick={() => {
+                if (!isDemoActive) {
+                  setIsDemoActive(true);
+                  setAlertMessage('Broadcasting audio test phrase...');
+                } else {
+                  setIsDemoActive(false);
+                }
+              }}
+              style={{
+                background: isDemoActive ? '#FF3311' : '#0022FF',
+                border: '2px solid #0A0A0A',
+                color: '#F7F5F0',
+                padding: '0.35rem 0.85rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.3rem',
+                fontFamily: 'var(--font-grotesk)',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                boxShadow: '2px 2px 0 rgba(10,10,10,1)'
+              }}
+            >
+              {isDemoActive ? 'Demo Playing...' : '⚡ Test Audio'}
             </button>
           </div>
         </header>

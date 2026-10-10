@@ -662,3 +662,76 @@ The Organizations module provides persistent collaborative spaces that tie meeti
 - **Action Required Review Alerts**: Hosts and co-hosts receive prominent, high-priority alert cards highlighting pending join requests with one-click **Approve** (Emerald) and **Reject** (Crimson) actions.
 - **Roster & Co-Host Privileges**: Organization owners can directly promote members to `COHOST` (or revoke back to `PARTICIPANT`) via the interactive star toggle (★), enabling decentralized meeting management.
 - **Brutalist Roster Modals**: Expanded roster inspection with full user avatars, verified email records, and removal controls.
+
+#### 10.8 Race-Condition Resilient Participant Upsert & Acoustic Echo Suppression Architecture
+
+##### 10.8.1 The Race-Condition Challenge (`P2002` Server Error)
+When users enter a meeting or lobby (especially during React 18/19 StrictMode double-mounts, network reconnect bursts, or rapid clicks on "Join Meeting"), concurrent HTTP `POST /api/meetings/join/:link` requests frequently hit the backend within milliseconds of each other.
+* **Naive Pattern**: An initial `findUnique` returned `null` for both requests simultaneously. Both threads subsequently attempted `participant.create(...)`.
+* **The Failure**: The second request crashed with Prisma unique constraint violation `P2002` on composite key `['userId', 'meetingId']`. Because `joinMeeting` caught this as an unhandled error, it returned a `500 Server error`, rendering a fatal red modal *"Unable to Join Meeting — Server error"* that blocked users from entering the lobby or meeting.
+* **The Solution**: 
+  1. **Atomic Exception Interception**: The `participant.create` invocation is encapsulated in a dedicated `P2002` error boundary. If a race condition occurs, the handler catches `err.code === 'P2002'`, falls back to fetching the concurrently created participant row, and executes an update with latest role and admission status.
+  2. **Supabase Pool Concurrency**: The Prisma connection limit was increased from 5 to 15 connections with an extended pool timeout of 30 seconds (`connection_limit=15&pool_timeout=30`), eliminating transaction pool saturation on Supabase PgBouncer.
+  3. **Client-Side Exponential Backoff & In-Flight Lock**: The frontend uses `isJoiningInProgressRef` to serialize join requests and automatically retries transient 500/network errors up to 3 times before presenting any error screen.
+  4. **Self-Healing "Try Joining Again" Action**: If a session sync issue ever occurs, the error screen provides a prominent Cobalt *"Try Joining Again"* action that resets the connection lock and seamlessly retries without requiring the user to navigate back to the dashboard.
+
+##### 10.8.2 Acoustic Echo Suppression & TTS Feedback Loop Elimination
+In multilingual speech translation meetings, participants rely on Text-to-Speech (TTS) to hear translations spoken aloud in their native tongue. However, naive speech recognition and TTS architectures suffer from a critical acoustic feedback loop:
+```
+Participant A Speaks: "Hello"
+       │
+       ▼
+Participant B's Browser receives translation -> Plays TTS via speaker: "नमस्ते"
+       │
+       ▼
+Participant B's Microphone captures the sound coming out of B's speakers!
+       │
+       ▼
+Participant B's SpeechRecognition recognizes: "नमस्ते" -> Emits caption:text!
+       │
+       ▼
+Participant A's Browser receives translation -> Plays TTS via speaker: "Hello"
+       │
+       ▼
+Participant A's Microphone captures the speaker sound -> Emits caption:text!
+       │
+       ▼
+[Repeats 5 to 6 times until acoustic distortion kills the ping-pong feedback loop]
+```
+
+To eliminate this echo loop, BhashaBridge implements a four-stage **Acoustic Echo Suppression & Deduplication Pipeline**:
+1. **TTS Ducking / Mic Suppression (`isTtsPlayingRef`)**:
+   - Whenever TTS audio plays (via `window.speechSynthesis` or backend proxy audio), `isTtsPlayingRef.current = true`.
+   - Any microphone transcripts delivered by Web Speech API's `rec.onresult` during TTS playback are immediately discarded.
+   - A trailing acoustic dissipation buffer (600ms) preserves the suppression flag after audio ends, allowing room reverb and speaker echo to decay completely before speech recognition resumes.
+2. **Audio Queue Clearance & Single Utterance Guarantee**:
+   - Before dispatching any new speech utterance, `window.speechSynthesis.cancel()` purges any pending audio chunks, preventing the browser audio engine from queuing up cascading speech backlogs.
+3. **Multi-Stage Transcript & TTS Deduplication**:
+   - **Frontend TTS Cache (`recentTtsMapRef`)**: Prevents playing the exact same translated sentence more than once within 5 seconds.
+   - **Outgoing Speech Cache (`lastSpeechEmitRef`)**: Prevents Web Speech API from firing duplicate final transcripts for the same sentence within 3.5 seconds.
+   - **Self-Echo Guard (`myLastSpokenTextRef`)**: If an incoming caption received from another peer matches what the current user spoke within the previous 6 seconds, TTS playback is suppressed on the local client.
+   - **Socket-Level Deduplication (`socket.lastCaption`)**: The backend socket server drops duplicate `caption:text` payloads arriving from the same client socket within 3 seconds.
+4. **Immediate Stream Abort on Mic Mute**:
+   - When the user mutes their microphone or the component unmounts, `rec.abort()` immediately dumps Chromium's internal audio buffers and terminates recognition instantly, rather than waiting for graceful buffer drain via `rec.stop()`.
+
+##### 10.8.3 Single-Pulse Audio Demo Architecture
+Previously, the meeting room "Demo" button launched an infinite `setInterval(..., 6000)` loop that broadcasted test sentences continuously, confusing users and flooding room audio.
+* **Architectural Refactor**: Clicking *"⚡ Test Audio"* sends a single test phrase (*"Hello, this is a live test of the BhashaBridge translation system."*), presents a clear confirmation toast to the user, and automatically resets `isDemoActive = false` after 2.5 seconds. It never runs an uncontrolled background loop.
+
+##### 10.8.4 Multi-Lobby Rejoin Lifecycle, Zombie Socket Eviction & Client Caption Idempotency
+A critical compounding failure previously occurred when users navigated back and forth between the lobby and dashboard (e.g. entering and leaving the lobby 4+ times before finally being admitted to the meeting):
+1. **The Compounding Failure Mechanism**:
+   - Every time a user entered the lobby (`/meeting/:id`), Next.js mounted the component, instantiated a new Socket.IO client, and joined `meeting:join`.
+   - When the user clicked *"Leave Waiting Room"*, the backend updated the participant database status to `LEFT` but never called `socket.leave(meeting.id)` or `socket.disconnect(true)`.
+   - On subsequent rejoins, the backend did not evict existing sockets for the same user ID. Consequently, entering and leaving the lobby 4 times left **4 zombie sockets** still joined to `meeting.id`.
+   - When any participant spoke or triggered the audio demo, `io.to(meeting.id).emit('caption:translated')` dispatched the broadcast to all 4 zombie sockets. In the browser, each socket received the event and called `window.speechSynthesis.speak()`, queueing the exact same translated sentence 4–6 times in series.
+   - Each socket connection also triggered duplicate WebRTC peer connections and audio tracks.
+   - Finally, while 4–6 TTS utterances played sequentially through the laptop speakers, the unmuted microphone picked up the speaker sound, generating a secondary acoustic echo loop that ping-ponged between participants.
+
+2. **The Multi-Layer Resolution**:
+   - **Backend Stale Socket Eviction on `meeting:join`**: On every join request, the server queries `io.in(meeting.id).fetchSockets()`. Any pre-existing socket belonging to the same user ID (`s.userId === userId && s.id !== socket.id`) is actively forced out of all rooms (`s.leave(...)`), notifies peers with `participant:left`, and is forcibly terminated (`s.disconnect(true)`). Only a single authoritative socket per user exists at any time.
+   - **Complete Teardown on `waiting:leave`**: When a participant leaves the lobby, the socket server cleans up room memberships across `meeting.id`, `meetingLink`, and `cleanLink`, notifies the host, and immediately calls `socket.disconnect(true)`.
+   - **Unique Message ID Client Deduplication (`processedCaptionIdsRef`)**: Every `caption:translated` broadcast includes a unique `id: cap_${speakerId}_${Date.now()}_${nonce}`. The frontend tracks received IDs in a bounded `Set` (`processedCaptionIdsRef.current`). Even in adverse network duplicate delivery conditions, duplicate packets are dropped instantaneously before touching state or `speechSynthesis`.
+   - **Client Lifecycle Guard & Singleton Socket**: The frontend meeting component uses cancellation guards during `getUserMedia` and `fetch`. Before creating any new socket, any existing `socketRef.current` has all listeners stripped via `removeAllListeners()` and is disconnected.
+   - **Resilient Translation Pipeline with Timeout Boundary**: Translation requests against external neural APIs are bounded with a 4-second timeout race and fallback to MyMemory (`AbortSignal.timeout(3000)`), preventing stalled external HTTP requests from freezing real-time caption dispatch.
+

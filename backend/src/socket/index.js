@@ -83,6 +83,24 @@ function setupSocket(server) {
         socket.meetingId = meeting.meetingLink;
         socket.dbMeetingId = meeting.id;
         socket.cleanLink = cleanLink;
+
+        // Evict and disconnect any stale zombie sockets for this user in this meeting
+        try {
+          const socketsInRoom = await io.in(meeting.id).fetchSockets();
+          for (const s of socketsInRoom) {
+            if (s.userId === userId && s.id !== socket.id) {
+              console.log(`[Socket] Evicting stale zombie socket ${s.id} for user ${userId} in meeting ${meeting.id}`);
+              s.leave(meeting.id);
+              s.leave(meeting.meetingLink);
+              if (cleanLink) s.leave(cleanLink);
+              socket.to(meeting.id).emit('participant:left', { socketId: s.id, userId });
+              s.disconnect(true);
+            }
+          }
+        } catch (evictErr) {
+          console.warn('[Socket] Stale socket eviction warning:', evictErr.message);
+        }
+
         socket.join(`user_${userId}`);
         socket.join(`user:${userId}`);
         socket.join(meeting.meetingLink);
@@ -262,11 +280,15 @@ function setupSocket(server) {
         }
         socket.isWaiting = false;
         if (targetMeetingId) {
+          socket.leave(targetMeetingId);
+          if (socket.meetingId) socket.leave(socket.meetingId);
+          if (socket.cleanLink) socket.leave(socket.cleanLink);
           io.to(targetMeetingId).emit('waiting:left', { userId: targetUserId });
           io.to(targetMeetingId).emit('meeting:refresh');
         }
         io.emit('dashboard:refresh');
         if (global.sseEmit) global.sseEmit('dashboard:refresh');
+        socket.disconnect(true);
       } catch (err) {
         console.error('Socket waiting:leave error', err);
       }
@@ -354,15 +376,27 @@ function setupSocket(server) {
     // Handle captions
     socket.on('caption:text', async (data) => {
       const { meetingId, speakerId, text, language } = data;
-      // Broadcast live caption
-      io.to(meetingId).emit('caption:text', data);
+      if (!text || !text.trim()) return;
+      const cleanText = text.trim();
+
+      const now = Date.now();
+      if (socket.lastCaption && socket.lastCaption.text.toLowerCase() === cleanText.toLowerCase() && (now - socket.lastCaption.time < 3000)) {
+        return;
+      }
+      socket.lastCaption = { text: cleanText, time: now };
+
+      const targetRoom = socket.dbMeetingId || meetingId;
+
+      // Broadcast live caption once to canonical room
+      console.log(`[CAPTION:TEXT] targetRoom: ${targetRoom}, speakerId: ${speakerId}, text: "${cleanText}"`);
+      io.to(targetRoom).emit('caption:text', { ...data, text: cleanText });
         if (socket.dbMeetingId) {
           prisma.caption.create({
-            data: { meetingId: socket.dbMeetingId, speakerId, originalText: text, originalLanguage: language }
+            data: { meetingId: socket.dbMeetingId, speakerId, originalText: cleanText, originalLanguage: language }
           }).catch(err => console.error("DB caption save error:", err));
         }
         try {
-          const clients = await io.in(meetingId).fetchSockets();
+          const clients = await io.in(targetRoom).fetchSockets();
           const targetLanguages = new Set();
           clients.forEach(c => {
             const s = c.userSettings || {};
@@ -373,23 +407,37 @@ function setupSocket(server) {
               targetLanguages.add(s.ttsLang);
             }
           });
+          console.log(`[CAPTION:TRANSLATING] clientsInRoom: ${clients.length}, targetLanguages:`, Array.from(targetLanguages));
           const translations = {};
           for (let targetLang of targetLanguages) {
             try {
-              const res = await translate(text, { to: targetLang, client: 'gtx' }).catch(async (e) => {
-                console.error("Google API failed, falling back to MyMemory...");
-                const fallbackUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${language}|${targetLang}`;
-                const fallbackRes = await fetch(fallbackUrl);
-                const fallbackData = await fallbackRes.json();
-                if (fallbackData?.responseData?.translatedText) {
-                  return { text: fallbackData.responseData.translatedText };
+              const translatePromise = (async () => {
+                try {
+                  return await translate(text, { to: targetLang, client: 'gtx' });
+                } catch (e) {
+                  console.warn("Google API failed, falling back to MyMemory...");
+                  const fallbackUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${language}|${targetLang}`;
+                  const fallbackRes = await fetch(fallbackUrl, { signal: AbortSignal.timeout(3000) });
+                  const fallbackData = await fallbackRes.json();
+                  if (fallbackData?.responseData?.translatedText) {
+                    return { text: fallbackData.responseData.translatedText };
+                  }
+                  throw e;
                 }
-                throw e;
-              });
+              })();
+
+              const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Translation timeout')), 4000));
+              const res = await Promise.race([translatePromise, timeoutPromise]);
               translations[targetLang] = res.text;
-            } catch (err) { console.error("Translation Error:", err.message); }
+            } catch (err) {
+              console.warn("Translation fallback for", targetLang, ":", err.message);
+              translations[targetLang] = text;
+            }
           }
-          io.to(meetingId).emit('caption:translated', { text, sourceLanguage: language, speakerId, senderSocketId: socket.id, translations });
+          const captionId = `cap_${speakerId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          const captionPayload = { id: captionId, text, sourceLanguage: language, speakerId, senderSocketId: socket.id, translations };
+          console.log(`[CAPTION:EMITTING] Emitting caption:translated to ${targetRoom}:`, captionPayload.id);
+          io.to(targetRoom).emit('caption:translated', captionPayload);
       } catch (error) {
         console.error('Caption translation error:', error);
       }

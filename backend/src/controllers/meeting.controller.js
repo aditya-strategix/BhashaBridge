@@ -373,33 +373,51 @@ exports.joinMeeting = async (req, res) => {
     }));
 
     const isCoHost = isOrgCoHost || (participant && participant.role === 'COHOST');
+    const targetRole = isHost ? 'HOST' : (isOrgCoHost ? 'COHOST' : (participant?.role || 'PARTICIPANT'));
     
     // Default: if you are host or cohost, you bypass waiting room.
     let finalStatus;
     if (!participant) {
       finalStatus = (isHost || isCoHost) ? 'ADMITTED' : 'WAITING';
-      participant = await withDbRetry(p => p.participant.create({
-        data: {
-          userId: req.user.userId,
-          meetingId: meeting.id,
-          role: isHost ? 'HOST' : (isOrgCoHost ? 'COHOST' : 'PARTICIPANT'),
-          status: finalStatus
+      try {
+        participant = await withDbRetry(p => p.participant.create({
+          data: {
+            userId: req.user.userId,
+            meetingId: meeting.id,
+            role: targetRole,
+            status: finalStatus
+          }
+        }));
+      } catch (createErr) {
+        if (createErr.code === 'P2002') {
+          // Concurrently created by parallel request - fetch existing and update
+          participant = await withDbRetry(p => p.participant.findUnique({
+            where: { userId_meetingId: { userId: req.user.userId, meetingId: meeting.id } }
+          }));
+          if (participant) {
+            finalStatus = (isHost || isCoHost) ? 'ADMITTED' : (participant.status === 'ADMITTED' ? 'ADMITTED' : 'WAITING');
+            participant = await withDbRetry(p => p.participant.update({
+              where: { id: participant.id },
+              data: { joinTime: new Date(), status: finalStatus, role: targetRole }
+            }));
+          }
+        } else {
+          throw createErr;
         }
-      }));
+      }
     } else {
       // If Host or CoHost, bypass lobby with ADMITTED.
       // If participant was already ADMITTED by host, preserve ADMITTED for reconnects.
       // If participant previously LEFT or was WAITING/REJECTED, they MUST be placed in WAITING room!
       finalStatus = (isHost || isCoHost) ? 'ADMITTED' : (participant.status === 'ADMITTED' ? 'ADMITTED' : 'WAITING');
-      const updatedRole = isHost ? 'HOST' : (isOrgCoHost ? 'COHOST' : participant.role);
       participant = await withDbRetry(p => p.participant.update({
         where: { id: participant.id },
-        data: { joinTime: new Date(), status: finalStatus, role: updatedRole }
+        data: { joinTime: new Date(), status: finalStatus, role: targetRole }
       }));
     }
 
     let waitingUsers = [];
-    if (participant.status === 'ADMITTED' && (participant.role === 'HOST' || participant.role === 'COHOST')) {
+    if (participant && participant.status === 'ADMITTED' && (participant.role === 'HOST' || participant.role === 'COHOST')) {
       const waitingDb = await withDbRetry(p => p.participant.findMany({
         where: { meetingId: meeting.id, status: 'WAITING' },
         include: { user: { select: { id: true, name: true, avatar: true } } }
@@ -436,10 +454,15 @@ exports.joinMeeting = async (req, res) => {
       }
       waitingUsers = activeWaiting;
     }
-    res.json({ meeting, participantStatus: participant.status, participantRole: participant.role, waitingUsers });
+    res.json({
+      meeting,
+      participantStatus: participant?.status || 'WAITING',
+      participantRole: participant?.role || 'PARTICIPANT',
+      waitingUsers
+    });
   } catch (error) {
     console.error('joinMeeting error:', error);
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: error.message || 'Server error' });
   }
 };
 
