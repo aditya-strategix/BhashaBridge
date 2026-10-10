@@ -85,7 +85,7 @@ export default function AdminDashboard() {
   if (!mounted || !user || (user.role !== 'ORG_ADMIN' && user.role !== 'PLATFORM_ADMIN')) return null;
 
   return (
-    <div style={{ backgroundColor: 'var(--bg-ivory, #FAF9F6)', minHeight: '100vh', width: '100%', maxWidth: '100vw', boxSizing: 'border-box', overflowX: 'hidden', padding: 'clamp(1rem, 3vw, 2rem)', fontFamily: 'var(--font-grotesk, sans-serif)', color: '#000' }}>
+    <div style={{ backgroundColor: 'var(--bg-ivory, #FAF9F6)', minHeight: '100vh', width: '100%', maxWidth: '100%', boxSizing: 'border-box', overflowX: 'hidden', padding: 'clamp(1rem, 3vw, 2rem)', fontFamily: 'var(--font-grotesk, sans-serif)', color: '#000' }}>
       <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
         <header style={{ borderBottom: '2px solid #000', paddingBottom: '2rem', marginBottom: '4rem' }}>
           <h1 style={{ fontFamily: 'var(--font-serif, serif)', fontStyle: 'italic', fontSize: '2rem', margin: 0, fontWeight: 'normal', color: 'var(--cobalt, #0047AB)' }}>BhashaBridge Directory</h1>

@@ -141,7 +141,7 @@ fetchReport();
         </div>
       )}
 
-      <div style={{ minHeight: '100vh', width: '100%', maxWidth: '100vw', boxSizing: 'border-box', backgroundColor: 'var(--bg-ivory, #FAF9F6)', color: '#000', padding: 'clamp(1rem, 3vw, 2rem)', position: 'relative', overflowX: 'hidden' }}>
+      <div style={{ minHeight: '100vh', width: '100%', maxWidth: '100%', boxSizing: 'border-box', backgroundColor: 'var(--bg-ivory, #FAF9F6)', color: '#000', padding: 'clamp(1rem, 3vw, 2rem)', position: 'relative', overflowX: 'hidden' }}>
         
         <header style={{ position: 'relative', zIndex: 10, display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #000', paddingBottom: '1rem', marginBottom: '2rem' }}>
           <div>

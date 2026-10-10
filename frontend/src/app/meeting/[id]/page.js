@@ -8,7 +8,8 @@ import {
   Mic, MicOff, Video, VideoOff, PhoneOff, Send,
   Users, Settings, Shield, UserCheck, UserX,
   MessageSquare, Globe, ChevronRight, VolumeX, MoreVertical, Star, Trash2, X,
-  Copy, Check, Clock, AlertCircle, FileText, ArrowLeft, RefreshCw
+  Copy, Check, Clock, AlertCircle, FileText, ArrowLeft, RefreshCw,
+  Monitor, MonitorOff, Subtitles, Sparkles, Radio, Activity, Volume2
 } from 'lucide-react';
 import useAuthStore from '../../../stores/authStore';
 import styles from './meeting.module.css';
@@ -56,34 +57,33 @@ const VideoPeer = ({ peer, name, role, isAudioOn = true, isVideoOn = true, avata
     };
   }, [peer]);
   return (
-    <div className={`${styles.videoTile} ${isAudioOn ? styles.activeSpeaker : ''}`}>
-      <video playsInline autoPlay ref={ref} className={styles.video} />
+    <div className={`${styles.videoTile} ${isAudioOn ? styles.videoTileActiveSpeaker : ''}`}>
+      <video playsInline autoPlay ref={ref} className={styles.videoElement} />
       {!isVideoOn && (
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F7F5F0' }}>
-          <Avatar name={name ? name.split(' (')[0] : 'P'} size={60} color="#0022FF" avatarUrl={avatarUrl} />
+        <div className={styles.avatarPlaceholder}>
+          <div className={styles.avatarPulseRing}>
+            {isAudioOn && <div className={styles.speakingWaves} />}
+            <Avatar name={name ? name.split(' (')[0] : 'P'} size={68} color="#0022FF" avatarUrl={avatarUrl} />
+          </div>
+          <span className={styles.avatarNameLabel}>{name || 'Participant'}</span>
         </div>
       )}
       <div className={styles.tileOverlay}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          <span className={styles.tileName}>{name || 'Participant'}</span>
+        <div className={styles.tileIdentity}>
+          <span className={styles.tileNamePill}>{name || 'Participant'}</span>
           {role && role !== 'PARTICIPANT' && (
-            <span style={{
-              background: role === 'HOST' ? '#FF3311' : '#0022FF',
-              color: '#F7F5F0',
-              padding: '0.15rem 0.45rem',
-              fontSize: '0.65rem',
-              fontWeight: 700,
-              fontFamily: 'var(--font-mono)',
-              border: '1px solid #0A0A0A',
-              boxShadow: '1px 1px 0 rgba(10,10,10,1)'
-            }}>
+            <span className={`${styles.tileRoleTag} ${role === 'HOST' ? styles.roleHost : styles.roleCoHost}`}>
               {role}
             </span>
           )}
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          {!isAudioOn && <MicOff size={16} color="var(--vermilion, #FF3311)" />}
-          {!isVideoOn && <VideoOff size={16} color="var(--vermilion, #FF3311)" />}
+        <div className={styles.tileStatusIcons}>
+          <div className={`${styles.statusIconPill} ${isAudioOn ? styles.iconActive : styles.iconMuted}`}>
+            {isAudioOn ? <Mic size={14} /> : <MicOff size={14} />}
+          </div>
+          <div className={`${styles.statusIconPill} ${isVideoOn ? styles.iconActive : styles.iconMuted}`}>
+            {isVideoOn ? <Video size={14} /> : <VideoOff size={14} />}
+          </div>
         </div>
       </div>
     </div>
@@ -119,10 +119,78 @@ export default function MeetingRoom() {
   const [showSettings, setShowSettings] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [meetingEnded, setMeetingEnded] = useState(false);
+  const [endedByInfo, setEndedByInfo] = useState(null);
   const [showLobby, setShowLobby] = useState(false);
   const [summaryModal, setSummaryModal] = useState({ isOpen: false, text: '', loading: false });
   const [lobbyToast, setLobbyToast] = useState(null); // { name }
   const lobbyToastTimer = useRef(null);
+
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const screenStreamRef = useRef(null);
+  const [showCaptions, setShowCaptions] = useState(true);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const meetingStartTimeRef = useRef(null);
+  const [micVolume, setMicVolume] = useState(0);
+  const membersToggleBtnRef = useRef(null);
+
+  useEffect(() => {
+    if (participantStatus !== 'ADMITTED' || meetingEnded) return;
+
+    const tick = () => {
+      if (!meetingStartTimeRef.current) {
+        meetingStartTimeRef.current = Date.now();
+      }
+      const diff = Math.max(0, Math.floor((Date.now() - meetingStartTimeRef.current) / 1000));
+      setElapsedSeconds(diff);
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [participantStatus, meetingEnded]);
+
+  const formatTimer = (totalSeconds) => {
+    const hrs = Math.floor(totalSeconds / 3600);
+    const mins = Math.floor((totalSeconds % 3600) / 60);
+    const secs = totalSeconds % 60;
+    if (hrs > 0) {
+      return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
+
+  useEffect(() => {
+    if (!stream || !isAudioOn) {
+      setMicVolume(0);
+      return;
+    }
+    let audioContext;
+    let animId;
+    try {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 64;
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+      const updateVolume = () => {
+        analyser.getByteFrequencyData(dataArray);
+        const sum = dataArray.reduce((acc, val) => acc + val, 0);
+        const avg = sum / dataArray.length;
+        setMicVolume(Math.min(100, Math.round((avg / 128) * 100)));
+        animId = requestAnimationFrame(updateVolume);
+      };
+      updateVolume();
+    } catch (_) {}
+
+    return () => {
+      if (animId) cancelAnimationFrame(animId);
+      if (audioContext) {
+        try { audioContext.close(); } catch (_) {}
+      }
+    };
+  }, [stream, isAudioOn]);
 
   const showLobbyToast = (name) => {
     if (lobbyToastTimer.current) clearTimeout(lobbyToastTimer.current);
@@ -155,6 +223,8 @@ export default function MeetingRoom() {
   const peersRef = useRef([]);
   const socketInitialized = useRef(false);
   const roleRef = useRef(null);
+  const hostIdRef = useRef(null);
+  const [meetingHostId, setMeetingHostId] = useState(null);
   const audioRef = useRef(true);
   const videoRef = useRef(true);
   const streamRef = useRef(null);
@@ -162,6 +232,65 @@ export default function MeetingRoom() {
   const moreMenuRef = useRef(null);
   const sidebarRef = useRef(null);
   const chatToggleBtnRef = useRef(null);
+
+  const stopScreenShare = useCallback(() => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(track => track.stop());
+      screenStreamRef.current = null;
+    }
+    if (stream) {
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        if (userVideo.current) userVideo.current.srcObject = stream;
+        peersRef.current.forEach(({ peer }) => {
+          try {
+            const sender = peer._pc?.getSenders()?.find(s => s.track && s.track.kind === 'video');
+            if (sender && videoTrack) {
+              sender.replaceTrack(videoTrack);
+            }
+          } catch (e) {
+            console.error('Error restoring video track:', e);
+          }
+        });
+      }
+    }
+    setIsScreenSharing(false);
+  }, [stream]);
+
+  const toggleScreenShare = async () => {
+    if (isScreenSharing) {
+      stopScreenShare();
+      return;
+    }
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      screenStreamRef.current = screenStream;
+      const screenTrack = screenStream.getVideoTracks()[0];
+
+      if (userVideo.current) {
+        userVideo.current.srcObject = screenStream;
+      }
+
+      peersRef.current.forEach(({ peer }) => {
+        try {
+          const sender = peer._pc?.getSenders()?.find(s => s.track && s.track.kind === 'video');
+          if (sender && screenTrack) {
+            sender.replaceTrack(screenTrack);
+          }
+        } catch (e) {
+          console.error('Error replacing track for screen share:', e);
+        }
+      });
+
+      screenTrack.onended = () => {
+        stopScreenShare();
+      };
+
+      setIsScreenSharing(true);
+    } catch (err) {
+      console.error('Failed to get display media:', err);
+    }
+  };
   
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -186,6 +315,9 @@ export default function MeetingRoom() {
         return;
       }
       if (chatToggleBtnRef.current && chatToggleBtnRef.current.contains(event.target)) {
+        return;
+      }
+      if (membersToggleBtnRef.current && membersToggleBtnRef.current.contains(event.target)) {
         return;
       }
       if (moreMenuRef.current && moreMenuRef.current.contains(event.target)) {
@@ -355,7 +487,14 @@ export default function MeetingRoom() {
           if (lowerMsg.includes('ended')) {
             errorType = 'ENDED';
             title = 'Meeting Has Ended';
-            description = 'This meeting has already concluded and is no longer active. You can view the meeting summary & report or return to your dashboard.';
+            let endedDesc = 'This meeting has already concluded and is no longer active. You can view the meeting summary & report or return to your dashboard.';
+            if (errData.endedBy) {
+              setEndedByInfo(errData.endedBy);
+              const rLabel = errData.endedBy.role === 'COHOST' ? 'Co-host' : 'Host';
+              const nLabel = errData.endedBy.name ? ` ${errData.endedBy.name}` : '';
+              endedDesc = `${rLabel}${nLabel} has ended this meeting for everyone.`;
+            }
+            description = endedDesc;
             showReport = true;
           } else if (lowerMsg.includes('cancelled') || lowerMsg.includes('canceled')) {
             errorType = 'CANCELLED';
@@ -392,10 +531,28 @@ export default function MeetingRoom() {
         isJoiningInProgressRef.current = false;
 
         const data = await res.json();
+        if (data.meeting) {
+          if (data.meeting.hostId) {
+            hostIdRef.current = data.meeting.hostId;
+            setMeetingHostId(data.meeting.hostId);
+          }
+          const rawStart = data.meeting.startTime || data.meeting.createdAt;
+          if (rawStart) {
+            const parsedTime = new Date(rawStart).getTime();
+            if (!isNaN(parsedTime) && parsedTime <= Date.now()) {
+              meetingStartTimeRef.current = parsedTime;
+            } else {
+              meetingStartTimeRef.current = Date.now();
+            }
+          } else {
+            meetingStartTimeRef.current = Date.now();
+          }
+        }
         setParticipantStatus(data.participantStatus);
         statusRef.current = data.participantStatus;
-        setParticipantRole(data.participantRole);
-        roleRef.current = data.participantRole;
+        const myInitialRole = (data.meeting?.hostId && user.id !== data.meeting.hostId && data.participantRole === 'HOST') ? 'COHOST' : data.participantRole;
+        setParticipantRole(myInitialRole);
+        roleRef.current = myInitialRole;
         if (data.waitingUsers) {
           setWaitingUsers(data.waitingUsers);
           if (data.waitingUsers.length > 0) setShowLobby(true);
@@ -499,8 +656,10 @@ export default function MeetingRoom() {
                   return;
                 }
                 if (myData) {
-                  setParticipantRole(myData.role);
-                  roleRef.current = myData.role;
+                  const hId = hostIdRef.current;
+                  const myCleanRole = (hId && currentUserId !== hId && myData.role === 'HOST') ? 'COHOST' : myData.role;
+                  setParticipantRole(myCleanRole);
+                  roleRef.current = myCleanRole;
                 }
 
                 // Remove peers not in admitted DB list
@@ -512,10 +671,12 @@ export default function MeetingRoom() {
                 peersRef.current = peersRef.current.filter(p => !p.userId || admittedUserIds.has(p.userId));
 
                 // Update remaining peers with latest roles
+                const hId = hostIdRef.current;
                 data.forEach(dbPeer => {
                   const idx = peersRef.current.findIndex(p => p.userId === dbPeer.userId);
                   if (idx !== -1) {
-                    peersRef.current[idx] = { ...peersRef.current[idx], role: dbPeer.role, name: dbPeer.name, avatar: dbPeer.avatar };
+                    const cleanRole = (hId && dbPeer.userId !== hId && dbPeer.role === 'HOST') ? 'COHOST' : dbPeer.role;
+                    peersRef.current[idx] = { ...peersRef.current[idx], role: cleanRole, name: dbPeer.name, avatar: dbPeer.avatar };
                   }
                 });
                 setPeers([...peersRef.current]);
@@ -561,7 +722,10 @@ export default function MeetingRoom() {
             return updated;
           });
         });
-        newSocket.on('meeting:ended', () => {
+        newSocket.on('meeting:ended', (payload) => {
+          if (payload?.endedBy) {
+            setEndedByInfo(payload.endedBy);
+          }
           setMeetingEnded(true);
           if (streamRef.current) {
             try { streamRef.current.getTracks().forEach(t => t.stop()); } catch (_) {}
@@ -578,8 +742,10 @@ export default function MeetingRoom() {
             peersRef.current.splice(existingIdx, 1);
           }
 
-          const peer = createPeer(socketId, newSocket.id, currentStream, newSocket, user.name, data.participantRole);
-          peersRef.current.push({ peerID: socketId, userId, peer, name, role, avatar });
+          const hId = hostIdRef.current;
+          const cleanRole = (hId && userId !== hId && role === 'HOST') ? 'COHOST' : role;
+          const peer = createPeer(socketId, newSocket.id, currentStream, newSocket, user.name, roleRef.current);
+          peersRef.current.push({ peerID: socketId, userId, peer, name, role: cleanRole, avatar });
           setPeers([...peersRef.current]);
         });
         newSocket.on('participant:left', ({ socketId, userId }) => {
@@ -614,8 +780,10 @@ export default function MeetingRoom() {
             });
 
             try {
-              const peer = addPeer(payload.signal, payload.callerId, currentStream, newSocket, user.name, data.participantRole);
-              peersRef.current.push({ peerID: payload.callerId, userId: payload.userId, peer, name: payload.name, role: payload.role, avatar: payload.avatar });
+              const hId = hostIdRef.current;
+              const cleanRole = (hId && payload.userId !== hId && payload.role === 'HOST') ? 'COHOST' : payload.role;
+              const peer = addPeer(payload.signal, payload.callerId, currentStream, newSocket, user.name, roleRef.current);
+              peersRef.current.push({ peerID: payload.callerId, userId: payload.userId, peer, name: payload.name, role: cleanRole, avatar: payload.avatar });
               setPeers([...peersRef.current]);
             } catch (err) {
               console.warn('[WebRTC] addPeer error:', err.message);
@@ -713,8 +881,13 @@ export default function MeetingRoom() {
             if (captionEnabled) {
               const textToShow = captionLang === 'original' ? data.text : (data.translations?.[captionLang] || `[Rate Limited] ${data.text}`);
               if (textToShow) {
-                setCurrentCaption(textToShow);
-                setTimeout(() => setCurrentCaption(null), 4000);
+                setCurrentCaption({
+                  text: textToShow,
+                  speaker: data.speakerName || 'Speaker',
+                  sourceLang: data.sourceLanguage || 'auto',
+                  targetLang: captionLang === 'original' ? (data.sourceLanguage || 'en') : captionLang,
+                });
+                setTimeout(() => setCurrentCaption(null), 5000);
               }
             }
 
@@ -1022,23 +1195,33 @@ export default function MeetingRoom() {
     if (isHostOrCoHost) {
       setShowLeaveModal(true);
     } else {
+      stopScreenShare();
       router.push(`/meeting/${meetingId}/report`);
     }
   };
 
   const confirmEndMeeting = async () => {
+    stopScreenShare();
+    const myRole = isHost ? 'HOST' : 'COHOST';
+    const myName = user?.name || (isHost ? 'Host' : 'Co-host');
+    const endedByPayload = { name: myName, role: myRole, userId: user?.id };
     try {
-      await authFetch(`/meetings/${meetingId}/end`, { method: 'POST' });
+      await authFetch(`/meetings/${meetingId}/end`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endedBy: endedByPayload })
+      });
     } catch (e) {
       console.error('Failed to end meeting via API', e);
     }
     if (socket) {
-      socket.emit('meeting:end', { meetingId });
+      socket.emit('meeting:end', { meetingId, endedBy: endedByPayload });
     }
     router.push(`/meeting/${meetingId}/report`);
   };
 
   const confirmLeaveMeeting = () => {
+    stopScreenShare();
     router.push(`/meeting/${meetingId}/report`);
   };
 
@@ -1234,7 +1417,22 @@ export default function MeetingRoom() {
             lineHeight: 1.6,
             fontFamily: 'var(--font-grotesk)'
           }}>
-            {joinError.message}
+            {isEnded ? (
+              endedByInfo?.name ? (
+                <>
+                  <strong style={{ color: '#0A0A0A' }}>
+                    {endedByInfo.role === 'COHOST' ? 'Co-host' : 'Host'} {endedByInfo.name}
+                  </strong>{' '}
+                  has ended this meeting for everyone.
+                </>
+              ) : endedByInfo?.role === 'COHOST' ? (
+                'The co-host has ended this meeting for everyone.'
+              ) : (
+                'The host has ended this meeting for everyone.'
+              )
+            ) : (
+              joinError.message
+            )}
           </p>
 
           {/* Action buttons */}
@@ -1441,7 +1639,18 @@ export default function MeetingRoom() {
             lineHeight: 1.6,
             fontFamily: 'var(--font-grotesk)'
           }}>
-            The host has ended this meeting for everyone.
+            {endedByInfo?.name ? (
+              <>
+                <strong style={{ color: '#0A0A0A' }}>
+                  {endedByInfo.role === 'COHOST' ? 'Co-host' : 'Host'} {endedByInfo.name}
+                </strong>{' '}
+                has ended this meeting for everyone.
+              </>
+            ) : endedByInfo?.role === 'COHOST' ? (
+              'The co-host has ended this meeting for everyone.'
+            ) : (
+              'The host has ended this meeting for everyone.'
+            )}
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             <button
@@ -1598,62 +1807,102 @@ export default function MeetingRoom() {
           </div>
         )}
 
-        {/* === HEADER === */}
-        <header style={{ position: 'relative', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 1rem', gap: '0.75rem', background: '#F7F5F0', borderBottom: '2px solid #0A0A0A', zIndex: 10, fontFamily: 'var(--font-grotesk)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <div style={{ width: 10, height: 10, borderRadius: '0', background: '#FF3311' }} />
-              <span style={{ fontWeight: 600, color: '#0A0A0A', fontSize: '1.35rem', fontFamily: 'var(--font-serif)', fontStyle: 'italic', letterSpacing: '-0.02em' }}>BhashaBridge</span>
+        {/* === STUDIO BROADCAST HEADER === */}
+        <header className={styles.studioHeader}>
+          <div className={styles.headerLeft}>
+            <div className={styles.brandEmblem}>
+              <div className={styles.onAirDot} />
+              <span className={styles.brandName}>BhashaBridge</span>
             </div>
-            <div style={{ height: 20, width: 2, background: '#0A0A0A' }} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: '#0022FF', fontWeight: 600 }}>{meetingId}</code>
+            <div className={styles.headerDivider} />
+            <div className={styles.roomMetaGroup}>
+              <div className={styles.roomCodePill}>
+                <span>ROOM:</span>
+                <code>{meetingId}</code>
+              </div>
               <button
                 onClick={handleCopyInviteLink}
-                title={copiedLink ? "Copied invite link!" : "Copy Invite Link"}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.35rem',
-                  background: copiedLink ? '#10b981' : '#F7F5F0',
-                  color: copiedLink ? '#FFFFFF' : '#0A0A0A',
-                  border: '2px solid #0A0A0A',
-                  padding: '0.2rem 0.5rem',
-                  cursor: 'pointer',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '0.72rem',
-                  fontWeight: 700,
-                  boxShadow: '2px 2px 0 rgba(10,10,10,1)',
-                  transition: 'all 0.1s'
-                }}
+                title={copiedLink ? "Link copied!" : "Copy meeting invite link"}
+                className={styles.copyCodeBtn}
               >
-                {copiedLink ? <Check size={12} /> : <Copy size={12} />}
-                <span>{copiedLink ? 'Copied' : 'Copy Link'}</span>
+                {copiedLink ? <Check size={12} color="#10B981" /> : <Copy size={12} />}
+                <span>{copiedLink ? 'COPIED' : 'COPY'}</span>
               </button>
+              <div className={styles.timerBadge}>
+                <Clock size={12} />
+                <span>{formatTimer(elapsedSeconds)}</span>
+              </div>
               {participantRole && (
-                <span style={{ background: participantRole === 'HOST' ? '#FF3311' : '#0022FF', color: '#F7F5F0', padding: '0.2rem 0.45rem', fontSize: '0.68rem', fontWeight: 700, fontFamily: 'var(--font-mono)', border: '2px solid #0A0A0A', boxShadow: '2px 2px 0 rgba(10,10,10,1)' }}>
+                <span className={`${styles.rolePill} ${participantRole === 'HOST' ? styles.roleHost : participantRole === 'COHOST' ? styles.roleCoHost : styles.roleParticipant}`}>
                   {participantRole}
                 </span>
               )}
             </div>
           </div>
 
-          <div className='meetingHeaderRight' style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <div className={styles.headerRight}>
+            {/* Quick Spoken Dialect Dropdown */}
+            <div className={styles.dialectSelectorPill} title="Your Spoken Mic Dialect">
+              <Mic size={13} color="var(--cobalt)" />
+              <select
+                className={styles.dialectSelect}
+                value={spokenLanguage}
+                onChange={e => {
+                  const val = e.target.value;
+                  setSpokenLanguage(val);
+                  if (useAuthStore.getState().user) {
+                    useAuthStore.getState().user.language = val;
+                  }
+                  if (socket) socket.emit("user:update_settings", useAuthStore.getState().user);
+                  const token = localStorage.getItem('token');
+                  if (token) {
+                    fetch(`${API_URL}/auth/profile`, {
+                      method: 'PUT',
+                      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ preferredLanguage: val })
+                    }).catch(console.error);
+                  }
+                }}
+              >
+                {LANG_OPTIONS.map(l => (
+                  <option key={l.value} value={l.value}>
+                    MIC: {l.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Host Lobby Alert */}
             {isHostOrCoHost && waitingUsers.length > 0 && (
               <button
                 onClick={() => setShowLobby(l => !l)}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', background: '#F7F5F0', border: '2px solid #0A0A0A', color: '#0A0A0A', cursor: 'pointer', fontFamily: 'var(--font-grotesk)', fontSize: '0.82rem', padding: '0.35rem 0.75rem', boxShadow: '2px 2px 0 rgba(10,10,10,1)' }}
+                className={`${styles.headerBtn} ${styles.lobbyAlertBtn}`}
               >
-                <div style={{ width: 8, height: 8, borderRadius: '0', background: '#FF3311', animation: 'pulse 1s infinite' }} />
-                <span style={{ fontWeight: 700 }}>Lobby ({waitingUsers.length})</span>
+                <div className={styles.onAirDot} />
+                <span>Lobby ({waitingUsers.length})</span>
               </button>
             )}
-            <button onClick={fetchLiveSummary} style={{ background: '#F7F5F0', border: '2px solid #0A0A0A', color: '#0A0A0A', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.82rem', padding: '0.35rem 0.75rem', boxShadow: '2px 2px 0 rgba(10,10,10,1)', fontWeight: 600 }}>
-              ✨ Summary
+
+            {/* AI Summary */}
+            <button
+              onClick={fetchLiveSummary}
+              className={styles.headerBtn}
+              title="Generate Instant Meeting Summary"
+            >
+              <Sparkles size={14} color="#0022FF" />
+              <span>AI Summary</span>
             </button>
-            <button onClick={() => setShowSettings(true)} style={{ background: '#0A0A0A', border: '2px solid #0A0A0A', color: '#F7F5F0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontFamily: 'var(--font-grotesk)', fontSize: '0.82rem', padding: '0.35rem 0.75rem', boxShadow: '2px 2px 0 rgba(10,10,10,1)', fontWeight: 600 }}>
-              <Settings size={14} /> Settings
+
+            {/* Settings */}
+            <button
+              onClick={() => setShowSettings(true)}
+              className={`${styles.headerBtn} ${styles.headerBtnDark}`}
+            >
+              <Settings size={14} />
+              <span>Settings</span>
             </button>
+
+            {/* Test Audio Demo */}
             <button
               onClick={() => {
                 if (!isDemoActive) {
@@ -1663,282 +1912,373 @@ export default function MeetingRoom() {
                   setIsDemoActive(false);
                 }
               }}
-              style={{
-                background: isDemoActive ? '#FF3311' : '#0022FF',
-                border: '2px solid #0A0A0A',
-                color: '#F7F5F0',
-                padding: '0.35rem 0.85rem',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.3rem',
-                fontFamily: 'var(--font-grotesk)',
-                fontSize: '0.8rem',
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                boxShadow: '2px 2px 0 rgba(10,10,10,1)'
-              }}
+              className={`${styles.headerBtn} ${isDemoActive ? styles.headerBtnLive : ''}`}
             >
-              {isDemoActive ? 'Demo Playing...' : '⚡ Test Audio'}
+              <Radio size={14} />
+              <span>{isDemoActive ? 'Demo Playing...' : '⚡ Test Audio'}</span>
             </button>
           </div>
         </header>
 
         <main className={styles.main}>
-        {/* === VIDEO AREA === */}
-        <div className={styles.videoSection}>
-          <div className={styles.videoGrid} data-count={peers.length + 1}>
-            {/* Self tile */}
-            <div className={`${styles.videoTile} ${isAudioOn ? styles.activeSpeaker : ''}`}>
-              <video muted ref={userVideo} autoPlay playsInline className={styles.video} />
-              {!isVideoOn && (
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F7F5F0' }}>
-                  <Avatar name={user.name} size={60} color="#0022FF" avatarUrl={user.avatar} />
-                </div>
-              )}
-              <div className={styles.tileOverlay}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <span className={styles.tileName}>{user.name} (You)</span>
-                  {participantRole && participantRole !== 'PARTICIPANT' && (
-                    <span style={{
-                      background: participantRole === 'HOST' ? '#FF3311' : '#0022FF',
-                      color: '#F7F5F0',
-                      padding: '0.15rem 0.45rem',
-                      fontSize: '0.65rem',
-                      fontWeight: 700,
-                      fontFamily: 'var(--font-mono)',
-                      border: '1px solid #0A0A0A',
-                      boxShadow: '1px 1px 0 rgba(10,10,10,1)'
-                    }}>
-                      {participantRole}
-                    </span>
+          {/* === VIDEO STAGE === */}
+          <div className={styles.videoSection}>
+            <div className={styles.videoStageContainer}>
+              <div
+                className={`${styles.videoGrid} ${
+                  (peers.length + 1) === 1 ? styles.gridCount1 :
+                  (peers.length + 1) === 2 ? styles.gridCount2 :
+                  (peers.length + 1) <= 4 ? styles.gridCount3 : styles.gridCountMany
+                }`}
+                data-count={peers.length + 1}
+              >
+                {/* Self Tile */}
+                <div className={`${styles.videoTile} ${isAudioOn ? styles.videoTileActiveSpeaker : ''}`}>
+                  <video muted ref={userVideo} autoPlay playsInline className={styles.videoElement} />
+                  {!isVideoOn && (
+                    <div className={styles.avatarPlaceholder}>
+                      <div className={styles.avatarPulseRing}>
+                        {isAudioOn && <div className={styles.speakingWaves} />}
+                        <Avatar name={user.name} size={68} color="#0022FF" avatarUrl={user.avatar} />
+                      </div>
+                      <span className={styles.avatarNameLabel}>{user.name || 'You'} (You)</span>
+                    </div>
                   )}
+                  <div className={styles.tileOverlay}>
+                    <div className={styles.tileIdentity}>
+                      <span className={styles.tileNamePill}>
+                        {isScreenSharing && <Monitor size={12} color="#10B981" />}
+                        {user.name || 'You'} (You)
+                      </span>
+                      {participantRole && participantRole !== 'PARTICIPANT' && (
+                        <span className={`${styles.tileRoleTag} ${participantRole === 'HOST' ? styles.roleHost : styles.roleCoHost}`}>
+                          {participantRole}
+                        </span>
+                      )}
+                    </div>
+                    <div className={styles.tileStatusIcons}>
+                      <div className={`${styles.statusIconPill} ${isAudioOn ? styles.iconActive : styles.iconMuted}`}>
+                        {isAudioOn ? <Mic size={14} /> : <MicOff size={14} />}
+                      </div>
+                      <div className={`${styles.statusIconPill} ${isVideoOn ? styles.iconActive : styles.iconMuted}`}>
+                        {isVideoOn ? <Video size={14} /> : <VideoOff size={14} />}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  {!isAudioOn && <MicOff size={16} color="var(--vermilion, #FF3311)" />}
-                  {!isVideoOn && <VideoOff size={16} color="var(--vermilion, #FF3311)" />}
-                </div>
+
+                {/* Peer Tiles */}
+                {peers
+                  .filter((peer, index, self) => index === self.findIndex(p => (p.userId && p.userId === peer.userId) || p.peerID === peer.peerID))
+                  .map((peer, i) => (
+                    <VideoPeer
+                      key={peer.userId || peer.peerID || i}
+                      peer={peer.peer}
+                      name={peer.name || `Participant ${i + 1}`}
+                      role={peer.role}
+                      isAudioOn={peer.isAudioOn}
+                      isVideoOn={peer.isVideoOn}
+                      avatarUrl={peer.avatar}
+                    />
+                  ))}
               </div>
             </div>
-            {peers
-              .filter((peer, index, self) => index === self.findIndex(p => (p.userId && p.userId === peer.userId) || p.peerID === peer.peerID))
-              .map((peer, i) => (
-                <VideoPeer key={peer.userId || peer.peerID || i} peer={peer.peer} name={`${peer.name || `Participant ${i + 1}`}`} role={peer.role} isAudioOn={peer.isAudioOn} isVideoOn={peer.isVideoOn} avatarUrl={peer.avatar} />
-            ))}
-          </div>
 
-          {/* Caption overlay */}
-          {currentCaption && (
-            <div className={styles.captionsOverlay}>
-              <div className={styles.captionText}>{currentCaption}</div>
-            </div>
-          )}
-
-          {/* Controls bar */}
-          <div className='meetingControlsBar' style={{ position: 'absolute', bottom: '2rem', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '0.75rem', padding: '0.75rem 1rem', background: '#F7F5F0', border: '2px solid #0A0A0A', boxShadow: '8px 8px 0 rgba(10,10,10,1)', zIndex: 150 }}>
-            <button
-              onClick={toggleAudio}
-              title={isAudioOn ? 'Mute' : 'Unmute'}
-              style={{ width: 48, height: 48, borderRadius: '0', border: '2px solid #0A0A0A', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.1s', background: isAudioOn ? 'transparent' : '#FF3311', color: isAudioOn ? '#0A0A0A' : 'white' }}
-            >
-              {isAudioOn ? <Mic size={20} /> : <MicOff size={20} />}
-            </button>
-            <button
-              onClick={toggleVideo}
-              title={isVideoLocked ? 'Camera disabled by Host' : (isVideoOn ? 'Turn off camera' : 'Turn on camera')}
-              disabled={isVideoLocked}
-              style={{ width: 48, height: 48, borderRadius: '0', border: '2px solid #0A0A0A', cursor: isVideoLocked ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.1s', background: isVideoOn ? 'transparent' : '#FF3311', color: isVideoOn ? '#0A0A0A' : 'white', opacity: isVideoLocked ? 0.5 : 1 }}
-            >
-              {isVideoOn ? <Video size={20} /> : <VideoOff size={20} />}
-            </button>
-            <button
-              ref={chatToggleBtnRef}
-              onClick={() => setSidebarTab(t => t === 'CHAT' ? null : 'CHAT')}
-              title="Chat"
-              style={{ width: 48, height: 48, borderRadius: '0', border: '2px solid #0A0A0A', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: sidebarTab === 'CHAT' ? '#0022FF' : 'transparent', color: sidebarTab === 'CHAT' ? 'white' : '#0A0A0A' }}
-            >
-              <MessageSquare size={20} />
-            </button>
-            {isHostOrCoHost && (
-              <div ref={moreMenuRef} style={{ position: 'relative' }}>
-                <button
-                  onClick={() => setShowMoreMenu(m => !m)}
-                  title="More Controls"
-                  style={{ width: 48, height: 48, borderRadius: '0', border: '2px solid #0A0A0A', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: showMoreMenu ? '#0A0A0A' : 'transparent', color: showMoreMenu ? '#F7F5F0' : '#0A0A0A', transition: 'all 0.1s' }}
-                >
-                  <MoreVertical size={20} />
-                </button>
-                {showMoreMenu && (
-                  <div style={{ position: 'absolute', bottom: 60, left: '50%', transform: 'translateX(-50%)', background: '#F7F5F0', border: '2px solid #0A0A0A', borderRadius: '0', padding: '0.5rem', minWidth: 220, zIndex: 100, fontFamily: 'var(--font-grotesk)', boxShadow: '8px 8px 0 rgba(10,10,10,1)' }}>
-                    <button onClick={() => { if(socket) socket.emit('meeting:force_mute_all', { role: participantRole }); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: '#0A0A0A', cursor: 'pointer', fontSize: '0.9rem', textAlign: 'left' }} onMouseEnter={e => e.currentTarget.style.background='rgba(10,10,10,0.05)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
-                      <MicOff size={16} color="#FF3311" /> Mute All
-                    </button>
-                    <button onClick={() => { if(socket) socket.emit('meeting:force_video_off_all', { role: participantRole }); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: '#0A0A0A', cursor: 'pointer', fontSize: '0.9rem', textAlign: 'left' }} onMouseEnter={e => e.currentTarget.style.background='rgba(10,10,10,0.05)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
-                      <VideoOff size={16} color="#FF3311" /> Turn Off All Cameras
-                    </button>
-                    <button onClick={() => {
-                      const newLock = !roomAudioLocked;
-                      setRoomAudioLocked(newLock);
-                      if(socket) socket.emit('meeting:lock_hardware', { role: participantRole, type: 'audio', locked: newLock });
-                      setShowMoreMenu(false);
-                    }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: '#0A0A0A', cursor: 'pointer', fontSize: '0.9rem', textAlign: 'left' }} onMouseEnter={e => e.currentTarget.style.background='rgba(10,10,10,0.05)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
-                      <MicOff size={16} color={roomAudioLocked ? "#0022FF" : "#0A0A0A"} /> {roomAudioLocked ? 'Unlock All Mics' : 'Lock All Mics'}
-                    </button>
-                    <button onClick={() => {
-                      const newLock = !roomVideoLocked;
-                      setRoomVideoLocked(newLock);
-                      if(socket) socket.emit('meeting:lock_hardware', { role: participantRole, type: 'video', locked: newLock });
-                      setShowMoreMenu(false);
-                    }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: '#0A0A0A', cursor: 'pointer', fontSize: '0.9rem', textAlign: 'left' }} onMouseEnter={e => e.currentTarget.style.background='rgba(10,10,10,0.05)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
-                      <VideoOff size={16} color={roomVideoLocked ? "#0022FF" : "#0A0A0A"} /> {roomVideoLocked ? 'Unlock All Cameras' : 'Lock All Cameras'}
-                    </button>
-                    <div style={{ height: 1, background: 'rgba(10,10,10,0.1)', margin: '0' }} />
-                    <button onClick={() => { setShowLobby(l => !l); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: '#0A0A0A', cursor: 'pointer', fontSize: '0.9rem', textAlign: 'left' }} onMouseEnter={e => e.currentTarget.style.background='rgba(10,10,10,0.05)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
-                      <Shield size={16} color="#0022FF" /> {waitingUsers.length > 0 ? `Lobby (${waitingUsers.length})` : 'Lobby'}
-                    </button>
-                    <button onClick={() => { setSidebarTab(t => t === 'MEMBERS' ? null : 'MEMBERS'); setShowMoreMenu(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.75rem', background: 'none', border: 'none', color: '#0A0A0A', cursor: 'pointer', fontSize: '0.9rem', textAlign: 'left' }} onMouseEnter={e => e.currentTarget.style.background='rgba(10,10,10,0.05)'} onMouseLeave={e => e.currentTarget.style.background='none'}>
-                      <Users size={16} /> Manage Members
-                    </button>
+            {/* Subtitle / Caption HUD */}
+            {currentCaption && showCaptions && (
+              <div className={styles.captionsOverlay}>
+                <div className={styles.captionCard}>
+                  <div className={styles.captionSpeakerBadge}>
+                    <div className={styles.captionLiveDot} />
+                    <span>{typeof currentCaption === 'object' ? (currentCaption.speaker || 'Speaker') : 'Speaker'}</span>
+                    {typeof currentCaption === 'object' && currentCaption.sourceLang && (
+                      <span className={styles.captionLangTag}>
+                        [{currentCaption.sourceLang.toUpperCase()} → {currentCaption.targetLang ? currentCaption.targetLang.toUpperCase() : 'AUTO'}]
+                      </span>
+                    )}
                   </div>
-                )}
+                  <p className={styles.captionText}>
+                    {typeof currentCaption === 'object' ? currentCaption.text : currentCaption}
+                  </p>
+                </div>
               </div>
             )}
-            <button
-              onClick={leaveMeeting}
-              title="Leave meeting"
-              style={{ width: 48, height: 48, borderRadius: '0', border: '2px solid #0A0A0A', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#FF3311', color: '#F7F5F0', boxShadow: '4px 4px 0 rgba(10,10,10,1)', transition: 'transform 0.1s' }}
-              onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-2px)'}
-              onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}
-            >
-              <PhoneOff size={20} />
-            </button>
-          </div>
-        </div>
 
-        {/* === SIDEBAR === */}
-        <aside ref={sidebarRef} className={`${styles.chatSection} ${sidebarTab ? styles.chatSectionOpen : ''}`}>
-          {/* Sidebar tabs */}
-          <div style={{ display: 'flex', alignItems: 'center', borderBottom: '2px solid #0A0A0A' }}>
-            {['CHAT', 'MEMBERS'].map(tab => (
-              <button key={tab} onClick={() => setSidebarTab(tab)} style={{ flex: 1, padding: '1rem', background: 'none', border: 'none', cursor: 'pointer', color: sidebarTab === tab ? '#0A0A0A' : '#5A5A5A', fontFamily: 'var(--font-grotesk)', borderBottom: sidebarTab === tab ? '2px solid #0A0A0A' : '3px solid transparent', fontSize: '0.9rem', transition: 'all 0.2s', position: 'relative', fontWeight: sidebarTab === tab ? 600 : 400 }}>
-                {tab === 'CHAT' ? <><MessageSquare size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Chat</>
-                  : <><Users size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Members ({peers.length + 1}){waitingUsers.length > 0 && isHostOrCoHost && <span style={{ position: 'absolute', top: 12, right: 12, width: 8, height: 8, borderRadius: '50%', background: 'var(--vermilion, #ff4500)' }} />}</>}
+            {/* Floating Controls Dock */}
+            <div className={styles.meetingControlsBar}>
+              {/* Mic Toggle */}
+              <button
+                onClick={toggleAudio}
+                title={isAudioLocked ? 'Microphone locked by host' : (isAudioOn ? 'Mute Microphone' : 'Unmute Microphone')}
+                disabled={isAudioLocked}
+                className={`${styles.controlBtn} ${!isAudioOn ? styles.controlBtnDisabled : ''}`}
+              >
+                {isAudioOn ? <Mic size={20} /> : <MicOff size={20} />}
               </button>
-            ))}
-            <button
-              onClick={() => setSidebarTab(null)}
-              title="Close panel"
-              style={{
-                background: 'none',
-                border: 'none',
-                borderLeft: '2px solid #0A0A0A',
-                padding: '0 1rem',
-                alignSelf: 'stretch',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                color: '#0A0A0A',
-                transition: 'background 0.15s'
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = 'rgba(10,10,10,0.06)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'none'}
-            >
-              <X size={18} />
-            </button>
-          </div>
 
-          {sidebarTab === 'CHAT' ? (
-            <>
-              <div className={styles.chatMessages}>
-                {messages.length === 0 && (
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#5A5A5A', padding: '2rem 1rem', textAlign: 'center' }}>
-                    <MessageSquare size={32} style={{ marginBottom: '0.75rem', opacity: 0.4 }} />
-                    <p style={{ margin: 0, fontSize: '0.88rem' }}>No messages yet.<br />Start the conversation!</p>
-                  </div>
-                )}
-                {messages.map((m, i) => (
-                  <div key={i} className={`${styles.message} ${m.senderId === user.id ? styles.self : ''}`}>
-                    {m.senderId !== user.id && <span style={{ fontSize: '0.72rem', color: '#5A5A5A', fontFamily: 'var(--font-mono)', marginBottom: '0.2rem', paddingLeft: '0.25rem' }}>{m.senderName}</span>}
-                    <div className={styles.messageContent}>
-                      <div style={{ fontSize: '0.9rem', lineHeight: 1.5 }}>{m.text}</div>
-                      {m.translatedText && m.senderId !== user.id && (
-                        <div className={styles.translatedText}>{m.translatedText}</div>
-                      )}
+              {/* Video Toggle */}
+              <button
+                onClick={toggleVideo}
+                title={isVideoLocked ? 'Camera disabled by Host' : (isVideoOn ? 'Turn off camera' : 'Turn on camera')}
+                disabled={isVideoLocked}
+                className={`${styles.controlBtn} ${!isVideoOn ? styles.controlBtnDisabled : ''}`}
+              >
+                {isVideoOn ? <Video size={20} /> : <VideoOff size={20} />}
+              </button>
+
+              {/* Screen Share Toggle */}
+              <button
+                onClick={toggleScreenShare}
+                title={isScreenSharing ? 'Stop Screen Share' : 'Share Screen'}
+                className={`${styles.controlBtn} ${isScreenSharing ? styles.controlBtnScreenShare : ''}`}
+              >
+                {isScreenSharing ? <MonitorOff size={20} /> : <Monitor size={20} />}
+              </button>
+
+              {/* Captions CC Toggle */}
+              <button
+                onClick={() => setShowCaptions(c => !c)}
+                title={showCaptions ? 'Hide Subtitles' : 'Show Subtitles'}
+                className={`${styles.controlBtn} ${showCaptions ? styles.controlBtnActive : ''}`}
+              >
+                <Subtitles size={20} />
+              </button>
+
+              {/* Chat Toggle */}
+              <button
+                ref={chatToggleBtnRef}
+                onClick={() => setSidebarTab(t => t === 'CHAT' ? null : 'CHAT')}
+                title="Chat"
+                className={`${styles.controlBtn} ${sidebarTab === 'CHAT' ? styles.controlBtnActive : ''}`}
+              >
+                <MessageSquare size={20} />
+                {messages.length > 0 && <span className={styles.btnBadge}>{messages.length}</span>}
+              </button>
+
+              {/* Members Toggle */}
+              <button
+                ref={membersToggleBtnRef}
+                onClick={() => setSidebarTab(t => t === 'MEMBERS' ? null : 'MEMBERS')}
+                title="Members"
+                className={`${styles.controlBtn} ${sidebarTab === 'MEMBERS' ? styles.controlBtnActive : ''}`}
+              >
+                <Users size={20} />
+                <span className={styles.btnBadge}>{peers.length + 1}</span>
+              </button>
+
+              {/* Host Controls */}
+              {isHostOrCoHost && (
+                <div ref={moreMenuRef} style={{ position: 'relative' }}>
+                  <button
+                    onClick={() => setShowMoreMenu(m => !m)}
+                    title="More Controls"
+                    className={`${styles.controlBtn} ${showMoreMenu ? styles.controlBtnActive : ''}`}
+                  >
+                    <MoreVertical size={20} />
+                  </button>
+                  {showMoreMenu && (
+                    <div className={styles.moreMenuDropdown}>
+                      <button
+                        className={styles.moreMenuItem}
+                        onClick={() => { if(socket) socket.emit('meeting:force_mute_all', { role: participantRole }); setShowMoreMenu(false); }}
+                      >
+                        <MicOff size={16} color="#FF3311" /> Mute All
+                      </button>
+                      <button
+                        className={styles.moreMenuItem}
+                        onClick={() => { if(socket) socket.emit('meeting:force_video_off_all', { role: participantRole }); setShowMoreMenu(false); }}
+                      >
+                        <VideoOff size={16} color="#FF3311" /> Turn Off All Cameras
+                      </button>
+                      <button
+                        className={styles.moreMenuItem}
+                        onClick={() => {
+                          const newLock = !roomAudioLocked;
+                          setRoomAudioLocked(newLock);
+                          if(socket) socket.emit('meeting:lock_hardware', { role: participantRole, type: 'audio', locked: newLock });
+                          setShowMoreMenu(false);
+                        }}
+                      >
+                        <MicOff size={16} color={roomAudioLocked ? "#0022FF" : "#0A0A0A"} /> {roomAudioLocked ? 'Unlock All Mics' : 'Lock All Mics'}
+                      </button>
+                      <button
+                        className={styles.moreMenuItem}
+                        onClick={() => {
+                          const newLock = !roomVideoLocked;
+                          setRoomVideoLocked(newLock);
+                          if(socket) socket.emit('meeting:lock_hardware', { role: participantRole, type: 'video', locked: newLock });
+                          setShowMoreMenu(false);
+                        }}
+                      >
+                        <VideoOff size={16} color={roomVideoLocked ? "#0022FF" : "#0A0A0A"} /> {roomVideoLocked ? 'Unlock All Cameras' : 'Lock All Cameras'}
+                      </button>
+                      <div className={styles.moreMenuDivider} />
+                      <button
+                        className={styles.moreMenuItem}
+                        onClick={() => { setShowLobby(l => !l); setShowMoreMenu(false); }}
+                      >
+                        <Shield size={16} color="#0022FF" /> {waitingUsers.length > 0 ? `Lobby (${waitingUsers.length})` : 'Lobby'}
+                      </button>
+                      <button
+                        className={styles.moreMenuItem}
+                        onClick={() => { setSidebarTab('MEMBERS'); setShowMoreMenu(false); }}
+                      >
+                        <Users size={16} /> Manage Members
+                      </button>
                     </div>
-                  </div>
-                ))}
-                <div ref={chatEndRef} />
-              </div>
-              <form onSubmit={sendMessage} className={styles.chatInputArea}>
-                <input type="text" className={styles.chatInput} placeholder="Type a message..." value={chatInput} onChange={e => setChatInput(e.target.value)} />
-                <button type="submit" className={styles.sendBtn}><Send size={16} /></button>
-              </form>
-            </>
-          ) : (
-            <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem' }}>
-              {/* Waiting room section for host */}
-              {isHostOrCoHost && waitingUsers.length > 0 && (
-                <div style={{ marginBottom: '1rem', padding: '0.75rem', background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0' }}>
-                  <div style={{ margin: '0 0 0.75rem', fontSize: '0.78rem', fontWeight: 700, color: '#FF3311', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#FF3311', animation: 'pulse 1s infinite' }} /> Waiting Room ({waitingUsers.length}) </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                    {waitingUsers.map(w => (
-                      <div key={w.userId} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.6rem', background: 'rgba(255,255,255,0.04)', borderRadius: '10px' }}>
-                        <Avatar name={w.name} size={32} color="#0A0A0A" avatarUrl={w.avatar} />
-                        <span style={{ flex: 1, color: '#0A0A0A', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
-                        <button onClick={() => handleAdmit(w.userId)} style={{ width: 28, height: 28, borderRadius: '6px', background: '#0022FF', border: 'none', color: '#0A0A0A', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <UserCheck size={14} />
-                        </button>
-                        <button onClick={() => handleReject(w.userId)} style={{ width: 28, height: 28, borderRadius: '6px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#FF3311', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <UserX size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+                  )}
                 </div>
               )}
 
-              {/* In-meeting participants */}
-              <p style={{ margin: '0 0 0.6rem', fontSize: '0.72rem', fontWeight: 700, color: '#5A5A5A', textTransform: 'uppercase', letterSpacing: '0.08em' }}>In Meeting</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.75rem', background: 'transparent', borderRadius: '0', border: 'none', borderBottom: '1px solid #5A5A5A' }}>
-                  <Avatar name={user.name} size={34} color="#0022FF" avatarUrl={user.avatar} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, color: '#0A0A0A', fontSize: '0.88rem' }}>{user.name} <span style={{ color: '#5A5A5A', fontFamily: 'var(--font-mono)', fontWeight: 400 }}>(You)</span></div>
-                    <div style={{ fontSize: '0.72rem', color: '#0022FF', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{participantRole}</div>
-                  </div>
-                </div>
-                {peers.map((peer, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0.75rem', background: 'transparent', borderRadius: 0, borderBottom: '1px solid #0A0A0A' }}>
-                    <Avatar name={peer.name || `P${i + 1}`} size={34} color="#0A0A0A" avatarUrl={peer.avatar} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 500, color: '#0A0A0A', fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{peer.name || `Participant ${i + 1}`}</div>
-                      <div style={{ fontSize: '0.72rem', color: peer.role === 'HOST' ? '#0022FF' : peer.role === 'COHOST' ? '#FF3311' : '#5A5A5A', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{peer.role || 'Connected'}</div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center', flexShrink: 0 }}>
-                      {(peer.isAudioOn ?? true) ? <Mic size={14} color="#5A5A5A" /> : <MicOff size={14} color="#FF3311" />}
-                      {(peer.isVideoOn ?? true) ? <Video size={14} color="#5A5A5A" /> : <VideoOff size={14} color="#FF3311" />}
-                      
-                      {isHost && peer.role !== 'HOST' && (
-                        <button onClick={() => handleToggleMeetingCoHost(peer.userId, peer.role === 'COHOST')} title={peer.role === 'COHOST' ? 'Remove Co-Host' : 'Make Co-Host'} style={{ background: 'none', border: 'none', color: peer.role === 'COHOST' ? '#FF3311' : '#5A5A5A', cursor: 'pointer', padding: '0.1rem', display: 'flex' }}>
-                          <Star size={14} fill={peer.role === 'COHOST' ? '#FF3311' : 'none'} />
-                        </button>
-                      )}
-                      {((isHost && peer.role !== 'HOST') || (participantRole === 'COHOST' && peer.role === 'PARTICIPANT')) && (
-                        <button onClick={() => handleRemoveParticipant(peer.userId)} title="Remove Participant" style={{ background: 'none', border: 'none', color: '#FF3311', cursor: 'pointer', padding: '0.1rem', display: 'flex' }}>
-                          <Trash2 size={14} />
-                        </button>
-                      )}
-
-                    </div>
-                  </div>
-                ))}
-              </div>
+              {/* Leave Meeting */}
+              <button
+                onClick={leaveMeeting}
+                title="Leave meeting"
+                className={`${styles.controlBtn} ${styles.controlBtnDanger}`}
+              >
+                <PhoneOff size={20} />
+              </button>
             </div>
-          )}
-        </aside>
-      </main>
+          </div>
+
+          {/* === SIDEBAR === */}
+          <aside ref={sidebarRef} className={`${styles.chatSection} ${sidebarTab ? styles.chatSectionOpen : ''}`}>
+            {/* Sidebar tabs */}
+            <div className={styles.sidebarHeaderRow}>
+              {['CHAT', 'MEMBERS'].map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setSidebarTab(tab)}
+                  className={`${styles.sidebarTabBtn} ${sidebarTab === tab ? styles.sidebarTabBtnActive : ''}`}
+                >
+                  {tab === 'CHAT' ? (
+                    <><MessageSquare size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Chat</>
+                  ) : (
+                    <><Users size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Members ({peers.length + 1}){waitingUsers.length > 0 && isHostOrCoHost && <span style={{ marginLeft: 6, width: 8, height: 8, borderRadius: '50%', background: '#FF3311', display: 'inline-block' }} />}</>
+                  )}
+                </button>
+              ))}
+              <button
+                onClick={() => setSidebarTab(null)}
+                title="Close panel"
+                className={styles.sidebarCloseBtn}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {sidebarTab === 'CHAT' ? (
+              <>
+                <div className={styles.chatMessages}>
+                  {messages.length === 0 && (
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#5A5A5A', padding: '2rem 1rem', textAlign: 'center' }}>
+                      <MessageSquare size={32} style={{ marginBottom: '0.75rem', opacity: 0.4 }} />
+                      <p style={{ margin: 0, fontSize: '0.88rem' }}>No messages yet.<br />Start the conversation!</p>
+                    </div>
+                  )}
+                  {messages.map((m, i) => (
+                    <div key={i} className={`${styles.message} ${m.senderId === user.id ? styles.self : ''}`}>
+                      {m.senderId !== user.id && <span style={{ fontSize: '0.72rem', color: '#5A5A5A', fontFamily: 'var(--font-mono)', marginBottom: '0.2rem', paddingLeft: '0.25rem' }}>{m.senderName}</span>}
+                      <div className={styles.messageContent}>
+                        <div style={{ fontSize: '0.9rem', lineHeight: 1.5 }}>{m.text}</div>
+                        {m.translatedText && m.senderId !== user.id && (
+                          <div className={styles.translatedText}>{m.translatedText}</div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  <div ref={chatEndRef} />
+                </div>
+                <form onSubmit={sendMessage} className={styles.chatInputArea}>
+                  <input type="text" className={styles.chatInput} placeholder="Type a message..." value={chatInput} onChange={e => setChatInput(e.target.value)} />
+                  <button type="submit" className={styles.sendBtn}><Send size={16} /></button>
+                </form>
+              </>
+            ) : (
+              <div className={styles.membersPanel}>
+                {/* Waiting room section for host */}
+                {isHostOrCoHost && waitingUsers.length > 0 && (
+                  <div style={{ marginBottom: '0.5rem', padding: '0.75rem', background: '#FFF1F0', border: '1px solid var(--vermilion)', boxShadow: '2px 2px 0 var(--ink)' }}>
+                    <div className={styles.membersSectionTitle} style={{ color: 'var(--vermilion)', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem' }}>
+                      <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--vermilion)', animation: 'pulseBeacon 1s infinite' }} />
+                      Waiting Room ({waitingUsers.length})
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      {waitingUsers.map(w => (
+                        <div key={w.userId} className={styles.memberCard}>
+                          <Avatar name={w.name} size={32} color="#0A0A0A" avatarUrl={w.avatar} />
+                          <span className={styles.memberName}>{w.name}</span>
+                          <div className={styles.memberActions}>
+                            <button onClick={() => handleAdmit(w.userId)} className={styles.memberBtnIcon} title="Admit" style={{ color: 'var(--cobalt)' }}>
+                              <UserCheck size={16} />
+                            </button>
+                            <button onClick={() => handleReject(w.userId)} className={styles.memberBtnIcon} title="Reject" style={{ color: 'var(--vermilion)' }}>
+                              <UserX size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* In-meeting participants */}
+                <h4 className={styles.membersSectionTitle}>In Meeting</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <div className={styles.memberCard}>
+                    <div className={styles.memberMeta}>
+                      <Avatar name={user.name} size={34} color="#0022FF" avatarUrl={user.avatar} />
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div className={styles.memberName}>{user.name} <span style={{ color: '#6B7280', fontSize: '0.75rem' }}>(You)</span></div>
+                        <span className={styles.memberRole}>{participantRole || 'PARTICIPANT'}</span>
+                      </div>
+                    </div>
+                    <div className={styles.memberActions}>
+                      {isAudioOn ? <Mic size={14} color="#10B981" /> : <MicOff size={14} color="#FF3311" />}
+                      {isVideoOn ? <Video size={14} color="#10B981" /> : <VideoOff size={14} color="#FF3311" />}
+                    </div>
+                  </div>
+
+                  {peers.map((peer, i) => (
+                    <div key={peer.userId || peer.peerID || i} className={styles.memberCard}>
+                      <div className={styles.memberMeta}>
+                        <Avatar name={peer.name || `P${i + 1}`} size={34} color="#0A0A0A" avatarUrl={peer.avatar} />
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div className={styles.memberName}>{peer.name || `Participant ${i + 1}`}</div>
+                          <span className={styles.memberRole}>{peer.role || 'PARTICIPANT'}</span>
+                        </div>
+                      </div>
+                      <div className={styles.memberActions}>
+                        {(peer.isAudioOn ?? true) ? <Mic size={14} color="#10B981" /> : <MicOff size={14} color="#FF3311" />}
+                        {(peer.isVideoOn ?? true) ? <Video size={14} color="#10B981" /> : <VideoOff size={14} color="#FF3311" />}
+
+                        {isHost && peer.role !== 'HOST' && (
+                          <button
+                            onClick={() => handleToggleMeetingCoHost(peer.userId, peer.role === 'COHOST')}
+                            title={peer.role === 'COHOST' ? 'Remove Co-Host' : 'Make Co-Host'}
+                            className={styles.memberBtnIcon}
+                          >
+                            <Star size={14} fill={peer.role === 'COHOST' ? '#FF3311' : 'none'} color={peer.role === 'COHOST' ? '#FF3311' : '#6B7280'} />
+                          </button>
+                        )}
+                        {((isHost && peer.role !== 'HOST') || (participantRole === 'COHOST' && peer.role === 'PARTICIPANT')) && (
+                          <button
+                            onClick={() => handleRemoveParticipant(peer.userId)}
+                            title="Remove Participant"
+                            className={styles.memberBtnIcon}
+                            style={{ color: '#FF3311' }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </aside>
+        </main>
 
       {/* === SUMMARY MODAL === */}
         {summaryModal.isOpen && (
@@ -1970,7 +2310,9 @@ export default function MeetingRoom() {
             <div style={{ background: '#F7F5F0', border: '2px solid #0A0A0A', borderRadius: '0', padding: 'clamp(1.5rem, 5vw, 3rem)', width: '100%', maxWidth: 440, boxSizing: 'border-box', fontFamily: 'var(--font-grotesk)', boxShadow: '8px 8px 0 rgba(10,10,10,1)' }} onClick={(e) => e.stopPropagation()}>
               <h2 style={{ margin: '0 0 1rem 0', color: '#0A0A0A', fontSize: '1.8rem', fontWeight: 600, fontFamily: 'var(--font-serif)', fontStyle: 'italic' }}>Leave Meeting</h2>
               <p style={{ margin: '0 0 2rem 0', color: '#5A5A5A', fontSize: '0.95rem', lineHeight: 1.5 }}>
-                You are the host. Do you want to end the meeting for everyone, or just leave?
+                {isHost
+                  ? 'You are the host. Do you want to end the meeting for everyone, or just leave?'
+                  : 'You are a co-host. Do you want to end the meeting for everyone, or just leave?'}
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <button onClick={confirmEndMeeting} style={{ padding: '1rem', background: '#FF3311', color: '#F7F5F0', border: '2px solid #0A0A0A', fontWeight: 600, cursor: 'pointer', fontSize: '1rem', textTransform: 'uppercase', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
@@ -1998,6 +2340,24 @@ export default function MeetingRoom() {
               </div>
   
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {/* Microphone Live Level Monitor */}
+                  <div style={{ padding: '0.85rem 1rem', background: '#FFFFFF', border: '2px solid #0A0A0A', boxShadow: '3px 3px 0 #0A0A0A' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Activity size={14} color="#0022FF" />
+                        <span style={{ fontSize: '0.78rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#0A0A0A', fontFamily: 'var(--font-mono)' }}>
+                          Mic Input Level
+                        </span>
+                      </div>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', fontWeight: 700, color: isAudioOn ? '#10B981' : '#FF3311' }}>
+                        {isAudioOn ? `${micVolume}%` : 'MUTED'}
+                      </span>
+                    </div>
+                    <div className={styles.audioMeterTrack}>
+                      <div className={styles.audioMeterFill} style={{ width: `${isAudioOn ? micVolume : 0}%` }} />
+                    </div>
+                  </div>
+
                   <div>
                     <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.75rem', color: '#0A0A0A', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       <Globe size={12} style={{ verticalAlign: 'middle', marginRight: 5 }} />My spoken language (mic)

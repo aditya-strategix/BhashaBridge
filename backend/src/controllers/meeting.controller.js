@@ -334,7 +334,19 @@ exports.joinMeeting = async (req, res) => {
     }
 
     if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
-    if (meeting.state === 'COMPLETED') return res.status(403).json({ error: 'This meeting has already ended.' });
+    if (meeting.state === 'COMPLETED') {
+      let endedBy = null;
+      if (meeting.summaryCache) {
+        try {
+          const sc = typeof meeting.summaryCache === 'string' ? JSON.parse(meeting.summaryCache) : meeting.summaryCache;
+          endedBy = sc?._endedBy || null;
+        } catch (_) {}
+      }
+      return res.status(403).json({ 
+        error: 'This meeting has already ended.',
+        endedBy
+      });
+    }
     if (meeting.state === 'CANCELLED') return res.status(403).json({ error: 'This meeting has been cancelled.' });
 
     let isOrgCoHost = false;
@@ -351,10 +363,17 @@ exports.joinMeeting = async (req, res) => {
       }
     }
 
-    const isHost = meeting.hostId === req.user.userId || isOrgAdmin;
+    let participant = await withDbRetry(p => p.participant.findUnique({
+      where: { userId_meetingId: { userId: req.user.userId, meetingId: meeting.id } }
+    }));
 
-    // If SCHEDULED and host or org admin is joining, flip to ONGOING
-    if (isHost && meeting.state === 'SCHEDULED') {
+    // ONLY the meeting creator is the primary HOST. All other elevated members are COHOST.
+    const isHost = meeting.hostId === req.user.userId;
+    const isCoHost = !isHost && (isOrgCoHost || isOrgAdmin || (participant && (participant.role === 'COHOST' || participant.role === 'HOST')));
+    const targetRole = isHost ? 'HOST' : (isCoHost ? 'COHOST' : (participant?.role === 'HOST' ? 'COHOST' : (participant?.role || 'PARTICIPANT')));
+
+    // If SCHEDULED and host, co-host, or org admin is joining, flip to ONGOING
+    if ((isHost || isCoHost || isOrgCoHost || isOrgAdmin) && meeting.state === 'SCHEDULED') {
       await withDbRetry(p => p.meeting.update({
         where: { id: meeting.id },
         data: { state: 'ONGOING', startTime: new Date() }
@@ -368,12 +387,15 @@ exports.joinMeeting = async (req, res) => {
       if (global.sseEmit) global.sseEmit('dashboard:refresh');
     }
 
-    let participant = await withDbRetry(p => p.participant.findUnique({
-      where: { userId_meetingId: { userId: req.user.userId, meetingId: meeting.id } }
-    }));
-
-    const isCoHost = isOrgCoHost || (participant && participant.role === 'COHOST');
-    const targetRole = isHost ? 'HOST' : (isOrgCoHost ? 'COHOST' : (participant?.role || 'PARTICIPANT'));
+    // Ensure database consistency: in this meeting, ONLY meeting.hostId can ever have role 'HOST'.
+    await withDbRetry(p => p.participant.updateMany({
+      where: {
+        meetingId: meeting.id,
+        userId: { not: meeting.hostId },
+        role: 'HOST'
+      },
+      data: { role: 'COHOST' }
+    })).catch(() => {});
     
     // Default: if you are host or cohost, you bypass waiting room.
     let finalStatus;
@@ -521,19 +543,44 @@ exports.endMeeting = async (req, res) => {
       return res.status(403).json({ error: 'Only the host or org admins/co-hosts can end the meeting' });
     }
 
+    // Identify caller details and role
+    const callerUser = await withDbRetry(p => p.user.findUnique({
+      where: { id: req.user.userId },
+      select: { id: true, name: true }
+    }));
+
+    const isPrimaryHost = meeting.hostId === req.user.userId;
+    const endedByRole = isPrimaryHost ? 'HOST' : 'COHOST';
+    const endedByName = callerUser?.name || req.body?.endedBy?.name || (isPrimaryHost ? 'Host' : 'Co-host');
+    const endedBy = {
+      name: endedByName,
+      role: endedByRole,
+      userId: req.user.userId
+    };
+
+    let currentCache = {};
+    if (meeting.summaryCache) {
+      try {
+        currentCache = typeof meeting.summaryCache === 'string' ? JSON.parse(meeting.summaryCache) : meeting.summaryCache;
+      } catch (_) {}
+    }
+    currentCache._endedBy = endedBy;
+
     const updated = await withDbRetry(p => p.meeting.update({
       where: { id: meeting.id },
       data: { 
         state: 'COMPLETED',
         endTime: new Date(),
-        startTime: meeting.startTime || meeting.createdAt
+        startTime: meeting.startTime || meeting.createdAt,
+        summaryCache: currentCache
       }
     }));
 
     if (global.io) {
-      if (meeting.meetingLink) global.io.to(meeting.meetingLink).emit('meeting:ended');
-      if (cleanLink && cleanLink !== meeting.meetingLink) global.io.to(cleanLink).emit('meeting:ended');
-      if (meeting.id) global.io.to(meeting.id).emit('meeting:ended');
+      const payload = { endedBy };
+      if (meeting.meetingLink) global.io.to(meeting.meetingLink).emit('meeting:ended', payload);
+      if (cleanLink && cleanLink !== meeting.meetingLink) global.io.to(cleanLink).emit('meeting:ended', payload);
+      if (meeting.id) global.io.to(meeting.id).emit('meeting:ended', payload);
       global.io.emit('dashboard:refresh');
       if (meeting.meetingLink) global.io.to(meeting.meetingLink).emit('meeting:refresh');
     }
@@ -541,7 +588,7 @@ exports.endMeeting = async (req, res) => {
       global.sseEmit('dashboard:refresh');
     }
 
-    res.json({ meeting: updated });
+    res.json({ meeting: updated, endedBy });
   } catch (error) {
     console.error('endMeeting error:', error);
     res.status(500).json({ error: 'Server error' });
@@ -641,9 +688,12 @@ exports.deleteMeeting = async (req, res) => {
         }
       };
 
-      // If host deletes a SCHEDULED meeting, mark it CANCELLED
+      // If host deletes a SCHEDULED meeting, mark it CANCELLED; if ONGOING, mark it COMPLETED
       if (isHost && meeting.state === 'SCHEDULED') {
         updateData.state = 'CANCELLED';
+      } else if (isHost && meeting.state === 'ONGOING') {
+        updateData.state = 'COMPLETED';
+        updateData.endTime = new Date();
       }
 
       await withDbRetry(p => p.meeting.update({
@@ -981,7 +1031,7 @@ exports.getParticipants = async (req, res) => {
 
     const mapped = participants.map(p => ({
       userId: p.userId,
-      role: p.role,
+      role: p.userId === meeting.hostId ? 'HOST' : (p.role === 'HOST' ? 'COHOST' : p.role),
       name: p.user?.name || 'User',
       avatar: p.user?.avatar
     }));

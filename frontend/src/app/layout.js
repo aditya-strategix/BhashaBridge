@@ -16,6 +16,12 @@ export const metadata = {
   description: "Real-time multilingual meeting platform with live translation.",
 };
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+};
+
 export default function RootLayout({ children }) {
   return (
     <html suppressHydrationWarning

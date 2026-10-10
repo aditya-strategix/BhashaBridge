@@ -80,6 +80,7 @@ function setupSocket(server) {
         const cleanLink = (meetingId || '').trim();
         socket.userLanguage = language || 'en';
         socket.userId = userId;
+        socket.userName = participant.user?.name;
         socket.meetingId = meeting.meetingLink;
         socket.dbMeetingId = meeting.id;
         socket.cleanLink = cleanLink;
@@ -116,12 +117,13 @@ function setupSocket(server) {
           io.to(meeting.id).emit('waiting:request', waitPayload);
         } else if (participant.status === 'ADMITTED') {
           socket.isWaiting = false;
+          const effectiveRole = participant.userId === meeting.hostId ? 'HOST' : (participant.role === 'HOST' ? 'COHOST' : participant.role);
           const joinedPayload = { 
             userId, 
             peerId, 
             socketId: socket.id,
             name: participant.user?.name,
-            role: participant.role,
+            role: effectiveRole,
             avatar: participant.user?.avatar 
           };
           socket.to(meeting.id).emit('participant:joined', joinedPayload);
@@ -253,9 +255,30 @@ function setupSocket(server) {
       }
     });
 
-    socket.on('meeting:end', async ({ meetingId }) => {
+    socket.on('meeting:end', async ({ meetingId, endedBy }) => {
       try {
-        io.to(meetingId).emit('meeting:ended');
+        const meeting = await resolveMeeting(meetingId);
+        let finalEndedBy = endedBy;
+        if (!finalEndedBy && socket.userId) {
+          const u = await withDbRetry(p => p.user.findUnique({
+            where: { id: socket.userId },
+            select: { name: true }
+          }));
+          const isHost = meeting && meeting.hostId === socket.userId;
+          finalEndedBy = {
+            name: u?.name || socket.userName || (isHost ? 'Host' : 'Co-host'),
+            role: isHost ? 'HOST' : 'COHOST',
+            userId: socket.userId
+          };
+        }
+        const payload = { endedBy: finalEndedBy };
+        io.to(meetingId).emit('meeting:ended', payload);
+        if (meeting?.meetingLink && meeting.meetingLink !== meetingId) {
+          io.to(meeting.meetingLink).emit('meeting:ended', payload);
+        }
+        if (meeting?.id && meeting.id !== meetingId) {
+          io.to(meeting.id).emit('meeting:ended', payload);
+        }
         io.to(meetingId).emit('meeting:refresh');
         io.emit('dashboard:refresh');
         if (global.sseEmit) global.sseEmit('dashboard:refresh');

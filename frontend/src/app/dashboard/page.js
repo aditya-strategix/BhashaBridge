@@ -6,7 +6,8 @@ import Link from 'next/link';
 import {
   PlusCircle, Video, Link as LinkIcon, Clock, Users,
   CalendarCheck2, LogOut, Trash2, User as UserIcon, Copy, Check,
-  Mail, Send, Building, Key, RefreshCw
+  Mail, Send, Building, Key, RefreshCw, ArrowRight, ExternalLink,
+  FileText, BarChart3, Globe, Calendar, Radio, Sparkles, Shield, Zap
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
@@ -16,16 +17,29 @@ import styles from './dashboard.module.css';
 import NotificationBell from '../../components/NotificationBell';
 
 // ------- constants -------
+const LANG_MAP = {
+  en: { name: 'English', native: 'English' },
+  hi: { name: 'Hindi', native: 'हिन्दी' },
+  bn: { name: 'Bengali', native: 'বাংলা' },
+  ta: { name: 'Tamil', native: 'தமிழ்' },
+  te: { name: 'Telugu', native: 'తెలుగు' },
+  mr: { name: 'Marathi', native: 'मराठी' },
+  gu: { name: 'Gujarati', native: 'ગુજરાતી' },
+  es: { name: 'Spanish', native: 'Español' },
+  fr: { name: 'French', native: 'Français' },
+  de: { name: 'German', native: 'Deutsch' },
+};
+
 const STATE_CFG = {
-  ONGOING:   { label: 'Live',      bg: '#111',  color: '#FDFBF7' },
-  SCHEDULED: { label: 'Scheduled', bg: 'transparent',  color: '#111' },
-  COMPLETED: { label: 'Ended',     bg: 'transparent', color: '#111' },
+  ONGOING:   { label: 'Live',      bg: '#FF3311', color: '#FDFBF7' },
+  SCHEDULED: { label: 'Scheduled', bg: 'transparent', color: '#111' },
+  COMPLETED: { label: 'Ended',     bg: 'transparent', color: '#0022FF' },
   CANCELLED: { label: 'Cancelled', bg: 'transparent', color: '#FF3311' },
 };
 
 const ROLE_CFG = {
-  HOST:        { label: 'Host',        color: '#E34234', bg: 'transparent' },
-  COHOST:      { label: 'Co-Host',     color: '#0047AB', bg: 'transparent' },
+  HOST:        { label: 'Host',        color: '#FF3311', bg: 'transparent' },
+  COHOST:      { label: 'Co-Host',     color: '#0022FF', bg: 'transparent' },
   PARTICIPANT: { label: 'Participant', color: '#111', bg: 'transparent' },
 };
 
@@ -115,6 +129,7 @@ function DashboardContent() {
 
   // Meeting state
   const [meetings, setMeetings] = useState([]);
+  const [meetingMode, setMeetingMode] = useState('instant'); // 'instant' | 'schedule'
   const [newTitle, setNewTitle] = useState('');
   const [scheduledTime, setScheduledTime] = useState('');
   const [selectedOrgId, setSelectedOrgId] = useState('');
@@ -252,12 +267,12 @@ function DashboardContent() {
 
   // ------- meeting handlers -------
   const handleCreateMeeting = async (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     setIsCreating(true);
     try {
-      const payload = { title: newTitle || 'Untitled Meeting' };
+      const payload = { title: newTitle.trim() || 'Multilingual Meeting' };
 
-      if (scheduledTime) {
+      if (meetingMode === 'schedule' && scheduledTime) {
         let parsed = new Date(scheduledTime);
         if (isNaN(parsed.getTime())) {
           const parts = scheduledTime.match(/(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})/);
@@ -633,6 +648,8 @@ function DashboardContent() {
     const part = m.participants?.find(p => p.userId === user?.id);
     return part && part.status === 'ADMITTED';
   });
+  const hasLiveMeeting = upcomingMeetings.some(m => m.state === 'ONGOING');
+  const userLangInfo = LANG_MAP[user?.language] || { name: user?.language?.toUpperCase() || 'EN', native: '' };
   const displayedHistory = showAllHistory ? historyMeetings : historyMeetings.slice(0, 3);
   const displayMeetings  = activeTab === 'upcoming' ? upcomingMeetings : displayedHistory;
 
@@ -1146,45 +1163,200 @@ function DashboardContent() {
 
         {/* Header */}
         <header className={styles.header}>
-          <h1 className={styles.title}>BhashaBridge</h1>
+          <div className={styles.brandGroup}>
+            <h1 className={styles.title}>
+              BhashaBridge <span className={styles.titleArchive}>/ Workspace</span>
+            </h1>
+            <div className={styles.brandMeta}>
+              <span className={styles.versionBadge}>v2.4 Live</span>
+              <span>•</span>
+              <span>Multilingual Conference Hub</span>
+              <span>•</span>
+              <span style={{ color: '#10B981', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                <span className={styles.pulseDotGreen} style={{ width: 6, height: 6 }} /> WebRTC Mesh Online
+              </span>
+            </div>
+          </div>
+
           <div className={styles.userInfo}>
-            <span className={styles.userName}>{user.name} <span style={{ color: '#111', fontWeight: 400, textTransform: 'none' }}>({user.language})</span></span>
+            {/* User Capsule */}
+            <div className={styles.userCapsule}>
+              <div className={styles.avatarCircle}>
+                {user.avatar ? (
+                  <img src={user.avatar} alt={user.name} className={styles.avatarImg} />
+                ) : (
+                  (user.name || '?').charAt(0).toUpperCase()
+                )}
+              </div>
+              <div className={styles.userTexts}>
+                <span className={styles.userName}>{user.name}</span>
+                <span className={styles.userLangTag}>
+                  <Globe size={11} color="var(--cobalt)" />
+                  <span>{userLangInfo.name} ({user.language?.toUpperCase()})</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Admin Panel button if ORG_ADMIN or PLATFORM_ADMIN */}
             {(user.role === 'ORG_ADMIN' || user.role === 'PLATFORM_ADMIN') && (
-              <Link href="/admin" style={{ color: 'var(--cobalt)', textDecoration: 'none', fontWeight: 600 }}>Admin Panel</Link>
+              <Link href="/admin" className={`${styles.navActionBtn} ${styles.adminBtn}`}>
+                <Shield size={13} />
+                <span>Admin</span>
+              </Link>
             )}
+
+            {/* Edit Profile */}
             <button
               onClick={() => { setEditName(user.name); setEditLanguage(user.language); setEditAvatar(user.avatar || ''); setShowProfileModal(true); }}
-              style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', background: 'transparent', border: '1px solid #111', color: '#111', padding: '0.4rem 0.8rem', cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
+              className={styles.navActionBtn}
             >
-              <UserIcon size={14} /> Profile
+              <UserIcon size={13} />
+              <span>Profile</span>
             </button>
+
+            {/* Notification Bell */}
             <NotificationBell />
-            <button onClick={handleLogout} className={styles.logoutBtn} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-              <LogOut size={14} /> Logout
+
+            {/* Logout */}
+            <button onClick={handleLogout} className={`${styles.navActionBtn} ${styles.logoutBtn}`}>
+              <LogOut size={13} />
+              <span>Logout</span>
             </button>
           </div>
         </header>
+
+        {/* Executive Hero & KPI Metrics Strip */}
+        <section className={styles.heroStrip}>
+          <div className={styles.heroTopRow}>
+            <div>
+              <h2 className={styles.heroGreeting}>Welcome back, {user.name}.</h2>
+              <p className={styles.heroSubtitle}>
+                Multilingual conference control center. Speak in your native dialect; peers receive live translated subtitles and synthetic speech in real-time.
+              </p>
+            </div>
+            <div className={styles.systemStatusPill}>
+              {hasLiveMeeting ? (
+                <>
+                  <span className={styles.pulseDotRed} />
+                  <span style={{ color: 'var(--vermilion)' }}>Meeting in Progress</span>
+                </>
+              ) : (
+                <>
+                  <span className={styles.pulseDotGreen} />
+                  <span>All Systems Operational</span>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* 4-KPI Grid */}
+          <div className={styles.kpiGrid}>
+            <div className={styles.kpiCard}>
+              <div className={styles.kpiHeader}>
+                <span className={styles.kpiLabel}>Upcoming Meetings</span>
+                {hasLiveMeeting ? <Radio size={16} color="var(--vermilion)" /> : <Calendar size={16} color="var(--cobalt)" />}
+              </div>
+              <div className={styles.kpiValueRow}>
+                <span className={styles.kpiValue}>{upcomingMeetings.length}</span>
+                {hasLiveMeeting && (
+                  <span className={styles.liveBadge} style={{ fontSize: '0.65rem', padding: '0.1rem 0.4rem' }}>
+                    ● 1 Live
+                  </span>
+                )}
+              </div>
+              <span className={styles.kpiSub}>Scheduled or currently active</span>
+            </div>
+
+            <div className={styles.kpiCard}>
+              <div className={styles.kpiHeader}>
+                <span className={styles.kpiLabel}>Meeting Archive</span>
+                <Clock size={16} color="var(--muted)" />
+              </div>
+              <div className={styles.kpiValueRow}>
+                <span className={styles.kpiValue}>{historyMeetings.length}</span>
+              </div>
+              <span className={styles.kpiSub}>Transcripts & summaries recorded</span>
+            </div>
+
+            <div className={styles.kpiCard}>
+              <div className={styles.kpiHeader}>
+                <span className={styles.kpiLabel}>Organizations</span>
+                <Building size={16} color="var(--cobalt)" />
+              </div>
+              <div className={styles.kpiValueRow}>
+                <span className={styles.kpiValue}>{organizations.length}</span>
+              </div>
+              <span className={styles.kpiSub}>Team workspaces & access passes</span>
+            </div>
+
+            <div className={styles.kpiCard}>
+              <div className={styles.kpiHeader}>
+                <span className={styles.kpiLabel}>Speech Translation</span>
+                <Sparkles size={16} color="#D97706" />
+              </div>
+              <div className={styles.kpiValueRow}>
+                <span className={styles.kpiValue} style={{ fontSize: '1.75rem' }}>10+</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem', fontWeight: 700 }}>LANGS</span>
+              </div>
+              <span className={styles.kpiSub}>Sub-350ms neural latency</span>
+            </div>
+          </div>
+        </section>
 
         <div className={styles.grid}>
           {/* ===== LEFT COLUMN ===== */}
           <div className={styles.leftCol}>
 
-            {/* New Meeting */}
-            <div className={styles.card} style={{ marginBottom: '1.5rem' }}>
-              <h2 className={styles.cardTitle}>New Conversation</h2>
-              <form onSubmit={handleCreateMeeting}>
-                <input
-                  type="text"
-                  placeholder="Topic (optional)"
-                  className={styles.input}
-                  value={newTitle}
-                  onChange={e => setNewTitle(e.target.value)}
-                />
+            {/* Launch Meeting Card */}
+            <div className={styles.actionCard}>
+              <div className={styles.cardHeaderRow}>
+                <span className={styles.cardDot} style={{ background: meetingMode === 'instant' ? 'var(--vermilion)' : 'var(--cobalt)' }} />
+                <h3 className={styles.cardTitle}>
+                  {meetingMode === 'instant' ? 'Instant Meeting' : 'Schedule Meeting'}
+                </h3>
+              </div>
+
+              {/* Segmented Switch */}
+              <div className={styles.segmentedSwitch}>
+                <button
+                  type="button"
+                  onClick={() => { setMeetingMode('instant'); setScheduledTime(''); }}
+                  className={`${styles.switchBtn} ${meetingMode === 'instant' ? styles.switchBtnActive : ''}`}
+                >
+                  <Zap size={13} />
+                  <span>Instant</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMeetingMode('schedule')}
+                  className={`${styles.switchBtn} ${meetingMode === 'schedule' ? styles.switchBtnActive : ''}`}
+                >
+                  <Calendar size={13} />
+                  <span>Schedule</span>
+                </button>
+              </div>
+
+              <form onSubmit={handleCreateMeeting} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div className={styles.inputGroup}>
+                  <label className={styles.inputLabel}>Meeting Topic</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Design Review, Multilingual Sync"
+                    className={styles.brutalistInput}
+                    value={newTitle}
+                    onChange={e => setNewTitle(e.target.value)}
+                  />
+                </div>
+
                 {organizations.some(org => org.ownerId === user.id || org.coHosts?.some(c => c.id === user.id)) && (
-                  <div style={{ margin: '0.75rem 0' }}>
-                    <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.82rem', color: '#111', fontFamily: 'var(--font-mono)' }}>Organization (Optional)</label>
-                    <select className={styles.input} value={selectedOrgId} onChange={e => setSelectedOrgId(e.target.value)}>
-                      <option value="">No Organization</option>
+                  <div className={styles.inputGroup}>
+                    <label className={styles.inputLabel}>Organization (Optional)</label>
+                    <select
+                      className={styles.brutalistSelect}
+                      value={selectedOrgId}
+                      onChange={e => setSelectedOrgId(e.target.value)}
+                    >
+                      <option value="">No Organization (Personal Room)</option>
                       {organizations
                         .filter(org => org.ownerId === user.id || org.coHosts?.some(c => c.id === user.id))
                         .map(org => (
@@ -1192,61 +1364,99 @@ function DashboardContent() {
                       ))}
                     </select>
                   </div>
+                )}
+
+                {meetingMode === 'schedule' && (
+                  <div className={styles.inputGroup}>
+                    <label className={styles.inputLabel}>Scheduled Time</label>
+                    <input
+                      type="datetime-local"
+                      className={`${styles.brutalistInput} ${styles.monoInput}`}
+                      value={scheduledTime}
+                      min={new Date().toISOString().slice(0, 16)}
+                      onChange={e => setScheduledTime(e.target.value)}
+                      required={meetingMode === 'schedule'}
+                    />
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  className={`${styles.btnLaunch} ${meetingMode === 'schedule' ? styles.btnSchedule : ''}`}
+                  disabled={isCreating}
+                >
+                  {isCreating ? (
+                    <RefreshCw size={16} className="animate-spin" />
+                  ) : meetingMode === 'instant' ? (
+                    <Video size={16} />
+                  ) : (
+                    <CalendarCheck2 size={16} />
                   )}
-                <div style={{ margin: '0.75rem 0' }}>
-                  <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.82rem', color: '#111', fontFamily: 'var(--font-mono)' }}>Schedule For (leave blank to start now)</label>
-                  <input
-                    type="datetime-local"
-                    className={styles.input}
-                    value={scheduledTime}
-                    min={new Date().toISOString().slice(0, 16)}
-                    onChange={e => setScheduledTime(e.target.value)}
-                  />
-                </div>
-                <button type="submit" className={styles.btnPrimary} disabled={isCreating}>
-                  {isCreating ? 'CREATING…' : scheduledTime ? 'SCHEDULE' : 'LAUNCH'}
+                  <span>
+                    {isCreating ? 'CREATING...' : meetingMode === 'instant' ? 'LAUNCH INSTANT MEETING' : 'SCHEDULE CONFERENCE'}
+                  </span>
                 </button>
               </form>
             </div>
 
-            {/* Join by Code */}
-            <div className={styles.card}>
-              <h2 className={styles.cardTitle}>Join</h2>
-              <form onSubmit={handleJoinMeeting}>
+            {/* Join by Code Card */}
+            <div className={styles.actionCard}>
+              <div className={styles.cardHeaderRow}>
+                <span className={styles.cardDot} style={{ background: 'var(--ink)' }} />
+                <h3 className={styles.cardTitle}>Join by Code</h3>
+              </div>
+              <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>
+                Have an invite code or room pass? Enter it below to join the conference directly.
+              </p>
+              <form onSubmit={handleJoinMeeting} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                 <input
                   type="text"
-                  placeholder="Paste code here"
-                  className={styles.input}
+                  placeholder="e.g. bha-lob-786"
+                  className={`${styles.brutalistInput} ${styles.monoInput}`}
                   value={joinLink}
                   onChange={e => setJoinLink(e.target.value)}
+                  required
                 />
-                <button type="submit" className={styles.btnPrimary}>JOIN</button>
+                <button type="submit" className={styles.btnJoinCode}>
+                  <ArrowRight size={15} />
+                  <span>JOIN CONFERENCE</span>
+                </button>
               </form>
+            </div>
+
+            {/* Tip / Intelligence dossier card */}
+            <div className={styles.tipCard}>
+              <div className={styles.tipHeader}>
+                <Sparkles size={14} color="var(--cobalt)" />
+                <span>Multilingual Intelligence</span>
+              </div>
+              <p className={styles.tipText}>
+                Your audio will be recognized in <strong>{userLangInfo.name}</strong> and translated on-the-fly for listeners across Bengali, French, German, Gujarati, Hindi, Marathi, Spanish, Tamil, and Telugu.
+              </p>
             </div>
           </div>
 
           {/* ===== RIGHT COLUMN ===== */}
           <div className={styles.rightCol}>
-            <div className={styles.card} style={{ minHeight: '100%' }}>
+            <div className={styles.workspaceCard}>
 
               {/* Tabs */}
               <div className={styles.tabsContainer}>
-                {['upcoming', 'history', 'organizations'].map(tab => (
+                {[
+                  { id: 'upcoming', label: 'Upcoming', count: upcomingMeetings.length, hasLive: hasLiveMeeting },
+                  { id: 'history', label: 'History', count: historyMeetings.length },
+                  { id: 'organizations', label: 'Organizations', count: organizations.length }
+                ].map(t => (
                   <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={styles.tabBtn}
-                    style={{
-                      color: activeTab === tab ? 'var(--cobalt)' : 'rgba(0,0,0,0.4)',
-                      borderBottom: activeTab === tab ? '4px solid var(--cobalt)' : '4px solid transparent',
-                    }}
+                    key={t.id}
+                    onClick={() => setActiveTab(t.id)}
+                    className={`${styles.tabBtn} ${activeTab === t.id ? styles.tabBtnActive : styles.tabBtnInactive}`}
                   >
-                    {tab === 'upcoming' ? 'Upcoming' : tab === 'history' ? 'History' : (
-                      <>
-                        <span className={styles.tabDesktop}>Organizations</span>
-                        <span className={styles.tabMobile}>Orgs</span>
-                      </>
-                    )}
+                    {t.hasLive && <span className={styles.pulseDotRed} style={{ width: 6, height: 6 }} />}
+                    <span>{t.label}</span>
+                    <span className={styles.tabCounterBadge}>
+                      {t.count}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -1402,29 +1612,18 @@ function DashboardContent() {
                         const role = isOwner ? 'HOST' : (isCoHost ? 'COHOST' : 'PARTICIPANT');
 
                         return (
-                          <div
-                            key={org.id}
-                            style={{
-                              background: '#FDFBF7',
-                              border: '2px solid #0A0A0A',
-                              boxShadow: '5px 5px 0 #0A0A0A',
-                              padding: '1.75rem',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: '1.5rem'
-                            }}
-                          >
+                          <div key={org.id} className={styles.orgCard}>
                             {/* Org Header Row */}
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1.25rem', flexWrap: 'wrap' }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', flex: 1, minWidth: 'min(240px, 100%)' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-                                  <div style={{ width: 10, height: 10, background: isOwner ? '#FF3311' : (isCoHost ? '#0022FF' : '#0A0A0A') }} />
-                                  <h4 style={{ margin: 0, color: '#0A0A0A', fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: '1.75rem', fontWeight: 600 }}>
+                            <div className={styles.orgHeaderRow}>
+                              <div className={styles.orgTitleArea}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+                                  <div style={{ width: 10, height: 10, background: isOwner ? '#FF3311' : (isCoHost ? '#0022FF' : '#0A0A0A'), flexShrink: 0 }} />
+                                  <h4 className={styles.orgTitle}>
                                     {org.name}
                                   </h4>
                                   <RoleBadge role={role} />
                                 </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem', flexWrap: 'wrap', fontSize: '0.82rem', color: '#555', fontFamily: 'var(--font-mono)' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap', fontSize: '0.8rem', color: '#555', fontFamily: 'var(--font-mono)' }}>
                                   <span>Hosted by: <strong style={{ color: '#0A0A0A' }}>{isOwner ? 'You (Owner)' : org.owner?.name}</strong></span>
                                   <span>•</span>
                                   <span>{org.users?.length || 0} Member{org.users?.length !== 1 ? 's' : ''}</span>
@@ -1440,20 +1639,12 @@ function DashboardContent() {
                               </div>
 
                               {/* Access Code & Controls */}
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.6rem', flexShrink: 0 }}>
-                                <div style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '0.6rem',
-                                  background: '#F7F5F0',
-                                  border: '2px solid #0A0A0A',
-                                  padding: '0.4rem 0.75rem',
-                                  boxShadow: '2px 2px 0 #0A0A0A'
-                                }}>
+                              <div className={styles.orgAccessControlArea}>
+                                <div className={styles.orgPassBox}>
                                   <span style={{ fontSize: '0.72rem', fontFamily: 'var(--font-mono)', color: '#666', textTransform: 'uppercase', fontWeight: 700 }}>
                                     Pass Code:
                                   </span>
-                                  <code style={{ color: '#0022FF', fontWeight: 700, fontSize: '0.95rem', fontFamily: 'var(--font-mono)', letterSpacing: '1px' }}>
+                                  <code style={{ color: '#0022FF', fontWeight: 700, fontSize: '0.92rem', fontFamily: 'var(--font-mono)', letterSpacing: '1px' }}>
                                     {org.accessCode}
                                   </code>
                                   <button
@@ -1478,7 +1669,7 @@ function DashboardContent() {
                                   </button>
                                 </div>
 
-                                <div style={{ display: 'flex', gap: '0.4rem' }}>
+                                <div className={styles.orgControlsButtons}>
                                   {isOwner ? (
                                     <>
                                       <button
@@ -1855,159 +2046,240 @@ function DashboardContent() {
               {activeTab !== 'organizations' && (
                 <>
                   {displayMeetings.length === 0 ? (
-                    <div className={styles.emptyState}>
-                      {activeTab === 'upcoming'
-                        ? 'No upcoming meetings. Create or schedule one!'
-                        : 'No past meetings yet.'}
+                    <div className={styles.emptyStateCard}>
+                      <div className={styles.emptyStateIcon}>
+                        {activeTab === 'upcoming' ? <Calendar size={32} /> : <Clock size={32} />}
+                      </div>
+                      <h3 className={styles.emptyStateTitle}>
+                        {activeTab === 'upcoming'
+                          ? 'No Upcoming Sessions Scheduled'
+                          : 'No Past Archives Found'}
+                      </h3>
+                      <p className={styles.emptyStateText}>
+                        {activeTab === 'upcoming'
+                          ? 'You do not have any active or scheduled briefings right now. Launch an instant room or schedule one using the dispatcher on the left.'
+                          : 'Once meetings wrap up, their audio transcripts, AI executive summaries, multilingual metrics, and attendance manifests will appear here.'}
+                      </p>
+                      {activeTab === 'upcoming' && (
+                        <button
+                          onClick={() => {
+                            setMeetingMode('instant');
+                            setNewTitle('Instant Briefing');
+                            window.scrollTo({ top: 300, behavior: 'smooth' });
+                          }}
+                          className={styles.btnLaunch}
+                          style={{ maxWidth: '300px', marginTop: '0.5rem' }}
+                        >
+                          <Zap size={16} />
+                          <span>Launch Instant Meeting Now</span>
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <div className={styles.meetingList}>
-                      {displayMeetings.map(m => (
-                        
-                          <div key={m.id} style={{ display: 'flex', flexDirection: 'column', padding: '1.5rem', background: 'transparent', borderTop: '2px solid #0A0A0A', gap: '1.5rem' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1, minWidth: 'min(200px, 100%)' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                                  <h3 style={{ margin: 0, fontSize: '1.75rem', color: '#0A0A0A', fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontWeight: 600 }}>{m.title || 'Untitled Meeting'}</h3>
-                                  <span style={{ background: m.state === 'COMPLETED' ? '#0022FF' : (m.state === 'CANCELLED' ? '#777' : (m.state === 'ONGOING' ? '#FF3311' : '#0A0A0A')), color: '#F7F5F0', padding: '0.2rem 0.5rem', fontSize: '0.7rem', fontWeight: 700, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', border: '1px solid #0A0A0A', boxShadow: '2px 2px 0 rgba(10,10,10,1)' }}>
-                                    {m.state}
-                                  </span>
-                                  {(() => {
-                                    const isMainHost = m.hostId === user?.id;
-                                    const participant = m.participants?.find(p => p.userId === user?.id);
-                                    const role = isMainHost ? 'HOST' : (participant?.role || 'PARTICIPANT');
-                                    return <RoleBadge role={role} />;
-                                  })()}
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
-                                    <code style={{ fontSize: '0.9rem', color: '#0022FF', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>ID: {m.meetingLink}</code>
-                                    <button
-                                      onClick={() => {
-                                        const fullUrl = `${window.location.origin}/meeting/${m.meetingLink}`;
-                                        navigator.clipboard.writeText(fullUrl);
-                                        setCopiedCode(m.meetingLink);
-                                        setTimeout(() => setCopiedCode(null), 2000);
-                                      }}
-                                      title={copiedCode === m.meetingLink ? "Copied invite link!" : "Copy Invite Link"}
-                                      style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '0.25rem',
-                                        background: copiedCode === m.meetingLink ? '#10b981' : '#F7F5F0',
-                                        color: copiedCode === m.meetingLink ? '#fff' : '#0A0A0A',
-                                        border: '1px solid #0A0A0A',
-                                        padding: '0.15rem 0.45rem',
-                                        fontSize: '0.72rem',
-                                        fontWeight: 600,
-                                        fontFamily: 'var(--font-mono)',
-                                        cursor: 'pointer',
-                                        boxShadow: '1px 1px 0 rgba(10,10,10,1)',
-                                        transition: 'all 0.1s'
-                                      }}
-                                    >
-                                      {copiedCode === m.meetingLink ? <Check size={12} /> : <Copy size={12} />}
-                                      <span>{copiedCode === m.meetingLink ? 'Copied' : 'Copy Link'}</span>
-                                    </button>
-                                  </div>
-                                  <span style={{ color: '#5A5A5A', fontSize: '0.85rem' }}>Host: <strong style={{ color: '#0A0A0A' }}>{m.host?.name || 'Unknown'}</strong></span>
-                                  <span style={{ color: '#5A5A5A', fontSize: '0.85rem' }}>{new Date(m.createdAt).toLocaleString()}</span>
-                                </div>
-                              </div>
+                      {displayMeetings.map(m => {
+                        const isMainHost = m.hostId === user?.id;
+                        const participant = m.participants?.find(p => p.userId === user?.id);
+                        const role = isMainHost ? 'HOST' : (participant?.role || 'PARTICIPANT');
+                        const isHostOrCoHost = isMainHost || participant?.role === 'COHOST';
 
-                              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                                {m.state === 'COMPLETED' ? (
-                                  <>
-                                    <button onClick={() => handleViewTranscript(m.meetingLink)} style={{ background: '#F7F5F0', color: '#0A0A0A', border: '2px solid #0A0A0A', padding: '0.5rem 1rem', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600, fontFamily: 'var(--font-mono)', boxShadow: '4px 4px 0 rgba(10,10,10,1)', textTransform: 'uppercase' }}>
-                                      Transcript
-                                    </button>
-                                    <button onClick={(e) => { e.preventDefault(); handleViewSummary(m.meetingLink); }} style={{ background: '#0A0A0A', color: '#F7F5F0', border: '2px solid #0A0A0A', padding: '0.5rem 1rem', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600, fontFamily: 'var(--font-mono)', boxShadow: '4px 4px 0 rgba(10,10,10,1)', textTransform: 'uppercase' }}>
-                                      Summary
-                                    </button>
-                                    <Link href={`/meeting/${m.meetingLink}/report`} style={{ background: '#0022FF', color: '#F7F5F0', border: '2px solid #0A0A0A', padding: '0.5rem 1rem', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600, fontFamily: 'var(--font-mono)', boxShadow: '4px 4px 0 rgba(10,10,10,1)', textTransform: 'uppercase', textDecoration: 'none' }}>
-                                      Report
-                                    </Link>
-                                  </>
-                                ) : m.state === 'CANCELLED' ? (
-                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: '#FF3311', fontWeight: 700, padding: '0.4rem 0.8rem', border: '1px solid #FF3311', textTransform: 'uppercase' }}>
-                                    Cancelled
-                                  </span>
-                                ) : (
-                                  <>
-                                    {activeTab === 'upcoming' && (() => {
-                                      const isMainHost = m.hostId === user?.id;
-                                      const participant = m.participants?.find(p => p.userId === user?.id);
-                                      const isCoHost = participant?.role === 'COHOST';
-                                      return (isMainHost || isCoHost);
-                                    })() && (
-                                      <button
-                                        onClick={() => {
-                                          setEmailInviteModal(m);
-                                          setInviteEmailInput('');
-                                          setInviteError(null);
-                                          setInviteSuccess(null);
-                                        }}
-                                        title="Send invitation via email"
-                                        style={{
-                                          background: '#F7F5F0',
-                                          color: '#0022FF',
-                                          border: '2px solid #0A0A0A',
-                                          padding: '0.5rem 1rem',
-                                          cursor: 'pointer',
-                                          fontSize: '0.85rem',
-                                          fontWeight: 700,
-                                          fontFamily: 'var(--font-mono)',
-                                          boxShadow: '4px 4px 0 rgba(10,10,10,1)',
-                                          textTransform: 'uppercase',
-                                          display: 'inline-flex',
-                                          alignItems: 'center',
-                                          gap: '0.4rem',
-                                        }}
-                                      >
-                                        <Mail size={15} />
-                                        <span>Send Invite</span>
-                                      </button>
-                                    )}
-                                    <Link href={`/meeting/${m.meetingLink}`} style={{ background: '#FF3311', color: '#F7F5F0', border: '2px solid #0A0A0A', padding: '0.5rem 2rem', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 700, fontFamily: 'var(--font-mono)', boxShadow: '4px 4px 0 rgba(10,10,10,1)', textTransform: 'uppercase', textDecoration: 'none' }}>
-                                      {m.state === 'SCHEDULED' ? 'Start' : 'Join'}
-                                    </Link>
-                                  </>
-                                )}
-                                <button onClick={() => handleDeleteMeeting(m.id, m.state === 'SCHEDULED' && m.hostId === user?.id)} title={m.state === 'SCHEDULED' && m.hostId === user?.id ? "Cancel Meeting" : "Remove"} style={{ background: '#FF3311', color: '#F7F5F0', border: '2px solid #0A0A0A', padding: '0.5rem', cursor: 'pointer', display: 'flex', alignItems: 'center', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
-                                  <Trash2 size={16} />
-                                </button>
+                        return (
+                          <div key={m.id} className={styles.meetingDossierCard}>
+                            {/* Top row: Badges + Title */}
+                            <div className={styles.dossierTopRow}>
+                              <div className={styles.dossierTitleArea}>
+                                <div className={styles.dossierBadgeRow}>
+                                  {m.state === 'ONGOING' ? (
+                                    <span className={styles.liveBadge}>
+                                      <Radio size={12} />
+                                      <span>LIVE NOW</span>
+                                    </span>
+                                  ) : m.state === 'SCHEDULED' ? (
+                                    <span className={styles.scheduledBadge}>
+                                      <Calendar size={12} />
+                                      <span>SCHEDULED</span>
+                                    </span>
+                                  ) : m.state === 'COMPLETED' ? (
+                                    <span className={styles.completedBadge}>
+                                      <span>COMPLETED</span>
+                                    </span>
+                                  ) : (
+                                    <span className={styles.cancelledBadge}>
+                                      <span>{m.state}</span>
+                                    </span>
+                                  )}
+                                  <RoleBadge role={role} />
+                                </div>
+                                <h3 className={styles.dossierTitle}>{m.title || 'Untitled Session'}</h3>
                               </div>
                             </div>
-                            
+
+                            {/* Meta strip */}
+                            <div className={styles.dossierMetaStrip}>
+                              <div className={styles.dossierMetaItem} style={{ width: '100%' }}>
+                                <span className={styles.meetingIdPill}>
+                                  <code>ID: {m.meetingLink}</code>
+                                  <button
+                                    onClick={() => {
+                                      const fullUrl = `${window.location.origin}/meeting/${m.meetingLink}`;
+                                      navigator.clipboard.writeText(fullUrl);
+                                      setCopiedCode(m.meetingLink);
+                                      setTimeout(() => setCopiedCode(null), 2000);
+                                    }}
+                                    className={styles.copyCodeBtn}
+                                    title="Copy Invite Link"
+                                  >
+                                    {copiedCode === m.meetingLink ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+                                    <span>{copiedCode === m.meetingLink ? 'Copied' : 'Copy Link'}</span>
+                                  </button>
+                                </span>
+                              </div>
+                              <div className={styles.dossierMetaItem}>
+                                <span>Host: <strong>{m.host?.name || 'Unknown'}</strong></span>
+                              </div>
+                              <div className={styles.dossierMetaItem}>
+                                <Calendar size={13} />
+                                <span>
+                                  {(m.startTime || m.scheduledAt)
+                                    ? new Date(m.startTime || m.scheduledAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+                                    : new Date(m.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Actions row */}
+                            <div className={styles.dossierActionsRow}>
+                              {activeTab === 'history' ? (
+                                <>
+                                  {m.state === 'COMPLETED' ? (
+                                    <>
+                                      <button
+                                        onClick={() => handleViewTranscript(m.meetingLink)}
+                                        className={styles.btnActionSecondary}
+                                      >
+                                        <FileText size={14} />
+                                        <span>Transcript</span>
+                                      </button>
+                                      <button
+                                        onClick={(e) => { e.preventDefault(); handleViewSummary(m.meetingLink); }}
+                                        className={styles.btnActionSecondary}
+                                      >
+                                        <Sparkles size={14} />
+                                        <span>AI Summary</span>
+                                      </button>
+                                      <Link
+                                        href={`/meeting/${m.meetingLink}/report`}
+                                        className={`${styles.btnActionSecondary} ${styles.btnActionReport}`}
+                                      >
+                                        <BarChart3 size={14} />
+                                        <span>Executive Report</span>
+                                      </Link>
+                                    </>
+                                  ) : (
+                                    <span className={styles.cancelledBadge}>Archived</span>
+                                  )}
+                                  <button
+                                    onClick={() => handleDeleteMeeting(m.id, false)}
+                                    title="Delete Record"
+                                    className={styles.btnActionDelete}
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  {isHostOrCoHost && (
+                                    <button
+                                      onClick={() => {
+                                        setEmailInviteModal(m);
+                                        setInviteEmailInput('');
+                                        setInviteError(null);
+                                        setInviteSuccess(null);
+                                      }}
+                                      title="Send invitation via email"
+                                      className={`${styles.btnActionSecondary} ${styles.btnActionInvite}`}
+                                    >
+                                      <Mail size={15} />
+                                      <span>Send Invite</span>
+                                    </button>
+                                  )}
+                                  <Link
+                                    href={`/meeting/${m.meetingLink}`}
+                                    className={styles.btnActionPrimary}
+                                  >
+                                    <span>{m.state === 'SCHEDULED' ? (isHostOrCoHost ? 'Start Session' : 'Join Room') : 'Enter Live Room'}</span>
+                                    <ArrowRight size={15} />
+                                  </Link>
+                                  <button
+                                    onClick={() => handleDeleteMeeting(m.id, m.state === 'SCHEDULED' && m.hostId === user?.id)}
+                                    title={m.state === 'SCHEDULED' && m.hostId === user?.id ? "Cancel Meeting" : "Remove"}
+                                    className={styles.btnActionDelete}
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+
+                            {/* History: Attendance Log */}
                             {activeTab === 'history' && m.participants?.length > 0 && (
-                              <div style={{ padding: '1rem', border: '2px solid #0A0A0A', background: 'transparent' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', color: '#0A0A0A' }}>Attendance Log ({m.participants.length} Users)</span>
-                                  <button onClick={(e) => { e.preventDefault(); handleExportAttendance(m); }} style={{ background: 'transparent', color: '#0022FF', border: '2px solid #0022FF', padding: '0.3rem 0.6rem', fontSize: '0.75rem', fontWeight: 700, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', cursor: 'pointer' }}>
-                                    Export CSV
+                              <div style={{
+                                padding: '0.85rem 0.75rem',
+                                border: '2px solid #0A0A0A',
+                                background: '#FFFFFF',
+                                boxShadow: '2px 2px 0 #0A0A0A',
+                                marginTop: '0.25rem',
+                                maxWidth: '100%',
+                                boxSizing: 'border-box',
+                                overflow: 'hidden'
+                              }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.4rem' }}>
+                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', color: '#0A0A0A' }}>
+                                    Attendance Manifest ({m.participants.length} Users)
+                                  </span>
+                                  <button
+                                    onClick={(e) => { e.preventDefault(); handleExportAttendance(m); }}
+                                    style={{
+                                      background: 'transparent',
+                                      color: '#0022FF',
+                                      border: '1px solid #0022FF',
+                                      padding: '0.2rem 0.5rem',
+                                      fontSize: '0.7rem',
+                                      fontWeight: 700,
+                                      fontFamily: 'var(--font-mono)',
+                                      textTransform: 'uppercase',
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.25rem'
+                                    }}
+                                  >
+                                    <span>Export CSV</span>
                                   </button>
                                 </div>
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
                                   {m.participants.map(p => (
-                                    <div key={p.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', border: '1px solid #0A0A0A', padding: '0.25rem 0.75rem', fontSize: '0.85rem', color: '#0A0A0A' }}>
-                                      <strong style={{ fontWeight: 600 }}>{p.user?.name || 'Unknown'}</strong>
-                                      <span style={{ fontSize: '0.7rem', color: '#FF3311', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>{p.role}</span>
+                                    <div key={p.id} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', border: '1px solid #0A0A0A', background: '#FDFBF7', padding: '0.2rem 0.5rem', fontSize: '0.75rem', color: '#0A0A0A', fontFamily: 'var(--font-mono)', maxWidth: '100%' }}>
+                                      <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '120px' }}>{p.user?.name || 'Unknown'}</strong>
+                                      <span style={{ fontSize: '0.65rem', color: '#FF3311', fontWeight: 800, textTransform: 'uppercase' }}>({p.role})</span>
                                     </div>
                                   ))}
                                 </div>
                               </div>
                             )}
                           </div>
-                        ))}
+                        );
+                      })}
 
-                        {/* Show more / less for history */}
+                      {/* Show more / less for history */}
                       {activeTab === 'history' && historyMeetings.length > 3 && (
-                        <div style={{ textAlign: 'center', marginTop: '1rem', paddingTop: '1rem', borderTop: '2px solid #111' }}>
+                        <div style={{ textAlign: 'center', marginTop: '1.25rem', paddingTop: '1rem', borderTop: '2px dashed #0A0A0A' }}>
                           <button
                             onClick={() => setShowAllHistory(!showAllHistory)}
-                            style={{ background: 'none', border: '1px solid #111', borderRadius: 8, color: '#555', cursor: 'pointer', padding: '0.5rem 1.5rem', fontSize: '0.85rem' }}
+                            className={styles.btnActionSecondary}
+                            style={{ margin: '0 auto', fontSize: '0.78rem', padding: '0.5rem 1rem' }}
                           >
-                            {showAllHistory ? '▲ Show Less' : `▼ View All ${historyMeetings.length} Meetings`}
+                            {showAllHistory ? '▲ Show Less' : `▼ View All ${historyMeetings.length} Meeting Archives`}
                           </button>
                         </div>
                       )}
