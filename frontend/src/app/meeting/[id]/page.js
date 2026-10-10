@@ -1841,8 +1841,8 @@ export default function MeetingRoom() {
           </div>
 
           <div className={styles.headerRight}>
-            {/* Quick Spoken Dialect Dropdown */}
-            <div className={styles.dialectSelectorPill} title="Your Spoken Mic Dialect">
+            {/* Quick Spoken Language Dropdown */}
+            <div className={styles.dialectSelectorPill} title="Your Spoken Language">
               <Mic size={13} color="var(--cobalt)" />
               <select
                 className={styles.dialectSelect}

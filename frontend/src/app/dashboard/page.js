@@ -1173,7 +1173,7 @@ function DashboardContent() {
               <span>Multilingual Conference Hub</span>
               <span>•</span>
               <span style={{ color: '#10B981', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
-                <span className={styles.pulseDotGreen} style={{ width: 6, height: 6 }} /> WebRTC Mesh Online
+                <span className={styles.pulseDotGreen} style={{ width: 6, height: 6 }} /> System Online
               </span>
             </div>
           </div>
@@ -1231,7 +1231,7 @@ function DashboardContent() {
             <div>
               <h2 className={styles.heroGreeting}>Welcome back, {user.name}.</h2>
               <p className={styles.heroSubtitle}>
-                Multilingual conference control center. Speak in your native dialect; peers receive live translated subtitles and synthetic speech in real-time.
+                Multilingual video meetings. Speak in your preferred language, and other participants will see translated subtitles and hear translated audio in real time.
               </p>
             </div>
             <div className={styles.systemStatusPill}>
@@ -1298,7 +1298,7 @@ function DashboardContent() {
                 <span className={styles.kpiValue} style={{ fontSize: '1.75rem' }}>10+</span>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem', fontWeight: 700 }}>LANGS</span>
               </div>
-              <span className={styles.kpiSub}>Sub-350ms neural latency</span>
+              <span className={styles.kpiSub}>Real-time instant translation</span>
             </div>
           </div>
         </section>
@@ -2057,23 +2057,9 @@ function DashboardContent() {
                       </h3>
                       <p className={styles.emptyStateText}>
                         {activeTab === 'upcoming'
-                          ? 'You do not have any active or scheduled briefings right now. Launch an instant room or schedule one using the dispatcher on the left.'
-                          : 'Once meetings wrap up, their audio transcripts, AI executive summaries, multilingual metrics, and attendance manifests will appear here.'}
+                          ? 'You do not have any active or scheduled meetings right now. Start an instant meeting or schedule one using the form on the left.'
+                          : 'Once meetings wrap up, their audio transcripts, AI summaries, language statistics, and attendance records will appear here.'}
                       </p>
-                      {activeTab === 'upcoming' && (
-                        <button
-                          onClick={() => {
-                            setMeetingMode('instant');
-                            setNewTitle('Instant Briefing');
-                            window.scrollTo({ top: 300, behavior: 'smooth' });
-                          }}
-                          className={styles.btnLaunch}
-                          style={{ maxWidth: '300px', marginTop: '0.5rem' }}
-                        >
-                          <Zap size={16} />
-                          <span>Launch Instant Meeting Now</span>
-                        </button>
-                      )}
                     </div>
                   ) : (
                     <div className={styles.meetingList}>
@@ -2235,7 +2221,7 @@ function DashboardContent() {
                               }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.4rem' }}>
                                   <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', color: '#0A0A0A' }}>
-                                    Attendance Manifest ({m.participants.length} Users)
+                                    Attendance Log ({m.participants.length} Participants)
                                   </span>
                                   <button
                                     onClick={(e) => { e.preventDefault(); handleExportAttendance(m); }}
