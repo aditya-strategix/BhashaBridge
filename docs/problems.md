@@ -321,3 +321,43 @@ We implemented a strict two-tier caching system to eliminate 95% of redundant AP
 **Root Cause:** The joinMeeting backend logic defaulted to assigning 
 ewStatus = 'WAITING' for any returning normal participant. It forcefully updated their PostgreSQL database record back to WAITING, overwriting their previously granted ADMITTED status.
 **Solution:** Rewrote the database fallback logic to verify the user's existing participant.status first. If they already hold an ADMITTED status, the database seamlessly preserves it, allowing them to bypass the waiting room upon reconnection.
+
+---
+
+## Problem 19: Pure WebRTC Mesh Scalability & $O(N^2)$ Bandwidth Bottleneck
+**Problem:** Rooms with more than 4–6 participants encounter packet drops, choppy voice, thermal throttling, and mobile battery drain.
+**Root Cause:** Pure WebRTC Mesh lacks a media server. Each participant must encode and upload separate media streams to every other participant ($N - 1$ outgoing streams). For 8 people, each user must upload 7 streams ($\approx 12.6\text{ Mbps}$). Most consumer and mobile connections have asymmetric speeds with only 5–10 Mbps upload, causing upload choke.
+**Why We CANNOT Solve This Purely in Client-Side Mesh:**
+- Bandwidth is physically capped by the user's ISP. No browser code can turn a 5 Mbps upload pipe into 15 Mbps.
+- Peer-to-peer topology requires separate encrypted packet streams to each unique peer IP address.
+- While WebRTC congestion control can downscale video to 240p at 5–10 FPS, this ruins meeting usability.
+- **Verdict:** This cannot be solved inside client-side WebRTC Mesh. The architectural remedy is migrating to an SFU (Selective Forwarding Unit) media server (e.g. LiveKit, Mediasoup), which requires recurring cloud media server hosting costs.
+
+---
+
+## Problem 20: Real-Time Speech-to-Speech Economics: Why Big Tech Does Not Offer It For Free
+**Problem:** Users question why Google Meet or Zoom does not offer free universal live speech-to-speech translation.
+**Root Cause:** Simultaneous speech-to-speech interpretation requires three continuous AI pipelines: Speech-to-Text (STT) $\rightarrow$ Neural Machine Translation (NMT) $\rightarrow$ Text-to-Speech Synthesis (TTS). Running continuous neural voice generation on centralized servers for 300M+ daily users would cost tens of millions of dollars monthly in GPU compute infrastructure. That is why Big Tech gates translated captions behind $20–$30/user/month enterprise licenses.
+**Why It Cannot Be Solved by Free Centralized Cloud Processing:** Continuous server-side neural voice generation at scale cannot be operated for free without unsustainable cloud bills.
+**BhashaBridge's Architectural Solution:** BhashaBridge employs a **hybrid edge model**: audio capture and voice synthesis run locally on the client's browser engine at zero cloud GPU cost, with only text translation passing through the backend bridge.
+
+---
+
+## Problem 21: Acoustic Cross-Talk & Dual-Channel Audio Latency in Live Interpretation
+**Problem:** In live interpretation, both the speaker's original voice and the synthetic translated voice can play simultaneously, causing acoustic clutter and cognitive fatigue.
+**Root Cause:** Original audio arrives instantly ($t = 0\text{ ms}$), whereas translated synthetic speech requires phrase completion and translation ($t \approx 300\text{–}400\text{ ms}$), causing slight overlapping audio.
+**Why It Cannot Be Solved by Naive Audio Muting:** Completely muting the original speaker breaks natural conversational cadence, lip-sync, and human emotional inflection.
+**BhashaBridge's Balanced Solution:** Visual-first high-contrast live subtitles provide an immediate anchor, while audio ducking and customizable in-meeting volume controls let users personalize their mix between original audio and synthetic speech.
+
+---
+
+## Problem 22: Symmetric NAT Port Mutation: Why Direct STUN P2P Fails on Mobile 4G/5G and Corporate Networks
+**Problem:** Direct peer-to-peer WebRTC connections fail consistently when users are on cellular 4G/5G or enterprise firewalls, even though both browsers use the same internal socket.
+**Root Cause (Cone NAT vs. Symmetric NAT - RFC 3489 & RFC 4787):**
+- **Home Wi-Fi (Cone NAT):** Router lookup key is 2-tuple: $\text{Mapping} = f(\text{Local IP}, \text{Local Port})$. The router preserves the same external port (e.g., `60001`) whether sending to STUN or Peer B. Hole punching succeeds.
+- **Mobile 4G/5G & Enterprise Networks (Symmetric NAT):** Firewalls enforce a 4-tuple key: $\text{Mapping} = f(\text{Local IP}, \text{Local Port}, \mathbf{\text{Destination IP}}, \mathbf{\text{Destination Port}})$.
+  1. Packet to STUN $\rightarrow$ External port `60001` allocated.
+  2. Packet to Peer B $\rightarrow$ Destination changed! Router refuses to reuse `60001` and mutates the mapping to a new random port `60842`.
+  3. Peer B targets `60001` (from STUN signaling), but Router A only accepts Peer B on `60842`. All packets are dropped.
+**Why This CANNOT Be Solved in Client-Side Code:** Port mutation occurs inside the cellular tower's CGNAT or enterprise firewall hardware. Browser code cannot predict what random external port the carrier will assign for Peer B's IP, making direct P2P mathematically impossible.
+**Why TURN Solves This 100% of the Time:** With TURN, the client sends 100% of its packets to the **same single destination** (`TURN_SERVER_IP:3478`). Because the destination IP and port never change, the Symmetric NAT **never mutates the port**, keeping port `60001` locked for the entire session. The TURN server reliably relays media without any port mismatch.

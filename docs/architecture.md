@@ -412,98 +412,244 @@ To prevent state-loss in critical database roles (like Host lockouts or lost Wai
 - The /meetings/join/:id API route forcefully rehydrates missing states by actively querying PostgreSQL for any users trapped in status === 'WAITING' and bundles them into the initial HTTP response payload so the Host's lobby UI is instantly restored.
 - The database engine actively checks the user's existing participant.status (e.g. ADMITTED) during reconnection to prevent the default fallback (which would force returning ADMITTED participants back into the WAITING state upon refresh).
 
-### 10. Appendix: WebRTC Networking Flow (NAT, STUN, TURN)
+## 11. WebRTC Networking Deep-Dive: NAT, STUN, TURN & Firewall Traversal
 
-#### 1. Public IP vs private IP
-Your internet provider gives your home one public address.
-* **Your home router:** 203.0.113.50 (The public internet can potentially find that address)
+This section provides the exhaustive networking mechanics of how BhashaBridge establishes real-time peer-to-peer audio/video connections across private routers, corporate firewalls, and cellular networks.
 
-But inside your house, you may have many devices:
-* **Laptop:** 192.168.1.5
-* **Phone:** 192.168.1.6
-* **TV:** 192.168.1.7
+---
 
-These are private IP addresses. They are like room numbers inside a building. Someone outside the building cannot send a letter to �Room 5� without knowing which building it belongs to. Likewise, 192.168.1.5 exists in millions of homes, so it cannot identify your laptop on the public internet.
+#### 11.1 Public IP vs. Private IP & The NAT Problem
 
-#### 2. What your router does
-Your router sits between your private home network ? the public internet. It lets all your devices share the one public IP given by your ISP. This is called **NAT: Network Address Translation**.
+1. **IPv4 Address Scarcity:** An Internet Service Provider (ISP) assigns a single public IPv4 address to a home or mobile subscriber (e.g., `203.0.113.50`).
+2. **Private Local Networks (RFC 1918):** Inside a home or office, internal devices are assigned private IP addresses:
+   * Laptop: `192.168.1.5`
+   * Smartphone: `192.168.1.6`
+   * Smart TV: `192.168.1.7`
+3. **The Addressing Conflict:** Private addresses are non-routable on the public internet. Millions of private homes use the identical `192.168.1.5` address.
+4. **Network Address Translation (NAT):** The router sits between the private LAN and public WAN, rewriting private IP/port headers into public IP/port headers so all internal devices can share a single public IP.
 
-For example, when your laptop opens YouTube, the router remembers:
-*Internet reply sent to 203.0.113.50 : 50123 should actually go to 192.168.1.5 : laptop*
+---
 
-The port is like a temporary apartment-door number. So the router keeps a temporary table:
-* 203.0.113.50:50123 ? 192.168.1.5
-* 203.0.113.50:50124 ? 192.168.1.6
+#### 11.2 Router Security Architecture: Ingress vs. Egress Firewall Rules
 
-That is how YouTube replies reach the correct device.
+Why can your laptop load web pages, but external strangers cannot connect directly to your laptop?
 
-#### 3. Why incoming connections are blocked
-Imagine a stranger on the internet sends a packet to 203.0.113.50:9999. Your router asks: Which device inside my home asked for this?
+```
+  [ Private LAN (Client A) ]                    [ Public Internet ]
+               |                                         |
+               | ===== OUTGOING (Egress): ALLOWED =====> | (Standard web requests)
+               |                                         |
+               | <==== INCOMING (Ingress): BLOCKED ===== | (Unsolicited connections dropped)
+```
 
-If it has no matching entry in its table, it drops the packet. This is good for security, otherwise anyone on the internet could attempt to connect directly to your laptop or camera. This behavior is often called **NAT firewall behavior**.
+1. **Ingress (Incoming from WAN): BLOCKED BY DEFAULT**
+   * If a packet arrives at `203.0.113.50:9999` from an unknown internet IP without a prior internal request, the router asks: *"Which internal device asked for this?"*
+   * Finding no matching active connection in its memory, the router **silently drops** the packet. This firewall behavior prevents internet port scans and malicious penetration.
+2. **Egress (Outgoing from LAN): ALLOWED BY DEFAULT**
+   * Consumer routers and corporate firewalls permit internal devices to initiate outgoing connections (`0.0.0.0/0`) over TCP and UDP. If outbound traffic were blocked, web browsing, video streaming, and email would cease functioning.
+3. **Stateful Packet Inspection & Connection Tracking (`conntrack`):**
+   * When Client A initiates an outgoing socket, the router writes an entry into its volatile **NAT State Table**:
+     ```
+     [NAT Translation Table Entry]
+     LAN Source:          192.168.1.5:54321 (Client A Ephemeral Port)
+     WAN Translation:     203.0.113.50:60001 (Router Public Mapped Endpoint)
+     Remote Destination:  198.51.100.20:443 (Target Server)
+     State:               ESTABLISHED / ACTIVE
+     Timeout:             UDP ~30-60s | TCP ~1-2 hours
+     ```
+   * When the remote server replies, the router checks its state table, confirms the incoming packet matches an active outbound session, rewrites the destination to `192.168.1.5:54321`, and delivers it to the laptop.
 
-#### 4. Why a direct WebRTC call is difficult (The NAT Problem)
-Suppose you are on one home network and your friend is on another.
-* **You:** Laptop private IP 192.168.1.5, Router public IP 203.0.113.50
-* **Friend:** Laptop private IP 192.168.1.9, Router public IP 198.51.100.70
+---
 
-If you tell your friend: *"Connect to 192.168.1.5"*, their laptop looks for that address inside their own home network not yours. So it fails.
+#### 11.3 The Core WebRTC P2P Dilemma
 
-Even if they know your public IP (*"Connect to 203.0.113.50"*), your router may still reject the request because it does not know which internal device should receive it.
+Suppose **Peer A** wants to call **Peer B**:
+* **Peer A:** Private IP `192.168.1.5`, Public Router A IP `203.0.113.50`
+* **Peer B:** Private IP `10.0.0.12`, Public Router B IP `198.51.100.80`
 
-#### 5. What WebRTC actually does
-WebRTC tries to create a direct connection between browsers. It uses a process called **ICE** (Interactive Connectivity Establishment). ICE means: *"Try every sensible way to connect these two people."*
+* Direct Local Addressing Fails: If Peer A tells Peer B *"send video to `192.168.1.5`"*, Peer B's device searches its own local subnet and fails.
+* Direct Public Addressing Fails: Even if Peer A tells Peer B *"send video to `203.0.113.50`"*, Router A immediately drops Peer B's incoming packets because Peer A's router has no existing state entry expecting traffic from Router B.
 
-It tries three main approaches:
+To overcome this, WebRTC executes a **three-stage traversal choreography**:
+1. **The Mirror (STUN)**
+2. **The Matchmaker (Signaling Server / Socket.IO)**
+3. **The Breakthrough (Simultaneous UDP Hole Punching)**
 
-**A. Local connection**
-If both people are on the same Wi-Fi, private addresses can work (192.168.1.5 ? 192.168.1.9). No internet routing is needed.
+---
 
-**B. STUN: discover the public-facing address**
-A STUN server is a public server on the internet. Your browser sends it a message: *"Hi, what address do you see me coming from?"*
-The STUN server replies: *"I see you as 203.0.113.50:50123"*
+#### 11.4 Stage 1: How STUN Works (The Mirror)
 
-Now your browser knows the temporary public address and port created by the router. This is called a **server-reflexive candidate**. Your browser sends this information to your friend through the signaling server (Your browser ? signaling server ? friend�s browser).
+**STUN (Session Traversal Utilities for NAT - RFC 5389)** is a lightweight public internet service. It does **not** relay media and does **not** know about other peers. It functions purely as a mirror.
 
-**C. NAT hole punching**
-Both browsers send outgoing packets toward each other at nearly the same time. Because each router sees an outgoing request, it creates a temporary mapping and may allow the matching incoming reply through.
-* You send outward ? your router opens a temporary path
-* Friend sends outward ? their router opens a temporary path
+```
+ [Peer A] (192.168.1.5)
+    |
+    |---- 1. Outbound UDP Request --------> [Router A (NAT)] ---------> [STUN Server]
+                                          (Maps to: 203.0.113.50:60001)   (stun.l.google.com:19302)
+                                                                               |
+    |<--- 2. STUN Binding Success Response ("You are 203.0.113.50:60001") -----|
+```
 
-If compatible, the browsers establish a direct peer-to-peer connection. Then the audio/video travels directly between them.
+1. Peer A sends an outbound UDP `Binding Request` to `stun.l.google.com:19302`.
+2. As the packet traverses Router A, Router A allocates an external mapped port (`60001`) and sends it to STUN.
+3. The STUN server inspects the packet's source IP and UDP port header and writes them into the response body:
+   $$\text{XOR-MAPPED-ADDRESS} = 203.0.113.50:60001$$
+4. Peer A receives the response. Peer A now knows its external internet coordinates (known as a **Server Reflexive Candidate** or `srflx`).
+5. Peer B concurrently queries the STUN server and discovers its own public endpoint: `198.51.100.80:55000`.
 
-#### 6. Why STUN is sometimes not enough
-Some networks are stricter (corporate networks, university Wi-Fi, symmetric NAT, UDP blocking). In those cases, the direct path fails even with STUN.
+---
 
-#### 7. TURN: the reliable fallback
-TURN is a public relay server. Instead of connecting directly, both connect outward to the TURN server (You ? TURN server ? Friend). Both connections are outbound, which routers usually permit. The TURN server forwards the data. It costs bandwidth and efficiency, but guarantees the call works.
+#### 11.5 Stage 2: The Signaling Server (The Matchmaker)
 
-#### 8. The complete WebRTC flow
-1. User A opens a meeting.
-2. User B opens the same meeting.
-3. Both browsers connect to your signaling server using WebSocket / Socket.IO.
-4. They exchange offers, answers, and ICE candidates.
-5. Each browser asks STUN: "What public address and port do you see?"
-6. WebRTC tries direct connections: local IP ? public STUN address ? other candidates.
-7. If direct connection works: Browser A ? Browser B
-8. If direct connection fails: Browser A ? TURN relay ? Browser B
+Neither router knows about the other yet. Peer A and Peer B exchange their newly discovered coordinates via the **BhashaBridge Backend Signaling Server** over WebSocket (Socket.IO):
 
-#### 9. In simple terms
-* **Router:** The security guard for your home network.
-* **Private IP:** Your room number inside the home.
-* **Public IP:** Your homes street address.
-* **NAT:** The routers record of which room requested which internet response.
-* **STUN:** A service that tells your browser how the internet sees it.
-* **ICE:** WebRTCs process for trying possible connection routes.
-* **TURN:** A relay service that carries the call when direct connection fails.
-* **Signaling server:** The messenger that helps browsers exchange connection details.
+```
+[Peer A] ===== ICE Candidate: { ip: "203.0.113.50", port: 60001 } =====> [Socket.IO Server]
+                                                                                |
+                                                                        (Relays to Peer B)
+                                                                                v
+[Peer B] <==== ICE Candidate: { ip: "203.0.113.50", port: 60001 } =============/
+```
+
+Both clients now possess the exact public IP and port needed to target each other.
+
+---
+
+#### 11.6 Stage 3: Simultaneous UDP Hole Punching (The Core Breakthrough)
+
+If Peer A blindly transmits video to `198.51.100.80:55000`, Router B will drop it because Router B's firewall has no record of outbound communication with `203.0.113.50`.
+
+To circumvent this, WebRTC executes **Simultaneous UDP Hole Punching**:
+
+```
+                       [ Public Internet ]
+
+     [Router A]                                     [Router B]
+  (203.0.113.50:60001)                           (198.51.100.80:55000)
+         |                                              |
+         |---- Packet 1 sent to 198.51.100.80:55000 ---> (X Dropped by Router B!)
+         |     (Router A logs: Expecting reply from B)   |
+         |                                              |
+         | <--- Packet 1 sent to 203.0.113.50:60001 ----|
+         |     (Router B logs: Expecting reply from A)  |
+         |                                              |
+         |==============================================|
+         |   BOTH FIREWALL PINHOLES ARE NOW OPEN!       |
+         | <==========================================> |
+         |     Direct P2P Encrypted Audio/Video Flows   |
+```
+
+1. **Simultaneous Outbound Transmission:**
+   * Peer A sends a UDP packet directly targeting Peer B's public coordinates (`198.51.100.80:55000`).
+   * Router A records this outbound destination in its connection tracking table: *"Traffic from `192.168.1.5` sent to `198.51.100.80:55000`. Allow incoming replies from that exact IP and port."*
+   * This initial packet reaches Router B and is dropped.
+2. **Reverse Outbound Transmission:**
+   * At virtually the same instant, Peer B transmits a UDP packet targeting Peer A's public coordinates (`203.0.113.50:60001`).
+   * Router B records: *"Traffic from `10.0.0.12` sent to `203.0.113.50:60001`. Allow incoming replies from that exact IP and port."*
+3. **The Pinhole Aligns:**
+   * When Peer A's subsequent packets arrive at Router B, Router B's firewall checks its state table:
+     *"An outgoing packet was recently sent to `203.0.113.50:60001`. This inbound packet is a legitimate response. **ALLOW.**"*
+   * Router A makes the identical determination for Peer B's inbound packets.
+4. **Direct P2P Connection Established:** Video, audio, and data tracks flow directly peer-to-peer across the open pinholes with **zero server bandwidth consumption**.
+
+---
+
+#### 11.7 Why STUN Fails on Symmetric NAT (Mobile 4G/5G & Corporate LANs)
+
+UDP hole punching succeeds on **Full-Cone** and **Restricted-Cone NATs** (standard home Wi-Fi), where the router preserves the same external port mapping regardless of destination.
+
+However, hole punching fails completely on **Symmetric NATs** (standard on cellular 4G/5G towers, university campus networks, and corporate enterprise firewalls):
+
+```
+                    +------------------------+
+                    |  Symmetric Router A    |
+                    +------------------------+
+                       /                  \
+                      /                    \
+       To STUN Server:                      To Peer B:
+       Allocates Port: 60001                Allocates Random Port: 60842!
+```
+
+* **Address and Port-Dependent Mapping:** When Client A communicates with the STUN server, the Symmetric NAT maps the connection to external port `60001`.
+* **Port Mutation:** When Client A attempts to send a packet to Peer B, the Symmetric NAT dynamically allocates a **completely different, unpredictable external port** (e.g., `60842`).
+* **Port Mismatch:** Peer B sends its hole-punching packets to port `60001` (the port reported by STUN). Because Router A only expects Peer B on port `60842`, all incoming packets are dropped.
+* **Result:** Direct peer-to-peer connection is mathematically impossible without external mediation.
+
+---
+
+#### 11.8 How TURN Works & Why Routers Agree to Communicate with It
+
+When direct P2P hole punching fails, WebRTC's ICE agent activates the fallback candidate: **TURN (Traversal Using Relays around NAT - RFC 8656)**.
+
+```
+       [Peer A]                                [Peer B]
+     (192.168.1.5)                           (10.0.0.12)
+          |                                       |
+    [Router A (NAT)]                        [Router B (NAT)]
+          |                                       |
+          |===(Outbound Egress: Allowed)=========>|===(Outbound Egress: Allowed)====\
+          |                                                                         |
+          \------------------> [ TURN Relay Server ] <-----------------------------/
+                             (Public IP:Port 3478 / 443)
+```
+
+#### Why Does the Router Allow the Connection to TURN?
+1. **Outbound Initiation:** Client A's browser initiates an outbound connection to the public TURN server by sending an authenticated `Allocate Request`.
+2. **Legitimate State Entry:** Router A treats this like any normal outbound web request. It creates a state table mapping:
+   `192.168.1.5:54321 <---> RouterA_Public_IP:61200 <---> TURN_SERVER_IP:3478`
+3. **Inbound Replies Permitted:** Router A allows all return packets from `TURN_SERVER_IP:3478` because they match an active session initiated internally.
+4. **Symmetric Handshake on Peer B:** Peer B performs the exact same outbound handshake with the TURN server through Router B.
+5. **The Relay Bridge:** The TURN server acts as an authenticated intermediary:
+   * Peer A transmits its media to the TURN server over its established outbound socket.
+   * The TURN server repackages the media into data indications and relays them down Peer B's established outbound socket.
+   * Neither router is ever forced to accept unsolicited inbound traffic from an unknown peer; each router only exchanges packets with the known, public TURN server.
+
+---
+
+#### 11.9 The Ultimate Firewall Bypass: TURN over TLS / Port 443
+
+Certain high-security enterprise and financial networks enforce **Strict Egress Filtering**, blocking all outgoing UDP traffic and restricting outbound TCP to standard web ports (80 and 443).
+
+WebRTC overcomes this constraint using **TURNS (TURN over TLS / TCP)**:
+```
+Client A  =====( Outbound TLS / TCP on Port 443 )=====> Enterprise Firewall =====> TURN Server
+(WebRTC)                                                [ Thinks it's HTTPS! ]
+                                                        [ Permitted by Default ]
+```
+
+1. WebRTC detects that standard UDP transport is blocked.
+2. It establishes a TCP connection to the TURN server over **Port 443 wrapped in TLS encryption**.
+3. **Why Enterprise Firewalls Cannot Block It:**
+   * Port 443 is universally open on all commercial networks to support standard HTTPS web browsing (`https://google.com`, online banking, corporate SaaS).
+   * Because the traffic is encrypted with standard TLS, packet inspection engines perceive it as secure web browsing and allow it through.
+   * This provides a **99.9% universal connectivity guarantee** regardless of network restrictions.
+
+---
+
+#### 11.10 Why TURN is Strictly a Fallback (Economic & Performance Constraints)
+
+If TURN guarantees connectivity through any firewall, why does WebRTC not use TURN for 100% of calls?
+
+| Architectural Dimension | Direct P2P (STUN Hole Punching) | TURN Relay (Fallback) |
+| :--- | :--- | :--- |
+| **Network Latency** | **Optimal / Minimal:** Direct geometric route between peers ($t \approx 15\text{–}40\text{ ms}$). | **Degraded:** Packets must detour through the remote TURN datacenter ($t \approx 80\text{–}180\text{ ms}$). |
+| **Server Bandwidth** | **0 MB:** Server carries zero audio/video payload. | **Heavy Egress:** All media streams continuously saturate server network interfaces. |
+| **Hosting & Cloud Billing** | **\$0:** STUN requests consume only ~2 KB of metadata during initial handshake. | **Expensive:** Streaming HD video across multiple participants generates terabytes of cloud egress bandwidth monthly. |
+| **Scalability Limit** | Scales linearly with zero media server CPU/RAM load. | Bounded by TURN server NIC capacity, CPU encryption overhead, and cloud egress budgets. |
+
+#### WebRTC ICE Candidate Prioritization Matrix:
+During connection negotiation, the browser's ICE agent tests candidate pairs in strict priority order:
+1. **`host` Candidates (Priority 1):** Direct communication over local LAN/Wi-Fi (fastest, zero routing).
+2. **`srflx` Candidates via STUN (Priority 2):** Direct peer-to-peer WAN communication via UDP hole punching (zero server cost, lowest internet latency).
+3. **`prflx` Candidates (Priority 3):** Peer-reflexive discovery during direct connectivity checks.
+4. **`relay` Candidates via TURN (Priority 4 - Last Resort):** Centralized media relay invoked only when Symmetric NATs or strict UDP firewall filtering prevent direct communication.
 
 
 ---
 
-### 10. Meeting Lifecycle, Waiting Room & History Architecture
+## 12. Meeting Lifecycle, Waiting Room & History Architecture
 
-#### 10.1 Meeting State Machine
+#### 12.1 Meeting State Machine
 Every meeting follows a deterministic state progression:
 1. **`SCHEDULED`**: Created in advance (standalone or attached to an Organization).
    - Visible under **"Upcoming"** tab for the Host and all members of the Organization so they can join when the time comes.
@@ -514,7 +660,7 @@ Every meeting follows a deterministic state progression:
    - Meeting state becomes `COMPLETED` and recorded with `endTime`.
 4. **`CANCELLED`**: If the Host deletes a scheduled meeting before it begins.
 
-#### 10.2 Strict History vs. Upcoming Visibility Filtering
+#### 12.2 Strict History vs. Upcoming Visibility Filtering
 To prevent non-attending members from seeing meetings they never joined in their History:
 - **Database Query (`GET /api/meetings`)**:
   ```sql
@@ -532,7 +678,7 @@ To prevent non-attending members from seeing meetings they never joined in their
   - **Rule**: If an organization member was NOT the host and NEVER attended (never admitted into the meeting), the meeting disappears from Upcoming once ended and does **NOT** appear in their History.
   - **Host & Admitted Participants**: Always retain the ended meeting in their History with full access to transcripts, AI summaries, and reports.
 
-#### 10.3 Database Resilience & Connection Pooler Architecture
+#### 12.3 Database Resilience & Connection Pooler Architecture
 - **Supabase PgBouncer Singleton**: Replaced fragmented `new PrismaClient()` instantiations across controllers with a centralized singleton (`backend/src/prisma.js`).
 - **Automatic Reconnection (`withDbRetry`)**: Transparently catches transient connection terminations (`P1017`, `P1001`, `ECONNRESET`), safely disconnects stale pool sockets, backs off exponentially, and retries the query without bubbling 500 errors to the client.
 - **Dual Real-time Dashboard Synchronization**:
@@ -540,14 +686,14 @@ To prevent non-attending members from seeing meetings they never joined in their
   - **Server-Sent Events (SSE)**: Secondary push pipeline on `/api/events`.
   - **Background Heartbeat**: 12-second periodic fallback refresh with client-side retry for maximum fault tolerance.
 
-#### 10.4 Waiting Room (Lobby) Lifecycle, Multi-Rejoin State Machine & WebRTC Peer Deduplication
+#### 12.4 Waiting Room (Lobby) Lifecycle, Multi-Rejoin State Machine & WebRTC Peer Deduplication
 
-##### 10.4.1 The Challenge
+##### 12.4.1 The Challenge
 In real-world meeting usage, users frequently enter the waiting room, leave (or disconnect), and re-enter multiple times before or after the host starts the session. Naive implementations suffer from two critical failure modes:
 1. **Lobby Bypass / Accidental Direct Entry**: When a participant leaves the waiting room, their status becomes `LEFT`. When they attempt to rejoin after the host starts the meeting, retaining `status = participant.status` (`'LEFT'`) would bypass the waiting room check because `'LEFT'` is not `'WAITING'`.
 2. **Duplicate Peer Explosion (Grid of 16+ identical tiles)**: If `waiting:admitted` or `participant:joined` is broadcast across overlapping room identifiers (`cleanLink`, `meetingLink`, `id`, `user_${id}`), or if multiple admissions fire, each event invokes `peersRef.current.push(createPeer(...))`. This creates duplicate WebRTC connections and cascades duplicate video tiles for the same participant.
 
-##### 10.4.2 Architectural Solution
+##### 12.4.2 Architectural Solution
 
 ###### A. Deterministic Participant State Machine
 When a participant requests to join (`POST /api/meetings/join/:link`):
@@ -588,30 +734,30 @@ finalStatus = (isHost || isCoHost)
 * **Lifecycle Teardown**: SPA page unmount resets `socketInitialized.current = false` and destroys active peer instances, guaranteeing that repeated lobby entries and exits start from a pristine connection state.
 * **In-Flight Signal Invalidation & Exception Safety**: In `simple-peer`, calling `.signal()` on a peer instance whose connection is closing or destroyed throws `cannot signal after peer is destroyed`. All signaling handlers check `!peer.destroyed`, purge dead peer records from the registry, and wrap `.signal()` dispatches in exception-safe blocks to gracefully handle asynchronous network packet arrival races.
 
-#### 10.5 Meeting Lifecycle Resilience, STT Loop Suppression & Multi-Format Resolution
+#### 12.5 Meeting Lifecycle Resilience, STT Loop Suppression & Multi-Format Resolution
 
-##### 10.5.1 Universal Meeting-Ended Interceptor
+##### 12.5.1 Universal Meeting-Ended Interceptor
 * **Lobby & Room Termination**: Previously, the `meetingEnded` modal was nested only inside the main room JSX. If the host ended the meeting while a user was waiting in the lobby (`participantStatus === 'WAITING'`), the user remained trapped on the lobby screen indefinitely.
 * **Architecture Fix**: `meetingEnded` is now intercepted as a top-level early return preceding the waiting room guard. When a meeting ends, all local media stream tracks are immediately stopped (`streamRef.current.getTracks().forEach(t => t.stop())`), and a clear dialog directs the user to either the meeting summary/report or their dashboard.
 
-##### 10.5.2 Speech Recognition (STT) Flood Suppression & State Guarding
+##### 12.5.2 Speech Recognition (STT) Flood Suppression & State Guarding
 * **Silence Loop Prevention**: In Chromium-based browsers, continuous Web Speech API instances fire `no-speech` errors during silence. Unconditional immediate restarts generated dozens of rapid restarts per minute, flooding the console and dev server logs.
 * **Admission Guarding**: STT execution is strictly gated by `participantStatus === 'ADMITTED' || isHostOrCoHost` and `!meetingEnded`. Users in the lobby or terminated meetings never have active speech recognition running.
 * **Debounced Restarts & Error Filtering**: Informational `no-speech` events are ignored without error logging, and engine restarts are debounced by 400ms to eliminate CPU spin.
 
-##### 10.5.3 Unified Entity Resolution & Database Fault Tolerance
+##### 12.5.3 Unified Entity Resolution & Database Fault Tolerance
 * **Multi-Format Identifier Resolution**: Endpoints (`/participants`, `/cohost`, `/transcript`, `/participant/:userId`) previously performed rigid `meetingLink` lookups that failed with 404 when clients passed internal UUIDs or lowercase alias codes. The centralized `resolveMeetingEntity` resolves meetings flexibly by link, case-insensitive link, UUID, or organization access code.
 * **PgBouncer Resilience across Endpoints**: Organization invitation acceptance and participant management queries are wrapped with `withDbRetry` to transparently recover from transient Supabase pool drops.
 
-##### 10.5.4 Dual-Convention Socket Notification Rooms
+##### 12.5.4 Dual-Convention Socket Notification Rooms
 * Both `user:${userId}` (colon notation) and `user_${userId}` (underscore notation) are joined upon `user:register` and `meeting:join`, ensuring instant delivery of notifications, promotions, and admissions regardless of emitter convention.
 
-#### 10.6 Email Invitation System (Standalone & Scheduled Meetings)
+#### 12.6 Email Invitation System (Standalone & Scheduled Meetings)
 
-##### 10.6.1 Motivation & Overview
+##### 12.6.1 Motivation & Overview
 While organization-scoped meetings automatically notify or list for enrolled organization members, ad-hoc and standalone scheduled meetings require an effortless mechanism to invite external collaborators. The Email Invitation System empowers hosts and co-hosts to dispatch branded, styled invitation emails to any recipient email address directly from their dashboard.
 
-##### 10.6.2 Architecture & Flow
+##### 12.6.2 Architecture & Flow
 ```
 Host/Co-host Dashboard (Upcoming Tab / Post-Schedule Modal)
          │
@@ -636,12 +782,12 @@ POST /api/meetings/:link/invite { emails: "alice@org.com, bob@org.com" }
 Response: { success: true, count: 2, message: "Invitation email sent to 2 recipient(s)" }
 ```
 
-##### 10.6.3 Security & Authorization Constraints
+##### 12.6.3 Security & Authorization Constraints
 - **Role Scoping**: Only verified meeting hosts or designated co-hosts can trigger invite emails for a given meeting ID.
 - **State Enforcement**: Invitations are strictly disallowed for ended (`COMPLETED`) or cancelled (`CANCELLED`) meetings to prevent outdated join links.
 - **Rate-Safety & Batching**: Recipient arrays are resolved asynchronously via `Promise.all` with individual error catching, reporting the exact number of successfully delivered invitations back to the client.
 
-##### 10.6.4 Brutalist Visual Language & Email Design
+##### 12.6.4 Brutalist Visual Language & Email Design
 Emails sent through `sendMeetingInvitation` adhere to BhashaBridge's signature Neo-Brutalist design language:
 - Georgia serif italics for headings and branding.
 - Monospace tags and high-contrast `#0A0A0A` borders with bold shadows.
@@ -649,23 +795,23 @@ Emails sent through `sendMeetingInvitation` adhere to BhashaBridge's signature N
 - Prominent Cobalt CTA button (`#0022FF`) with a direct one-click deep link to `/meeting/:meetingLink`.
 - Zero-install browser callout reassuring recipients that no desktop client or plugin installation is required.
 
-#### 10.7 Team Organizations UI & Membership Management Architecture
+#### 12.7 Team Organizations UI & Membership Management Architecture
 
-##### 10.7.1 Overview & Design Unification
+##### 12.7.1 Overview & Design Unification
 The Organizations module provides persistent collaborative spaces that tie meetings, rosters, and administrative delegations together. In previous builds, the tab suffered from disparate styles (dark-mode leftovers, washed-out blue rounded pills, raw unstyled inputs). The updated architecture unifies the module with BhashaBridge’s Neo-Brutalist visual design:
 - **Paper Cream Canvas (`#FDFBF7`)**: High-contrast `#0A0A0A` borders with bold offset drop shadows (`5px 5px 0 #0A0A0A`).
 - **Editorial Typography**: Georgia serif italic typography for organization identities paired with high-legibility monospace badges for roles and metadata.
 - **Dedicated Access Pass Tickets**: Formatted access codes with instant copy visual state, lifecycle regeneration, and deletion safety guards.
 
-##### 10.7.2 Membership Lifecycle & Role Delegation
+##### 12.7.2 Membership Lifecycle & Role Delegation
 - **Access Passes**: Each organization features an alphanumeric pass code (e.g. `BB-E01D16`). Users requesting to join enter the code, which creates a `PENDING` join request.
 - **Action Required Review Alerts**: Hosts and co-hosts receive prominent, high-priority alert cards highlighting pending join requests with one-click **Approve** (Emerald) and **Reject** (Crimson) actions.
 - **Roster & Co-Host Privileges**: Organization owners can directly promote members to `COHOST` (or revoke back to `PARTICIPANT`) via the interactive star toggle (★), enabling decentralized meeting management.
 - **Brutalist Roster Modals**: Expanded roster inspection with full user avatars, verified email records, and removal controls.
 
-#### 10.8 Race-Condition Resilient Participant Upsert & Acoustic Echo Suppression Architecture
+#### 12.8 Race-Condition Resilient Participant Upsert & Acoustic Echo Suppression Architecture
 
-##### 10.8.1 The Race-Condition Challenge (`P2002` Server Error)
+##### 12.8.1 The Race-Condition Challenge (`P2002` Server Error)
 When users enter a meeting or lobby (especially during React 18/19 StrictMode double-mounts, network reconnect bursts, or rapid clicks on "Join Meeting"), concurrent HTTP `POST /api/meetings/join/:link` requests frequently hit the backend within milliseconds of each other.
 * **Naive Pattern**: An initial `findUnique` returned `null` for both requests simultaneously. Both threads subsequently attempted `participant.create(...)`.
 * **The Failure**: The second request crashed with Prisma unique constraint violation `P2002` on composite key `['userId', 'meetingId']`. Because `joinMeeting` caught this as an unhandled error, it returned a `500 Server error`, rendering a fatal red modal *"Unable to Join Meeting — Server error"* that blocked users from entering the lobby or meeting.
@@ -675,7 +821,7 @@ When users enter a meeting or lobby (especially during React 18/19 StrictMode do
   3. **Client-Side Exponential Backoff & In-Flight Lock**: The frontend uses `isJoiningInProgressRef` to serialize join requests and automatically retries transient 500/network errors up to 3 times before presenting any error screen.
   4. **Self-Healing "Try Joining Again" Action**: If a session sync issue ever occurs, the error screen provides a prominent Cobalt *"Try Joining Again"* action that resets the connection lock and seamlessly retries without requiring the user to navigate back to the dashboard.
 
-##### 10.8.2 Acoustic Echo Suppression & TTS Feedback Loop Elimination
+##### 12.8.2 Acoustic Echo Suppression & TTS Feedback Loop Elimination
 In multilingual speech translation meetings, participants rely on Text-to-Speech (TTS) to hear translations spoken aloud in their native tongue. However, naive speech recognition and TTS architectures suffer from a critical acoustic feedback loop:
 ```
 Participant A Speaks: "Hello"
@@ -714,11 +860,11 @@ To eliminate this echo loop, BhashaBridge implements a four-stage **Acoustic Ech
 4. **Immediate Stream Abort on Mic Mute**:
    - When the user mutes their microphone or the component unmounts, `rec.abort()` immediately dumps Chromium's internal audio buffers and terminates recognition instantly, rather than waiting for graceful buffer drain via `rec.stop()`.
 
-##### 10.8.3 Single-Pulse Audio Demo Architecture
+##### 12.8.3 Single-Pulse Audio Demo Architecture
 Previously, the meeting room "Demo" button launched an infinite `setInterval(..., 6000)` loop that broadcasted test sentences continuously, confusing users and flooding room audio.
 * **Architectural Refactor**: Clicking *"⚡ Test Audio"* sends a single test phrase (*"Hello, this is a live test of the BhashaBridge translation system."*), presents a clear confirmation toast to the user, and automatically resets `isDemoActive = false` after 2.5 seconds. It never runs an uncontrolled background loop.
 
-##### 10.8.4 Multi-Lobby Rejoin Lifecycle, Zombie Socket Eviction & Client Caption Idempotency
+##### 12.8.4 Multi-Lobby Rejoin Lifecycle, Zombie Socket Eviction & Client Caption Idempotency
 A critical compounding failure previously occurred when users navigated back and forth between the lobby and dashboard (e.g. entering and leaving the lobby 4+ times before finally being admitted to the meeting):
 1. **The Compounding Failure Mechanism**:
    - Every time a user entered the lobby (`/meeting/:id`), Next.js mounted the component, instantiated a new Socket.IO client, and joined `meeting:join`.
