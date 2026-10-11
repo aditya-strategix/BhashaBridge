@@ -15,8 +15,45 @@ import useAuthStore from '../../../stores/authStore';
 import styles from './meeting.module.css';
 import './theme.css';
 
-const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const getSocketUrl = () => {
+  if (process.env.NEXT_PUBLIC_SOCKET_URL && !process.env.NEXT_PUBLIC_SOCKET_URL.includes('localhost')) {
+    return process.env.NEXT_PUBLIC_SOCKET_URL;
+  }
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    return window.location.origin;
+  }
+  return process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
+};
+
+const getApiUrl = () => {
+  if (process.env.NEXT_PUBLIC_API_URL && !process.env.NEXT_PUBLIC_API_URL.includes('localhost')) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    return `${window.location.origin}/api`;
+  }
+  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+};
+
+const SOCKET_URL = getSocketUrl();
+const API_URL = getApiUrl();
+
+const BCP47_LANG_MAP = {
+  en: 'en-US',
+  hi: 'hi-IN',
+  es: 'es-ES',
+  fr: 'fr-FR',
+  de: 'de-DE',
+  zh: 'zh-CN',
+  ta: 'ta-IN',
+  te: 'te-IN',
+  bn: 'bn-IN',
+  mr: 'mr-IN',
+  gu: 'gu-IN',
+  kn: 'kn-IN',
+  pa: 'pa-IN',
+  ur: 'ur-PK',
+};
 
 const LANG_OPTIONS = [
   { value: 'en', label: 'English' },
@@ -90,7 +127,11 @@ const VideoPeer = ({ peer, name, role, isAudioOn = true, isVideoOn = true, isScr
         autoPlay
         ref={ref}
         className={styles.videoElement}
-        style={{ display: showVideo ? 'block' : 'none' }}
+        style={{
+          display: showVideo ? 'block' : 'none',
+          objectFit: isScreenSharing ? 'contain' : 'cover',
+          backgroundColor: isScreenSharing ? '#000' : 'transparent'
+        }}
         onLoadedMetadata={() => {
           if (ref.current) {
             ref.current.play().catch(() => {});
@@ -252,6 +293,110 @@ export default function MeetingRoom() {
   const processedCaptionIdsRef = useRef(new Set());
   const activeSpeechRecRef = useRef(null);
 
+  useEffect(() => {
+    const unlockAudio = () => {
+      if (typeof window !== 'undefined') {
+        if ('speechSynthesis' in window) {
+          try {
+            const u = new SpeechSynthesisUtterance(' ');
+            u.volume = 0.01;
+            window.speechSynthesis.speak(u);
+          } catch (_) {}
+        }
+        try {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (AudioCtx) {
+            const ctx = new AudioCtx();
+            if (ctx.state === 'suspended') {
+              ctx.resume();
+            }
+          }
+        } catch (_) {}
+      }
+    };
+    window.addEventListener('touchstart', unlockAudio, { once: true, passive: true });
+    window.addEventListener('click', unlockAudio, { once: true, passive: true });
+    return () => {
+      window.removeEventListener('touchstart', unlockAudio);
+      window.removeEventListener('click', unlockAudio);
+    };
+  }, []);
+
+  const playTtsAudio = useCallback((cleanText, targetLangCode, bcpLang) => {
+    isTtsPlayingRef.current = true;
+    let playedViaBackend = false;
+
+    const playViaBackend = () => {
+      if (playedViaBackend) return;
+      playedViaBackend = true;
+      try {
+        const backendUrl = getApiUrl();
+        const shortLang = (targetLangCode || 'en').split('-')[0];
+        const url = `${backendUrl}/tts?text=${encodeURIComponent(cleanText)}&lang=${shortLang}`;
+        const audio = new Audio(url);
+        audio.onended = () => {
+          setTimeout(() => { isTtsPlayingRef.current = false; }, 600);
+        };
+        audio.onerror = () => {
+          setTimeout(() => { isTtsPlayingRef.current = false; }, 300);
+        };
+        audio.play().catch(e => {
+          isTtsPlayingRef.current = false;
+          console.warn('[Meeting TTS] Backend audio play failed:', e);
+        });
+      } catch (err) {
+        isTtsPlayingRef.current = false;
+      }
+    };
+
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(cleanText);
+        utterance.lang = bcpLang;
+        // Retain reference on window to prevent iOS Safari GC cutting speech prematurely
+        window._activeUtterance = utterance;
+
+        const voices = window.speechSynthesis.getVoices() || [];
+        if (voices.length > 0) {
+          const voice = voices.find(v => v.lang === bcpLang || v.lang.startsWith(targetLangCode));
+          if (voice) utterance.voice = voice;
+        }
+
+        let endedOrErrored = false;
+
+        utterance.onend = () => {
+          endedOrErrored = true;
+          window._activeUtterance = null;
+          setTimeout(() => { isTtsPlayingRef.current = false; }, 600);
+        };
+
+        utterance.onerror = (e) => {
+          endedOrErrored = true;
+          window._activeUtterance = null;
+          console.warn('[Meeting TTS] SpeechSynthesis error, falling back to backend audio:', e);
+          playViaBackend();
+        };
+
+        // Watchdog fallback for mobile if synthesis stalls without speaking
+        setTimeout(() => {
+          if (!endedOrErrored && !window.speechSynthesis.speaking && !playedViaBackend) {
+            console.warn('[Meeting TTS] SpeechSynthesis watchdog fired, falling back to backend');
+            try { window.speechSynthesis.cancel(); } catch (_) {}
+            playViaBackend();
+          }
+        }, 1800);
+
+        window.speechSynthesis.speak(utterance);
+      } catch (e) {
+        console.warn('[Meeting TTS] Native TTS exception:', e);
+        playViaBackend();
+      }
+    } else {
+      playViaBackend();
+    }
+  }, []);
+
   const handleCopyInviteLink = () => {
     const url = `${window.location.origin}/meeting/${meetingId}`;
     navigator.clipboard.writeText(url);
@@ -329,8 +474,23 @@ export default function MeetingRoom() {
       stopScreenShare();
       return;
     }
+
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      setAlertMessage('Screen sharing is not supported on this browser or mobile device. Please use Google Chrome or Safari on HTTPS.');
+      return;
+    }
+
     try {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      // Mobile Safari / Android WebKit requires simple constraints ({ video: true } with NO audio constraint)
+      let screenStream = null;
+      try {
+        screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      } catch (constraintErr) {
+        // Fallback for browsers requiring empty constraints or basic invocation
+        screenStream = await navigator.mediaDevices.getDisplayMedia();
+      }
+
+      if (!screenStream) return;
       screenStreamRef.current = screenStream;
       const screenTrack = screenStream.getVideoTracks()[0];
       if (!screenTrack) return;
@@ -366,9 +526,12 @@ export default function MeetingRoom() {
         });
       }
     } catch (err) {
-      if (err.name !== 'NotAllowedError') {
-        console.error('Failed to get display media:', err);
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        // User cancelled the prompt - harmless
+        return;
       }
+      console.error('Failed to get display media:', err);
+      setAlertMessage('Could not share screen: ' + (err.message || 'Permission denied or unsupported by this device.'));
     }
   };
   
@@ -438,8 +601,21 @@ export default function MeetingRoom() {
   useEffect(() => { socketRef.current = socket; }, [socket]);
   useEffect(() => { userRef.current = user; }, [user]);
   useEffect(() => { roleRef.current = participantRole; }, [participantRole]);
-  useEffect(() => { audioRef.current = isAudioOn; }, [isAudioOn]);
-  useEffect(() => { videoRef.current = isVideoOn; }, [isVideoOn]);
+  useEffect(() => {
+    audioRef.current = isAudioOn;
+    const s = streamRef.current || stream;
+    if (s) {
+      s.getAudioTracks().forEach(t => { t.enabled = isAudioOn; });
+    }
+  }, [isAudioOn, stream]);
+
+  useEffect(() => {
+    videoRef.current = isVideoOn;
+    const s = streamRef.current || stream;
+    if (s) {
+      s.getVideoTracks().forEach(t => { t.enabled = isVideoOn; });
+    }
+  }, [isVideoOn, stream]);
   useEffect(() => { streamRef.current = stream; }, [stream]);
 
   const handleUserVideoRef = useCallback((el) => {
@@ -716,6 +892,8 @@ export default function MeetingRoom() {
             audioRef.current = false;
           }
         }
+        currentStream.getAudioTracks().forEach(t => { t.enabled = audioRef.current; });
+        currentStream.getVideoTracks().forEach(t => { t.enabled = videoRef.current; });
         setStream(currentStream);
         streamRef.current = currentStream;
         if (userVideo.current) userVideo.current.srcObject = currentStream;
@@ -1121,11 +1299,19 @@ export default function MeetingRoom() {
             
             // Do not play TTS for own speech
             if (ttsEnabled && data.speakerId !== u.id) {
-              const textToSpeak = ttsLang === 'original' ? data.text : (data.translations?.[ttsLang] || data.text);
+              let targetLangCode = ttsLang;
+              if (targetLangCode === 'original' && u.language && u.language !== data.sourceLanguage) {
+                targetLangCode = u.language;
+              }
+              const textToSpeak = (targetLangCode !== 'original' && data.translations?.[targetLangCode])
+                ? data.translations[targetLangCode]
+                : (ttsLang === 'original' ? data.text : (data.translations?.[ttsLang] || data.text));
+
               if (textToSpeak && textToSpeak.trim()) {
                 const cleanText = textToSpeak.trim();
-                const targetLangCode = ttsLang === 'original' ? (data.sourceLanguage || 'en') : ttsLang;
-                const normKey = `${targetLangCode}:${cleanText.toLowerCase()}`;
+                const actualLangCode = targetLangCode === 'original' ? (data.sourceLanguage || 'en') : targetLangCode;
+                const bcpLang = BCP47_LANG_MAP[actualLangCode] || actualLangCode || 'en-US';
+                const normKey = `${actualLangCode}:${cleanText.toLowerCase()}`;
                 const now = Date.now();
 
                 // 1. Deduplication: Don't repeat identical audio within 5 seconds
@@ -1140,35 +1326,8 @@ export default function MeetingRoom() {
                   return;
                 }
 
-                // 3. Mark TTS as active so local mic SpeechRecognition suppresses audio input during playback
-                isTtsPlayingRef.current = true;
-
-                // Try native browser TTS first (much faster, bypasses strict MP3 autoplay rules)
-                if ('speechSynthesis' in window) {
-                  try { window.speechSynthesis.cancel(); } catch (_) {}
-                  const utterance = new SpeechSynthesisUtterance(cleanText);
-                  utterance.lang = targetLangCode;
-                  utterance.onend = () => {
-                    setTimeout(() => { isTtsPlayingRef.current = false; }, 600);
-                  };
-                  utterance.onerror = () => {
-                    setTimeout(() => { isTtsPlayingRef.current = false; }, 300);
-                  };
-                  window.speechSynthesis.speak(utterance);
-                } else {
-                  const url = `${API_URL}/tts?text=${encodeURIComponent(cleanText)}&lang=${targetLangCode.split("-")[0]}`;
-                  const audio = new Audio(url);
-                  audio.onended = () => {
-                    setTimeout(() => { isTtsPlayingRef.current = false; }, 600);
-                  };
-                  audio.onerror = () => {
-                    setTimeout(() => { isTtsPlayingRef.current = false; }, 300);
-                  };
-                  audio.play().catch(e => {
-                    isTtsPlayingRef.current = false;
-                    setAlertMessage('Browser blocked audio playback. Please click anywhere on the page first.');
-                  });
-                }
+                // 3. Play TTS audio via native speech synthesis or backend /api/tts
+                playTtsAudio(cleanText, actualLangCode, bcpLang);
               }
             }
           });
@@ -1230,7 +1389,7 @@ export default function MeetingRoom() {
           activeSpeechRecRef.current = null;
         } 
       };
-  }, [user, meetingId, retryCount]);
+  }, [user?.id, meetingId, retryCount]);
 
   // Speech recognition - starts when mic is unmuted and participant is admitted
   useEffect(() => {
@@ -1245,11 +1404,12 @@ export default function MeetingRoom() {
       try { activeSpeechRecRef.current.abort(); } catch (_) {}
       activeSpeechRecRef.current = null;
     }
+    const isMobile = typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const rec = new SR();
     activeSpeechRecRef.current = rec;
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = spokenLanguage;
+    rec.continuous = !isMobile;
+    rec.interimResults = !isMobile;
+    rec.lang = BCP47_LANG_MAP[spokenLanguage] || spokenLanguage || 'en-US';
     let stopped = false;
     let restartTimer = null;
 
@@ -1260,7 +1420,7 @@ export default function MeetingRoom() {
       }
 
       for (let i = ev.resultIndex; i < ev.results.length; ++i) {
-        if (ev.results[i].isFinal) {
+        if (ev.results[i].isFinal || isMobile) {
           const txt = ev.results[i][0].transcript.trim();
           if (txt) {
             const norm = txt.toLowerCase();
@@ -1294,7 +1454,7 @@ export default function MeetingRoom() {
           if (!stopped && audioRef.current) {
             try { rec.start(); } catch (_) {}
           }
-        }, 350);
+        }, isMobile ? 150 : 350);
       }
     };
     try { rec.start(); } catch (_) {}
@@ -1305,7 +1465,7 @@ export default function MeetingRoom() {
         try { rec.stop(); } catch (_) {}
       }
     };
-  }, [socket, user, isAudioOn, spokenLanguage, meetingId, participantStatus, isHostOrCoHost, meetingEnded]);
+  }, [socket, user?.id, isAudioOn, spokenLanguage, meetingId, participantStatus, isHostOrCoHost, meetingEnded]);
 
   const toggleVideo = () => {
     if (videoLockedRef.current) {
@@ -1329,6 +1489,9 @@ export default function MeetingRoom() {
     setIsAudioOn(nextAudio);
     const mediaStream = streamRef.current || stream;
     mediaStream?.getAudioTracks().forEach(t => { t.enabled = nextAudio; });
+    if (!nextAudio && activeSpeechRecRef.current) {
+      try { activeSpeechRecRef.current.abort(); } catch (_) {}
+    }
     if (socket) socket.emit('meeting:status_update', { isAudioOn: nextAudio, isVideoOn: videoRef.current });
   };
 
@@ -2178,7 +2341,11 @@ export default function MeetingRoom() {
                     ref={handleUserVideoRef}
                     autoPlay
                     className={styles.videoElement}
-                    style={{ display: (isVideoOn || isScreenSharing) ? 'block' : 'none' }}
+                    style={{
+                      display: (isVideoOn || isScreenSharing) ? 'block' : 'none',
+                      objectFit: isScreenSharing ? 'contain' : 'cover',
+                      backgroundColor: isScreenSharing ? '#000' : 'transparent'
+                    }}
                     onLoadedMetadata={() => {
                       if (userVideo.current) {
                         userVideo.current.play().catch(() => {});

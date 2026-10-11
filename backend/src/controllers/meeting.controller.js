@@ -1109,7 +1109,10 @@ exports.sendEmailInvite = async (req, res) => {
     }));
     const hostName = hostUser?.name || 'A BhashaBridge User';
 
-    const frontendBaseUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:3000');
+    const origin = req.headers.origin || (req.headers.referer ? new URL(req.headers.referer).origin : null);
+    const frontendBaseUrl = (origin && !origin.includes('localhost') && !origin.includes('127.0.0.1'))
+      ? origin.replace(/\/$/, '')
+      : (process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://bhashabridge.aditya-kumar.in').replace(/\/$/, '');
     const joinUrl = `${frontendBaseUrl}/meeting/${meeting.meetingLink}`;
 
     const results = await Promise.all(

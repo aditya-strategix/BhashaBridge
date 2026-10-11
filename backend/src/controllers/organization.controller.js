@@ -112,7 +112,10 @@ exports.inviteMembers = async (req, res) => {
     if (!org) return res.status(404).json({ error: 'Organization not found' });
     if (org.ownerId !== req.user.userId) return res.status(403).json({ error: 'Only the host can invite members' });
 
-    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'http://localhost:3001';
+    const origin = req.headers.origin || (req.headers.referer ? new URL(req.headers.referer).origin : null);
+    const frontendUrl = (origin && !origin.includes('localhost') && !origin.includes('127.0.0.1'))
+      ? origin.replace(/\/$/, '')
+      : (process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://bhashabridge.aditya-kumar.in').replace(/\/$/, '');
     
     const results = [];
 

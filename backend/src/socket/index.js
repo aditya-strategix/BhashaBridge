@@ -78,7 +78,7 @@ function setupSocket(server) {
         if (!participant) return;
 
         const cleanLink = (meetingId || '').trim();
-        socket.userLanguage = language || 'en';
+        socket.userLanguage = language || participant.user?.preferredLanguage || participant.user?.language || 'en';
         socket.userId = userId;
         socket.userName = participant.user?.name;
         socket.meetingId = meeting.meetingLink;
@@ -86,6 +86,13 @@ function setupSocket(server) {
         socket.cleanLink = cleanLink;
         socket.isAudioOn = isAudioOn !== undefined ? isAudioOn : true;
         socket.isVideoOn = isVideoOn !== undefined ? isVideoOn : true;
+        socket.userSettings = {
+          language: socket.userLanguage,
+          captionLang: socket.userLanguage,
+          ttsLang: socket.userLanguage,
+          captionEnabled: true,
+          ttsEnabled: true
+        };
 
         // Evict and disconnect any stale zombie sockets for this user in this meeting
         try {
@@ -440,11 +447,15 @@ function setupSocket(server) {
           const targetLanguages = new Set();
           clients.forEach(c => {
             const s = c.userSettings || {};
-            if ((s.captionEnabled ?? true) && s.captionLang && s.captionLang !== 'original') {
-              targetLanguages.add(s.captionLang);
+            const clientLang = s.language || c.userLanguage || 'en';
+            const effCaptionLang = (s.captionLang && s.captionLang !== 'original') ? s.captionLang : clientLang;
+            const effTtsLang = (s.ttsLang && s.ttsLang !== 'original') ? s.ttsLang : clientLang;
+
+            if ((s.captionEnabled ?? true) && effCaptionLang && effCaptionLang !== language) {
+              targetLanguages.add(effCaptionLang);
             }
-            if ((s.ttsEnabled ?? true) && s.ttsLang && s.ttsLang !== 'original') {
-              targetLanguages.add(s.ttsLang);
+            if ((s.ttsEnabled ?? true) && effTtsLang && effTtsLang !== language) {
+              targetLanguages.add(effTtsLang);
             }
           });
           console.log(`[CAPTION:TRANSLATING] clientsInRoom: ${clients.length}, targetLanguages:`, Array.from(targetLanguages));

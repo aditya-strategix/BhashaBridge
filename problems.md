@@ -268,8 +268,62 @@ Raw benchmark JSON output is persisted at [`backend/scripts/benchmark-results.js
    * Updated both the Self `<video>` element and `<VideoPeer>` component to evaluate `const showVideo = isVideoOn || isScreenSharing; style={{ display: showVideo ? 'block' : 'none' }}`.
 4. **Signaling Plane Propagation:**
    * Updated `backend/src/socket/index.js` and frontend socket handlers (`meeting:status_update` and `audio:signal`) to broadcast `isScreenSharing`.
-   * Added the green `<Monitor size={12} color="#10B981" />` indicator on active screen-sharer name pills for both self and remote peer tiles.
 
+---
 
+## Problem 13: Mobile WebRTC & UI Adaptations, Settings Peer Eviction, Phantom Mic State & Production Speech-to-Speech Resolution
 
+### Symptoms:
+1. **Hardcoded Email Invitations & Broken Mobile Dropdown:**
+   * Organization invite emails sent invitation links hardcoded to `http://localhost:3001/invite/[token]` instead of the live production domain (`https://bhashabridge.aditya-kumar.in`).
+   * On mobile screens, clicking the notification bell icon opened an oversized desktop dropdown that overflowed off-screen, clipping invite cards and action buttons.
+2. **Mobile Screen Sharing Failures & Distorted Video Tiles:**
+   * Calling screen share on mobile browsers crashed without informative user feedback due to unsupported desktop audio constraints (`audio: true`).
+   * Remote mobile portrait screen shares were severely cropped and zoomed because video elements used `object-fit: cover`.
+3. **Settings Dropdown Participant Disappearance Glitch:**
+   * Whenever any participant (host, cohost, or attendee) opened the Settings modal and selected any dropdown (Speech-to-Speech, Captions, Chat language), all other meeting participants disappeared for several seconds.
+4. **Microphone Phantom Audio Transmission:**
+   * When muting the microphone, speech or audio continued transmitting internally until the user clicked unmute and mute a second time.
+5. **Speech-to-Speech Translation Failure on Mobile & Production Domain:**
+   * Speech-to-speech translation worked across two windows on localhost desktop Chrome, but completely failed on mobile phones and on the production domain `https://bhashabridge.aditya-kumar.in`.
 
+### Root Cause Analysis:
+1. **Org Invites & Popup:**
+   * In `backend/src/controllers/organization.controller.js` and `meeting.controller.js`, the invite link was hardcoded to `http://localhost:3001`.
+   * In `frontend/src/components/NotificationBell.js`, the popup styling was positioned with `right: 0, width: '380px'` with no mobile viewport breakpoint or backdrop.
+2. **Mobile Screen Share:**
+   * Calling `getDisplayMedia({ video: true, audio: true })` throws `NotAllowedError` or `TypeError` on mobile WebKit/Blink because mobile OS display media APIs do not capture system loopback audio.
+   * `object-fit: cover` forced vertical 9:16 mobile phone screens into horizontal 16:9 meeting tiles, cutting off 70% of the content.
+3. **Settings Peer Eviction:**
+   * In `frontend/src/app/meeting/[id]/page.js`, the main WebRTC connection `useEffect` had `user` in its dependency array: `}, [user, meetingId, retryCount]);`.
+   * Selecting any language dropdown invoked `useAuthStore.getState().updateUser()`, which generated a new `user` object reference.
+   * React triggered the effect cleanup, which destroyed all active simple-peer connections (`peer.destroy()`), cleared `peersRef.current = []`, and reset `setPeers([])`!
+4. **Phantom Mic State:**
+   * In `initializeMeeting()`, `getUserMedia({ audio: true })` created tracks that were enabled by default (`t.enabled = true`), without synchronizing with `audioRef.current`.
+   * If a user was muted in lobby or joined muted, the physical track remained transmitting until toggled twice.
+5. **Speech-to-Speech Translation on Mobile & Domain:**
+   * **Domain Hardcoding:** Sockets and TTS endpoints fell back to `'http://localhost:5000'` when `process.env.NEXT_PUBLIC_SOCKET_URL` was unset, causing mixed-content and connection refused errors on phones and HTTPS domains.
+   * **Mobile WebKit Autoplay Policy:** Mobile Safari and Chrome pause `window.speechSynthesis` and Web Audio until a user touch/click unlocks the audio subsystem.
+   * **Safari Utterance Garbage Collection:** In iOS Safari, local `SpeechSynthesisUtterance` instances are garbage-collected mid-speech unless referenced globally on `window._activeUtterance`.
+   * **Missing Language Voice Fallback:** Many mobile OS devices lack native offline TTS voices for Indian regional languages (e.g., Hindi, Tamil, Telugu). When `speechSynthesis.speak()` errored or stalled, there was no fallback to the backend Google TTS MP3 proxy (`/api/tts`).
+   * **Continuous Speech Recognition on Mobile:** Mobile WebKit strictly rejects `rec.continuous = true`, causing recognition to terminate prematurely.
+
+### The Solution:
+1. **Dynamic Domain Resolution & Responsive Drawer:**
+   * Updated `organization.controller.js` and `meeting.controller.js` to derive the base URL from `req.headers.origin` or fallback to `https://bhashabridge.aditya-kumar.in`.
+   * Transformed `NotificationBell.js` with responsive viewport detection (`innerWidth < 640px`), rendering a centered fixed drawer (`left: 0.75rem, right: 0.75rem, top: 65px`) with a darkened backdrop overlay and mobile touch dismiss.
+2. **Mobile Display Media & Aspect-Ratio Containment:**
+   * Updated `toggleScreenShare` to verify `navigator.mediaDevices.getDisplayMedia`, call `{ video: true }` without desktop-only audio constraints, and gracefully handle permission cancellation.
+   * Updated self `<video>` and `<VideoPeer>` elements to dynamically switch `objectFit: isScreenSharing ? 'contain' : 'cover'` with letterbox background `#000`.
+3. **Targeted Dependency Arrays in Meeting Lifecycle:**
+   * Swapped `user` for primitive `user?.id` in the main connection `useEffect` (`[user?.id, meetingId, retryCount]`) and Speech Recognition hook (`[socket, user?.id, ...]`). Settings updates now mutate state without re-running socket or peer teardowns.
+4. **Strict Microphone Track State Synchronization:**
+   * Enforced `currentStream.getAudioTracks().forEach(t => { t.enabled = audioRef.current; })` immediately upon acquiring stream in `initializeMeeting()`.
+   * Added `useEffect([isAudioOn, stream])` synchronization and immediate `activeSpeechRecRef.current.abort()` on microphone mute.
+5. **Universal Speech-to-Speech Engine with Dual Fallback:**
+   * **Dynamic Origin Adapters:** Added `getSocketUrl()` and `getApiUrl()` to `page.js`, `api.js`, `dashboard/page.js`, and `NotificationBell.js` to automatically resolve to `window.location.origin` on non-localhost hosts.
+   * **Touch Gesture Audio Primer:** Registered one-time `touchstart` and `click` listeners that prime `SpeechSynthesisUtterance` and resume suspended `AudioContext`.
+   * **BCP-47 Tag Normalization:** Mapped language codes (`'hi'` $\rightarrow$ `'hi-IN'`, `'en'` $\rightarrow$ `'en-US'`) for system voice matching.
+   * **Safari Utterance Retention:** Anchored active utterances to `window._activeUtterance` with cleanup on `onend`/`onerror`.
+   * **Automatic Backend MP3 Fallback:** Created `playTtsAudio` with an automatic fallback: if native synthesis encounters `onerror`, lacks voices, or stalls for > 1.8 seconds, it transparently fetches and streams audio from `${getApiUrl()}/tts?text=...&lang=...`.
+   * **Mobile Speech Recognition Loop:** Switched mobile devices (`isMobile`) to `continuous = false` with rapid 150ms `onend` auto-restarts, ensuring uninterrupted voice transcription across iOS Safari and Android Chrome.

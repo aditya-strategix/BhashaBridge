@@ -10,7 +10,27 @@ import {
   FileText, BarChart3, Globe, Calendar, Radio, Sparkles, Shield, Zap
 } from 'lucide-react';
 import { io } from 'socket.io-client';
-const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
+
+const getSocketUrl = () => {
+  if (process.env.NEXT_PUBLIC_SOCKET_URL && !process.env.NEXT_PUBLIC_SOCKET_URL.includes('localhost')) {
+    return process.env.NEXT_PUBLIC_SOCKET_URL;
+  }
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    return window.location.origin;
+  }
+  return process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
+};
+
+const getApiUrl = () => {
+  if (process.env.NEXT_PUBLIC_API_URL && !process.env.NEXT_PUBLIC_API_URL.includes('localhost')) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    return `${window.location.origin}/api`;
+  }
+  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+};
+
 import useAuthStore from '../../stores/authStore';
 import api from '../../services/api';
 import styles from './dashboard.module.css';
@@ -223,7 +243,7 @@ function DashboardContent() {
   useEffect(() => {
     if (!user) return;
 
-    const sseUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/events`;
+    const sseUrl = `${getApiUrl()}/events`;
     const eventSource = new EventSource(sseUrl);
 
     eventSource.addEventListener('dashboard:refresh', () => {
@@ -236,7 +256,7 @@ function DashboardContent() {
     };
 
     // Socket.IO real-time channel
-    const socket = io(SOCKET_URL);
+    const socket = io(getSocketUrl());
     socket.on('dashboard:refresh', () => {
       console.log('[Socket] dashboard:refresh received -> refetching data');
       fetchData();

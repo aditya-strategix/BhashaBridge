@@ -6,7 +6,15 @@ import { Bell, X, Check, Building2, Clock } from 'lucide-react';
 import api from '../services/api';
 import useAuthStore from '../stores/authStore';
 
-const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
+const getSocketUrl = () => {
+  if (process.env.NEXT_PUBLIC_SOCKET_URL && !process.env.NEXT_PUBLIC_SOCKET_URL.includes('localhost')) {
+    return process.env.NEXT_PUBLIC_SOCKET_URL;
+  }
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    return window.location.origin;
+  }
+  return process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
+};
 
 // ---- tiny helper ----
 function timeAgo(dateStr) {
@@ -23,8 +31,16 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [processing, setProcessing] = useState({}); // { [token]: 'accepting'|'declining' }
   const [toast, setToast] = useState(null); // { message, type }
+  const [isMobile, setIsMobile] = useState(false);
   const dropdownRef = useRef(null);
   const socketRef = useRef(null);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(typeof window !== 'undefined' && window.innerWidth < 640);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
@@ -52,7 +68,7 @@ export default function NotificationBell() {
   useEffect(() => {
     if (!user) return;
 
-    const sock = io(SOCKET_URL, { transports: ['websocket'] });
+    const sock = io(getSocketUrl(), { transports: ['websocket'] });
     socketRef.current = sock;
 
     sock.on('connect', () => {
@@ -161,11 +177,15 @@ export default function NotificationBell() {
 
         return (
           <div style={{
-            position: 'fixed', top: '1.5rem', right: 'clamp(0.5rem, 3vw, 1.5rem)', zIndex: 99999,
-            width: 'min(320px, calc(100vw - 1rem))',
+            position: 'fixed',
+            top: isMobile ? '0.75rem' : '1.5rem',
+            left: isMobile ? '0.5rem' : 'auto',
+            right: isMobile ? '0.5rem' : 'clamp(0.5rem, 3vw, 1.5rem)',
+            zIndex: 99999,
+            width: isMobile ? 'calc(100vw - 1rem)' : 'min(340px, calc(100vw - 1rem))',
             maxWidth: 'calc(100vw - 1rem)',
             boxSizing: 'border-box',
-            background: 'linear-gradient(145deg, #FDFBF7, #FDFBF7)',
+            background: '#FDFBF7',
             border: '2px solid #111',
             borderRadius: '0',
             boxShadow: '4px 4px 0 #111',
@@ -250,15 +270,36 @@ export default function NotificationBell() {
           )}
         </button>
 
+        {/* Mobile Backdrop */}
+        {open && isMobile && (
+          <div
+            onClick={() => setOpen(false)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0,0,0,0.5)',
+              zIndex: 9998,
+              backdropFilter: 'blur(3px)',
+            }}
+          />
+        )}
+
         {/* Dropdown panel */}
         {open && (
           <div style={{
-            position: 'absolute', right: 0, top: 'calc(100% + 10px)',
-            width: 'min(360px, calc(100vw - 2rem))', maxHeight: 480, overflowY: 'auto',
+            position: isMobile ? 'fixed' : 'absolute',
+            right: isMobile ? '0.75rem' : 0,
+            left: isMobile ? '0.75rem' : 'auto',
+            top: isMobile ? '65px' : 'calc(100% + 10px)',
+            width: isMobile ? 'auto' : '360px',
+            maxWidth: isMobile ? 'calc(100vw - 1.5rem)' : '360px',
+            maxHeight: isMobile ? 'calc(100vh - 85px)' : 480,
+            overflowY: 'auto',
             boxSizing: 'border-box',
-            background: 'linear-gradient(135deg, #FDFBF7, #FDFBF7)',
+            background: '#FDFBF7',
             border: '2px solid #111',
-            borderRadius: '0', zIndex: 9998,
+            borderRadius: '0',
+            zIndex: 9999,
             boxShadow: '4px 4px 0 #111',
             backdropFilter: 'blur(20px)',
           }}>
