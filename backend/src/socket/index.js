@@ -62,7 +62,7 @@ function setupSocket(server) {
     });
 
     // Join meeting room
-    socket.on('meeting:join', async ({ meetingId, userId, peerId, language }) => {
+    socket.on('meeting:join', async ({ meetingId, userId, peerId, language, isAudioOn, isVideoOn }) => {
       try {
         const meeting = await resolveMeeting(meetingId);
         if (!meeting) return;
@@ -84,6 +84,8 @@ function setupSocket(server) {
         socket.meetingId = meeting.meetingLink;
         socket.dbMeetingId = meeting.id;
         socket.cleanLink = cleanLink;
+        socket.isAudioOn = isAudioOn !== undefined ? isAudioOn : true;
+        socket.isVideoOn = isVideoOn !== undefined ? isVideoOn : true;
 
         // Evict and disconnect any stale zombie sockets for this user in this meeting
         try {
@@ -124,7 +126,9 @@ function setupSocket(server) {
             socketId: socket.id,
             name: participant.user?.name,
             role: effectiveRole,
-            avatar: participant.user?.avatar 
+            avatar: participant.user?.avatar,
+            isAudioOn: socket.isAudioOn,
+            isVideoOn: socket.isVideoOn
           };
           socket.to(meeting.id).emit('participant:joined', joinedPayload);
           console.log(`User ${userId} joined meeting ${meeting.meetingLink}`);
@@ -361,8 +365,15 @@ function setupSocket(server) {
 
     // Handle WebRTC signaling
     socket.on('meeting:status_update', ({ isAudioOn, isVideoOn }) => {
+      socket.isAudioOn = isAudioOn !== undefined ? isAudioOn : socket.isAudioOn;
+      socket.isVideoOn = isVideoOn !== undefined ? isVideoOn : socket.isVideoOn;
       if (socket.meetingId) {
-        socket.to(socket.meetingId).emit('participant:status_update', { socketId: socket.id, isAudioOn, isVideoOn });
+        socket.to(socket.meetingId).emit('participant:status_update', {
+          socketId: socket.id,
+          userId: socket.userId,
+          isAudioOn,
+          isVideoOn
+        });
       }
     });
 
@@ -392,7 +403,10 @@ function setupSocket(server) {
         callerId: socket.id,
         name: data.name,
         role: data.role,
-        userId: data.userId
+        userId: data.userId,
+        avatar: data.avatar,
+        isAudioOn: data.isAudioOn,
+        isVideoOn: data.isVideoOn
       });
     });
 

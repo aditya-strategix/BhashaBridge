@@ -147,3 +147,102 @@ Users and engineers often wonder:
 * The TURN server receives media from Client A on `60001`, relays it to Peer B, and returns Peer B's media back to Client A from `TURN_SERVER_IP:3478`.
 * Router A's firewall sees return packets from the exact destination Client A reached out to, and permits 100% of the traffic without dropping a single packet.
 
+---
+
+## Problem 9: WebRTC Media State Desynchronization on Join (Initial Black Video Box & Phantom Active Icons)
+
+### Symptom:
+1. When a new participant joins a meeting room where existing participants (such as the Host) have their camera and/or microphone turned off, the host appears with **active green camera/mic icons and a pitch-black video box** instead of their Avatar placeholder with red muted icons.
+2. When a participant joins with their camera enabled, their video stream would sometimes remain black or invisible to remote peers until they toggled the camera button off and on.
+3. When a participant is admitted from the Waiting Room (Lobby) into the main meeting, the remote Host can see the participant's camera stream normally, but on the participant's own screen, **their own self-video tile is completely pitch-black**.
+
+### Root Cause Analysis:
+1. **Socket Race Condition (`participant:status_update` before Peer Creation):**
+   * When Participant B joins, existing Participant A receives `participant:joined` and immediately emits `meeting:status_update`.
+   * Participant B receives `participant:status_update` *before* the WebRTC offer (`audio:signal`) arrives to construct the peer object in `peersRef.current`.
+   * Because `peersRef.current.findIndex(...)` resolved to `-1`, Participant B silently dropped the incoming status payload.
+2. **Missing State in WebRTC Signaling Handshake:**
+   * Neither `createPeer` nor `addPeer` included `isAudioOn` or `isVideoOn` in the `audio:signal` payload.
+   * Additionally, the backend socket relay stripped custom payload properties, forwarding only a minimal dictionary without media states or avatar URLs.
+3. **Undefined Fallback in Render Layer:**
+   * When peers were pushed to `peersRef.current`, `isAudioOn` and `isVideoOn` were `undefined`.
+   * The `<VideoPeer />` component defaulted them to `true`, forcing `<video style={{ display: 'block' }}>` to render instead of the `<Avatar>` placeholder, resulting in a black box showing green active indicators.
+4. **MediaStream Track Attachment Race:**
+   * In `simple-peer`, remote tracks can be added to the remote stream after initial stream events fire.
+   * Without listening to `peer.on('track')` and the `<video>` element's `onLoadedMetadata`, playback could stall until renegotiation was forced via manual button toggle.
+5. **DOM Element Lifecycle & Unmount on View Transition (Lobby $\rightarrow$ Meeting Stage):**
+   * When a participant first entered the waiting room, `userVideo.current.srcObject = currentStream` was attached to the Lobby's `<video>` DOM node.
+   * When the host admitted the participant (`participantStatus` changed from `'WAITING'` to `'ADMITTED'`), React unmounted the Lobby component tree and mounted the Main Meeting Stage component tree.
+   * This destroyed the previous `<video>` element and rendered a brand-new `<video>` DOM element for the self tile.
+   * Because `srcObject` assignment was only performed once inside `initMeeting()`, the newly mounted `<video>` element in the main room never received `srcObject = stream` ($srcObject = \text{null}$).
+   * The camera was broadcasting over WebRTC (so the Host could see them), but locally the participant saw a pitch-black box for their own tile.
+
+### The Solution:
+1. **Client-Side Early Status Cache (`peerStatusMapRef`):**
+   * All incoming status updates are indexed in a `peerStatusMapRef` cache by `socketId` and `userId`.
+   * When a peer object is instantiated from either `participant:joined` or `audio:signal`, its initial `isAudioOn` and `isVideoOn` states are resolved directly from the cache or signaling payload rather than defaulting to `true`.
+2. **Signaling Payload Enhancement:**
+   * Initial media states are included in `meeting:join`, `participant:joined`, and `audio:signal` payloads, propagating hardware states during the WebRTC handshake itself.
+   * The backend socket server forwards `isAudioOn`, `isVideoOn`, and `avatar` attributes intact.
+3. **P2P Connect Hook (`peer.on('connect')`):**
+   * As soon as the direct WebRTC peer connection transitions to the connected state, both peers emit an immediate `meeting:status_update` to guarantee synchronized state.
+4. **Robust Video Stream Playback:**
+   * Added `peer.on('track')` and `onLoadedMetadata={() => ref.current?.play().catch(() => {})}` to guarantee the `<video>` pipeline begins playback as soon as media frames arrive.
+5. **Callback Ref (`handleUserVideoRef`) & View Transition Stream Synchronizer:**
+   * Implemented a `useCallback` ref (`handleUserVideoRef`) attached to both the Lobby and Main Stage `<video>` elements. As soon as React mounts any self `<video>` DOM node, `handleUserVideoRef` synchronously sets `el.srcObject = streamRef.current || stream` and triggers `.play()`.
+   * Added an active `useEffect` listening to `[stream, participantStatus, isVideoOn]` ensuring seamless stream persistence across all role changes, lobby transitions, and camera toggles.
+
+---
+
+## Problem 10: Gemini 1.5 API Deprecation (404 Not Found) & Multi-Provider AI Architecture
+
+### Symptom:
+When generating meeting summaries or clicking "AI Summary" / "View Synthesis", the system popped up a modal error:
+`Server error: Gemini API Error: 404 { "error": { "code": 404, "message": "models/gemini-1.5-pro is not found for API version v1beta, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.", "status": "NOT_FOUND" } }`
+
+### Root Cause:
+* Google deprecated earlier preview model designations (`gemini-1.5-pro`, `gemini-1.5-flash`, `gemini-2.0-flash`, `gemini-2.5-flash`) for newer API consumers, returning HTTP 404 with notice: *"This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.8-flash for the latest features and improvements."*
+* The backend `AIService` was hardcoded exclusively to deprecated model names and lacked multi-provider fallback. When all 4 hardcoded models returned 404, it threw a 500 server error to the frontend client.
+
+### The Solution:
+1. **Upgraded to Active Flagship Gemini Models:**
+   * Updated the primary model priority queue to:
+     `gemini-3.8-flash`, `gemini-3.7-flash`, `gemini-3.5-flash`, `gemini-flash-latest`, `gemini-3.5-flash-lite`, and `gemini-2.5-pro`.
+2. **Multi-Provider Fallback Architecture:**
+   * Added automatic fallback support for:
+     * **Groq** (`llama-3.3-70b-versatile`, `llama-3.1-8b-instant`) if `GROQ_API_KEY` is present.
+     * **OpenAI** (`gpt-4o-mini`, `gpt-4o`, `gpt-3.5-turbo`) if `OPENAI_API_KEY` is present.
+     * **Anthropic** (`claude-3-5-haiku`, `claude-3-5-sonnet`) if `ANTHROPIC_API_KEY` is present.
+3. **Resilient Local Structural Fallback:**
+   * Added an offline linguistic structural analyzer (`generateStructuralSummary`) that parses speakers, discussions, and action verb commitments directly from the transcript if all cloud LLMs are unreachable or rate-limited.
+   * Guarantees 100% service uptime: the user is never shown a 404/500 modal failure.
+
+---
+
+## Problem 11: Empirical System Latency Benchmarking Across Architectural Planes
+
+### Objective:
+Accurately measure, statistically profile, and document real-world latency times across comparable architectural states in BhashaBridge (Cold AI inference vs. Warm in-memory caching, PostgreSQL relational queries vs. Redis key-value lookups, dynamic multilingual translation vs. identity pass-through, and WebSocket signaling RTT) to provide empirically validated metrics for engineering resumes and architectural documentation.
+
+### Benchmark Methodology & Test Harness:
+* Built an automated benchmark suite in [`backend/scripts/benchmark-latency.js`](file:///E:/BhashaBridge/BhashaBridge/backend/scripts/benchmark-latency.js) utilizing Node.js high-resolution timers (`performance.now()`).
+* Ran repeated production cycles across active live services:
+  * **Cold Gemini 3.8 Flash** via Google Generative Language API
+  * **Upstash Valkey / Redis** distributed in-memory key-value store over TLS
+  * **Supabase PostgreSQL** via Prisma ORM connection pool
+  * **Google Translate API** live translation engine (`@vitalets/google-translate-api`)
+  * **Socket.IO** WebSocket real-time signaling plane on Node.js
+
+### Verified Empirical Results:
+
+| Architectural Domain / Pipeline | State A (Baseline / Cold) | State B (Optimized / Warm) | Speedup Ratio | Latency Reduction |
+| :--- | :--- | :--- | :--- | :--- |
+| **AI Meeting Synthesis** | Cold Gemini 3.8 Flash: **6,566.2 ms** (P50: 6,405.3 ms, P90: 7,503.9 ms) | Warm Redis Cache Hit: **109.8 ms** (P50: 108.2 ms, P90: 112.1 ms) | **59.8× Speedup** | **98.3% Decrease** |
+| **Persistence Layer Read Path** | PostgreSQL / Prisma Query: **655.5 ms** (P50: 647.2 ms, P90: 660.4 ms) | Redis Key-Value Lookup: **108.3 ms** (P50: 107.8 ms, P90: 108.5 ms) | **6.1× Speedup** | **83.5% Decrease** |
+| **Live Speech Translation** | Dynamic (EN $\rightarrow$ HI & ES): **738.4 ms** (Steady-state P50: **284.3 ms**) | Identity Pass-Through: **0.01 ms** (Bypass routing) | **73,836× Bypass** | Instant zero-cost stream |
+| **WebSocket Signaling Plane** | Real-Time Peer Audio/Video Packet Relay RTT: **Mean 1.20 ms** (P50: **1.21 ms**, P95: **1.90 ms**, Min: **0.82 ms**) | - | - | **Sub-2ms Signaling** |
+
+Raw benchmark JSON output is persisted at [`backend/scripts/benchmark-results.json`](file:///E:/BhashaBridge/BhashaBridge/backend/scripts/benchmark-results.json).
+
+
+

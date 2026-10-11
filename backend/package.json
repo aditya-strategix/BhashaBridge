@@ -30,6 +30,7 @@
     "redis": "^6.2.1",
     "resend": "^6.28.1",
     "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.4",
     "zod": "^4.5.4"
   },
   "devDependencies": {

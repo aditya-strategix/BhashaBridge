@@ -1,0 +1,78 @@
+{
+  "summary": {
+    "coldGemini": {
+      "min": 5789.55,
+      "max": 7503.86,
+      "mean": 6566.22,
+      "p50": 6405.25,
+      "p90": 7503.86,
+      "p95": 7503.86,
+      "samplesCount": 3
+    },
+    "warmRedis": {
+      "min": 107.33,
+      "max": 118.7,
+      "mean": 109.79,
+      "p50": 108.22,
+      "p90": 112.13,
+      "p95": 118.7,
+      "samplesCount": 10
+    },
+    "speedup": "59.8x",
+    "reductionPercent": "98.3%"
+  },
+  "database": {
+    "postgresPrisma": {
+      "min": 641.7,
+      "max": 723.58,
+      "mean": 655.54,
+      "p50": 647.18,
+      "p90": 660.41,
+      "p95": 723.58,
+      "samplesCount": 10
+    },
+    "redisKv": {
+      "min": 106.83,
+      "max": 113.78,
+      "mean": 108.26,
+      "p50": 107.77,
+      "p90": 108.48,
+      "p95": 113.78,
+      "samplesCount": 10
+    },
+    "speedup": "6.1x",
+    "reductionPercent": "83.5%"
+  },
+  "translation": {
+    "activeTranslation": {
+      "min": 246.33,
+      "max": 2444.05,
+      "mean": 738.36,
+      "p50": 284.25,
+      "p90": 2444.05,
+      "p95": 2444.05,
+      "samplesCount": 5
+    },
+    "identityPassThrough": {
+      "min": 0.01,
+      "max": 0.02,
+      "mean": 0.01,
+      "p50": 0.01,
+      "p90": 0.01,
+      "p95": 0.02,
+      "samplesCount": 10
+    },
+    "speedup": "73836.0x"
+  },
+  "signaling": {
+    "socketRtt": {
+      "min": 0.82,
+      "max": 1.9,
+      "mean": 1.2,
+      "p50": 1.21,
+      "p90": 1.48,
+      "p95": 1.9,
+      "samplesCount": 15
+    }
+  }
+}

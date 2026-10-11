@@ -49,16 +49,52 @@ const VideoPeer = ({ peer, name, role, isAudioOn = true, isVideoOn = true, avata
   const ref = useRef();
   useEffect(() => {
     const handleStream = stream => {
-      if (ref.current) ref.current.srcObject = stream;
+      if (!stream) return;
+      if (ref.current) {
+        if (ref.current.srcObject !== stream) {
+          ref.current.srcObject = stream;
+        }
+        ref.current.play().catch(() => {});
+      }
     };
-    peer.on('stream', handleStream);
+    const handleTrack = (_track, stream) => {
+      handleStream(stream);
+    };
+    if (peer && peer._remoteStreams && peer._remoteStreams[0]) {
+      handleStream(peer._remoteStreams[0]);
+    }
+    if (peer) {
+      peer.on('stream', handleStream);
+      peer.on('track', handleTrack);
+    }
     return () => {
-      try { peer.off('stream', handleStream); } catch (_) {}
+      if (peer) {
+        try { peer.off('stream', handleStream); } catch (_) {}
+        try { peer.off('track', handleTrack); } catch (_) {}
+      }
     };
   }, [peer]);
+
+  useEffect(() => {
+    if (isVideoOn && ref.current && ref.current.srcObject) {
+      ref.current.play().catch(() => {});
+    }
+  }, [isVideoOn]);
+
   return (
     <div className={`${styles.videoTile} ${isAudioOn ? styles.videoTileActiveSpeaker : ''}`}>
-      <video playsInline autoPlay ref={ref} className={styles.videoElement} />
+      <video
+        playsInline
+        autoPlay
+        ref={ref}
+        className={styles.videoElement}
+        style={{ display: isVideoOn ? 'block' : 'none' }}
+        onLoadedMetadata={() => {
+          if (ref.current) {
+            ref.current.play().catch(() => {});
+          }
+        }}
+      />
       {!isVideoOn && (
         <div className={styles.avatarPlaceholder}>
           <div className={styles.avatarPulseRing}>
@@ -221,6 +257,19 @@ export default function MeetingRoom() {
   const ttsEnabledRef = useRef(true);
   const userVideo = useRef();
   const peersRef = useRef([]);
+  const peerStatusMapRef = useRef(new Map());
+
+  const setPeerCachedStatus = (key, status) => {
+    if (!key) return;
+    const existing = peerStatusMapRef.current.get(key) || {};
+    peerStatusMapRef.current.set(key, { ...existing, ...status });
+  };
+
+  const getPeerCachedStatus = (socketId, userId) => {
+    return (socketId ? peerStatusMapRef.current.get(socketId) : null) ||
+           (userId ? peerStatusMapRef.current.get(userId) : null) || null;
+  };
+
   const socketInitialized = useRef(false);
   const roleRef = useRef(null);
   const hostIdRef = useRef(null);
@@ -362,6 +411,27 @@ export default function MeetingRoom() {
   useEffect(() => { videoRef.current = isVideoOn; }, [isVideoOn]);
   useEffect(() => { streamRef.current = stream; }, [stream]);
 
+  const handleUserVideoRef = useCallback((el) => {
+    userVideo.current = el;
+    const mediaStream = streamRef.current || stream;
+    if (el && mediaStream) {
+      if (el.srcObject !== mediaStream) {
+        el.srcObject = mediaStream;
+      }
+      el.play().catch(() => {});
+    }
+  }, [stream]);
+
+  useEffect(() => {
+    const mediaStream = streamRef.current || stream;
+    if (userVideo.current && mediaStream) {
+      if (userVideo.current.srcObject !== mediaStream) {
+        userVideo.current.srcObject = mediaStream;
+      }
+      userVideo.current.play().catch(() => {});
+    }
+  }, [stream, participantStatus, isVideoOn]);
+
   useEffect(() => {
     const handleUnload = () => {
       if (statusRef.current === 'WAITING') {
@@ -408,7 +478,25 @@ export default function MeetingRoom() {
     const peer = new Peer({ initiator: true, trickle: false, stream, config: iceServers });
     peer.on('signal', signal => {
       if (currentSocket) {
-        currentSocket.emit('audio:signal', { targetSocketId: userToSignal, callerId: callerID, signal, name: userName, role: userRole, userId: user.id, avatar: user.avatar });
+        currentSocket.emit('audio:signal', {
+          targetSocketId: userToSignal,
+          callerId: callerID,
+          signal,
+          name: userName,
+          role: userRole,
+          userId: user.id,
+          avatar: user.avatar,
+          isAudioOn: audioRef.current,
+          isVideoOn: videoRef.current
+        });
+      }
+    });
+    peer.on('connect', () => {
+      if (currentSocket) {
+        currentSocket.emit('meeting:status_update', {
+          isAudioOn: audioRef.current,
+          isVideoOn: videoRef.current
+        });
       }
     });
     peer.on('error', err => {
@@ -421,7 +509,25 @@ export default function MeetingRoom() {
     const peer = new Peer({ initiator: false, trickle: false, stream, config: iceServers });
     peer.on('signal', signal => {
       if (currentSocket) {
-        currentSocket.emit('audio:signal', { signal, targetSocketId: callerID, callerId: currentSocket.id, name: userName, role: userRole, userId: user.id, avatar: user.avatar });
+        currentSocket.emit('audio:signal', {
+          signal,
+          targetSocketId: callerID,
+          callerId: currentSocket.id,
+          name: userName,
+          role: userRole,
+          userId: user.id,
+          avatar: user.avatar,
+          isAudioOn: audioRef.current,
+          isVideoOn: videoRef.current
+        });
+      }
+    });
+    peer.on('connect', () => {
+      if (currentSocket) {
+        currentSocket.emit('meeting:status_update', {
+          isAudioOn: audioRef.current,
+          isVideoOn: videoRef.current
+        });
       }
     });
     peer.on('error', err => {
@@ -565,14 +671,18 @@ export default function MeetingRoom() {
           try {
             currentStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
             setIsVideoOn(false);
+            videoRef.current = false;
           } catch {
             const ctx = new (window.AudioContext || window.webkitAudioContext)();
             currentStream = ctx.createMediaStreamDestination().stream;
             setIsVideoOn(false);
             setIsAudioOn(false);
+            videoRef.current = false;
+            audioRef.current = false;
           }
         }
         setStream(currentStream);
+        streamRef.current = currentStream;
         if (userVideo.current) userVideo.current.srcObject = currentStream;
 
         if (isCancelled) {
@@ -595,9 +705,16 @@ export default function MeetingRoom() {
         });
         socketRef.current = newSocket;
         setSocket(newSocket);
-        newSocket.emit('meeting:join', { meetingId, userId: user.id, peerId: newSocket.id, language: user.language });
-        setTimeout(() => newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current }), 2000);
-          newSocket.emit('user:update_settings', useAuthStore.getState().user || {});
+        newSocket.emit('meeting:join', {
+          meetingId,
+          userId: user.id,
+          peerId: newSocket.id,
+          language: user.language,
+          isAudioOn: audioRef.current,
+          isVideoOn: videoRef.current
+        });
+        newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current });
+        newSocket.emit('user:update_settings', useAuthStore.getState().user || {});
 
                   
                     newSocket.on('participant:promoted', ({ userId, role }) => {
@@ -696,8 +813,15 @@ export default function MeetingRoom() {
             if (statusRef.current !== 'ADMITTED') {
               setParticipantStatus('ADMITTED');
               statusRef.current = 'ADMITTED';
-              newSocket.emit('meeting:join', { meetingId, userId: user.id, peerId: newSocket.id, language: user.language });
-              setTimeout(() => newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current }), 2000);
+              newSocket.emit('meeting:join', {
+                meetingId,
+                userId: user.id,
+                peerId: newSocket.id,
+                language: user.language,
+                isAudioOn: audioRef.current,
+                isVideoOn: videoRef.current
+              });
+              newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current });
             }
           } else {
             setWaitingUsers(prev => {
@@ -731,24 +855,44 @@ export default function MeetingRoom() {
             try { streamRef.current.getTracks().forEach(t => t.stop()); } catch (_) {}
           }
         });
-        newSocket.on('participant:joined', ({ userId, socketId, name, role, avatar }) => {
+        newSocket.on('participant:joined', ({ userId, socketId, name, role, avatar, isAudioOn, isVideoOn }) => {
           if (!userId || userId === user.id) return;
           newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current });
 
+          if (isAudioOn !== undefined || isVideoOn !== undefined) {
+            if (socketId) setPeerCachedStatus(socketId, { isAudioOn, isVideoOn });
+            if (userId) setPeerCachedStatus(userId, { isAudioOn, isVideoOn });
+          }
+
           // Destroy any existing peer instance for this user or socket
-          const existingIdx = peersRef.current.findIndex(p => p.userId === userId || p.peerID === socketId);
+          const existingIdx = peersRef.current.findIndex(p => (userId && p.userId === userId) || (socketId && p.peerID === socketId));
           if (existingIdx !== -1) {
             try { peersRef.current[existingIdx].peer?.destroy(); } catch (_) {}
             peersRef.current.splice(existingIdx, 1);
           }
 
+          const cached = getPeerCachedStatus(socketId, userId);
+          const initialAudio = isAudioOn !== undefined ? isAudioOn : (cached?.isAudioOn !== undefined ? cached.isAudioOn : true);
+          const initialVideo = isVideoOn !== undefined ? isVideoOn : (cached?.isVideoOn !== undefined ? cached.isVideoOn : true);
+
           const hId = hostIdRef.current;
           const cleanRole = (hId && userId !== hId && role === 'HOST') ? 'COHOST' : role;
-          const peer = createPeer(socketId, newSocket.id, currentStream, newSocket, user.name, roleRef.current);
-          peersRef.current.push({ peerID: socketId, userId, peer, name, role: cleanRole, avatar });
+          const peer = createPeer(socketId, newSocket.id, streamRef.current || currentStream, newSocket, user.name, roleRef.current);
+          peersRef.current.push({
+            peerID: socketId,
+            userId,
+            peer,
+            name,
+            role: cleanRole,
+            avatar,
+            isAudioOn: initialAudio,
+            isVideoOn: initialVideo
+          });
           setPeers([...peersRef.current]);
         });
         newSocket.on('participant:left', ({ socketId, userId }) => {
+          if (socketId) peerStatusMapRef.current.delete(socketId);
+          if (userId) peerStatusMapRef.current.delete(userId);
           const toRemove = peersRef.current.filter(p => (socketId && p.peerID === socketId) || (userId && p.userId === userId));
           toRemove.forEach(p => {
             if (p.peer) {
@@ -760,8 +904,25 @@ export default function MeetingRoom() {
         });
         newSocket.on('audio:signal', payload => {
           if (!payload.userId || payload.userId === user.id) return;
-          const item = peersRef.current.find(p => p.peerID === payload.callerId);
+          if (payload.isAudioOn !== undefined || payload.isVideoOn !== undefined) {
+            if (payload.callerId) setPeerCachedStatus(payload.callerId, { isAudioOn: payload.isAudioOn, isVideoOn: payload.isVideoOn });
+            if (payload.userId) setPeerCachedStatus(payload.userId, { isAudioOn: payload.isAudioOn, isVideoOn: payload.isVideoOn });
+          }
+
+          const item = peersRef.current.find(p => p.peerID === payload.callerId || (payload.userId && p.userId === payload.userId));
           if (item && item.peer && !item.peer.destroyed) {
+            let updated = false;
+            if (payload.isAudioOn !== undefined && item.isAudioOn !== payload.isAudioOn) {
+              item.isAudioOn = payload.isAudioOn;
+              updated = true;
+            }
+            if (payload.isVideoOn !== undefined && item.isVideoOn !== payload.isVideoOn) {
+              item.isVideoOn = payload.isVideoOn;
+              updated = true;
+            }
+            if (updated) {
+              setPeers([...peersRef.current]);
+            }
             try {
               item.peer.signal(payload.signal);
             } catch (err) {
@@ -770,7 +931,7 @@ export default function MeetingRoom() {
           } else {
             // Destroy any previous stale or destroyed peer for this userId or callerId
             const staleIndices = peersRef.current
-              .map((p, idx) => ((p.userId === payload.userId || p.peerID === payload.callerId || p.peer?.destroyed) ? idx : -1))
+              .map((p, idx) => (((payload.userId && p.userId === payload.userId) || p.peerID === payload.callerId || p.peer?.destroyed) ? idx : -1))
               .filter(idx => idx !== -1)
               .reverse();
 
@@ -780,20 +941,40 @@ export default function MeetingRoom() {
             });
 
             try {
+              const cached = getPeerCachedStatus(payload.callerId, payload.userId);
+              const initialAudio = payload.isAudioOn !== undefined ? payload.isAudioOn : (cached?.isAudioOn !== undefined ? cached.isAudioOn : true);
+              const initialVideo = payload.isVideoOn !== undefined ? payload.isVideoOn : (cached?.isVideoOn !== undefined ? cached.isVideoOn : true);
+
               const hId = hostIdRef.current;
               const cleanRole = (hId && payload.userId !== hId && payload.role === 'HOST') ? 'COHOST' : payload.role;
-              const peer = addPeer(payload.signal, payload.callerId, currentStream, newSocket, user.name, roleRef.current);
-              peersRef.current.push({ peerID: payload.callerId, userId: payload.userId, peer, name: payload.name, role: cleanRole, avatar: payload.avatar });
+              const peer = addPeer(payload.signal, payload.callerId, streamRef.current || currentStream, newSocket, user.name, roleRef.current);
+              peersRef.current.push({
+                peerID: payload.callerId,
+                userId: payload.userId,
+                peer,
+                name: payload.name,
+                role: cleanRole,
+                avatar: payload.avatar,
+                isAudioOn: initialAudio,
+                isVideoOn: initialVideo
+              });
               setPeers([...peersRef.current]);
             } catch (err) {
               console.warn('[WebRTC] addPeer error:', err.message);
             }
           }
         });
-        newSocket.on('participant:status_update', ({ socketId, isAudioOn, isVideoOn }) => {
-          const idx = peersRef.current.findIndex(p => p.peerID === socketId);
+        newSocket.on('participant:status_update', ({ socketId, userId, isAudioOn, isVideoOn }) => {
+          if (socketId) setPeerCachedStatus(socketId, { isAudioOn, isVideoOn });
+          if (userId) setPeerCachedStatus(userId, { isAudioOn, isVideoOn });
+
+          const idx = peersRef.current.findIndex(p => (socketId && p.peerID === socketId) || (userId && p.userId === userId));
           if (idx !== -1) {
-            peersRef.current[idx] = { ...peersRef.current[idx], isAudioOn, isVideoOn };
+            peersRef.current[idx] = {
+              ...peersRef.current[idx],
+              isAudioOn: isAudioOn !== undefined ? isAudioOn : peersRef.current[idx].isAudioOn,
+              isVideoOn: isVideoOn !== undefined ? isVideoOn : peersRef.current[idx].isVideoOn
+            };
             setPeers([...peersRef.current]);
           }
         });
@@ -802,6 +983,7 @@ export default function MeetingRoom() {
           const myRole = roleRef.current;
           if (muterRole === 'HOST' || (muterRole === 'COHOST' && myRole !== 'HOST')) {
             setIsAudioOn(false);
+            audioRef.current = false;
             if (streamRef.current) {
               streamRef.current.getAudioTracks().forEach(t => { t.enabled = false; });
             }
@@ -813,6 +995,7 @@ export default function MeetingRoom() {
           const myRole = roleRef.current;
           if (muterRole === 'HOST' || (muterRole === 'COHOST' && myRole !== 'HOST')) {
             setIsVideoOn(false);
+            videoRef.current = false;
             if (streamRef.current) {
               streamRef.current.getVideoTracks().forEach(t => { t.enabled = false; });
             }
@@ -1090,7 +1273,8 @@ export default function MeetingRoom() {
     const nextVideo = !isVideoOn;
     videoRef.current = nextVideo;
     setIsVideoOn(nextVideo);
-    stream?.getVideoTracks().forEach(t => { t.enabled = nextVideo; });
+    const mediaStream = streamRef.current || stream;
+    mediaStream?.getVideoTracks().forEach(t => { t.enabled = nextVideo; });
     if (socket) socket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: nextVideo });
   };
   const toggleAudio = () => {
@@ -1101,7 +1285,8 @@ export default function MeetingRoom() {
     const nextAudio = !isAudioOn;
     audioRef.current = nextAudio;
     setIsAudioOn(nextAudio);
-    stream?.getAudioTracks().forEach(t => { t.enabled = nextAudio; });
+    const mediaStream = streamRef.current || stream;
+    mediaStream?.getAudioTracks().forEach(t => { t.enabled = nextAudio; });
     if (socket) socket.emit('meeting:status_update', { isAudioOn: nextAudio, isVideoOn: videoRef.current });
   };
 
@@ -1715,7 +1900,18 @@ export default function MeetingRoom() {
           <div style={{ width: '100%', maxWidth: 560, position: 'relative' }}>
             {/* Video card */}
             <div style={{ position: 'relative', borderRadius: '0', overflow: 'hidden', background: '#000', border: '2px solid #0A0A0A', boxShadow: '12px 12px 0 rgba(10,10,10,1)', aspectRatio: '16/9' }}>
-              <video playsInline muted ref={userVideo} autoPlay style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <video
+                playsInline
+                muted
+                ref={handleUserVideoRef}
+                autoPlay
+                style={{ width: '100%', height: '100%', objectFit: 'cover', display: isVideoOn ? 'block' : 'none' }}
+                onLoadedMetadata={() => {
+                  if (userVideo.current) {
+                    userVideo.current.play().catch(() => {});
+                  }
+                }}
+              />
               {!isVideoOn && (
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
                   <Avatar name={user.name} size={72} color="#0022FF" avatarUrl={user.avatar} />
@@ -1934,7 +2130,19 @@ export default function MeetingRoom() {
               >
                 {/* Self Tile */}
                 <div className={`${styles.videoTile} ${isAudioOn ? styles.videoTileActiveSpeaker : ''}`}>
-                  <video muted ref={userVideo} autoPlay playsInline className={styles.videoElement} />
+                  <video
+                    muted
+                    playsInline
+                    ref={handleUserVideoRef}
+                    autoPlay
+                    className={styles.videoElement}
+                    style={{ display: isVideoOn ? 'block' : 'none' }}
+                    onLoadedMetadata={() => {
+                      if (userVideo.current) {
+                        userVideo.current.play().catch(() => {});
+                      }
+                    }}
+                  />
                   {!isVideoOn && (
                     <div className={styles.avatarPlaceholder}>
                       <div className={styles.avatarPulseRing}>

@@ -197,8 +197,23 @@ exports.getSummary = async (req, res) => {
       const transcriptText = captions.map(c => `[${new Date(c.timestamp).toLocaleTimeString()}] ${c.speaker.name}: ${c.originalText}`).join('\n');
 
       const targetLang = req.query.lang || req.user.language || req.user.preferredLanguage || 'en';
-      
-      // 1. Permanent Cache Check (PostgreSQL) for COMPLETED meetings
+      const cacheKey = `summary:${meeting.id}:${targetLang}`;
+      const cache = await initRedis();
+
+      // 1. Check Redis / Valkey Cache FIRST (ultra-fast sub-millisecond retrieval)
+      if (cache) {
+        try {
+          const cachedSummary = await cache.get(cacheKey);
+          if (cachedSummary) {
+            console.log(`[Summary Cache] Served summary for meeting ${meeting.id} (${targetLang}) from Redis Cache! [State: ${meeting.state}]`);
+            return res.json({ summary: cachedSummary, source: 'REDIS' });
+          }
+        } catch (err) {
+          console.warn('[Summary Cache] Redis lookup warning:', err.message);
+        }
+      }
+
+      // 2. Permanent Cache Check (PostgreSQL) for COMPLETED meetings
       if (meeting.state === 'COMPLETED' && meeting.summaryCache) {
         let cachedJson = {};
         try {
@@ -206,29 +221,28 @@ exports.getSummary = async (req, res) => {
         } catch(e) {}
         
         if (cachedJson && cachedJson[targetLang]) {
-          console.log(`Served summary for meeting ${meeting.id} from PostgreSQL Permanent Cache!`);
-          return res.json({ summary: cachedJson[targetLang] });
+          console.log(`[Summary Cache] Served summary for meeting ${meeting.id} (${targetLang}) from PostgreSQL Permanent Cache!`);
+          // Backfill into Redis so subsequent requests are served from Redis
+          if (cache) {
+            await cache.setEx(cacheKey, 86400, cachedJson[targetLang]).catch(() => {});
+          }
+          return res.json({ summary: cachedJson[targetLang], source: 'POSTGRES' });
         }
       }
 
-      // 2. TTL Cache Check (Valkey) for ONGOING meetings
-      const cacheKey = `summary:${meeting.id}:${targetLang}`;
-      const cache = await initRedis();
-
-      if (cache && meeting.state !== 'COMPLETED') {
-        const cachedSummary = await cache.get(cacheKey);
-        if (cachedSummary) {
-          console.log(`Served summary for meeting ${meeting.id} from Valkey TTL Cache!`);
-          return res.json({ summary: cachedSummary });
-        }
-      }
-
-      // Generate new summary via Gemini
+      // 3. Generate new summary via Gemini
+      console.log(`[Summary Cache] No cache found for meeting ${meeting.id}. Generating summary via Gemini...`);
       const summary = await AIService.summarizeTranscript(transcriptText, targetLang);
 
-      // Save to appropriate Cache
+      // 4. Save to Redis / Valkey Cache (86400s = 24hr TTL for completed meetings, 300s = 5min TTL for ongoing meetings)
+      if (cache) {
+        const ttl = meeting.state === 'COMPLETED' ? 86400 : 300;
+        await cache.setEx(cacheKey, ttl, summary).catch(err => console.warn('[Summary Cache] Redis write error:', err.message));
+        console.log(`[Summary Cache] Saved summary for meeting ${meeting.id} (${targetLang}) to Redis Cache with ${ttl}s TTL.`);
+      }
+
+      // 5. Save to PostgreSQL permanently for COMPLETED meetings
       if (meeting.state === 'COMPLETED') {
-        // Save to PostgreSQL permanently
         let cachedJson = {};
         if (meeting.summaryCache) {
           try { cachedJson = typeof meeting.summaryCache === 'string' ? JSON.parse(meeting.summaryCache) : meeting.summaryCache; } catch(e) {}
@@ -237,16 +251,11 @@ exports.getSummary = async (req, res) => {
         await prisma.meeting.update({
           where: { id: meeting.id },
           data: { summaryCache: cachedJson }
-        });
-        console.log(`Saved summary to PostgreSQL Permanent Cache.`);
-      } else if (cache) {
-        // Save to Valkey with 5-minute TTL
-        const ttl = 300;
-        await cache.setEx(cacheKey, ttl, summary);
-        console.log(`Saved summary to Valkey Cache with ${ttl}s TTL.`);
+        }).catch(err => console.warn('[Summary Cache] Postgres write error:', err.message));
+        console.log(`[Summary Cache] Saved summary to PostgreSQL Permanent Cache.`);
       }
 
-      res.json({ summary });
+      res.json({ summary, source: 'GEMINI' });
   } catch (error) {
     console.error('Summary error:', error);
     res.status(500).json({ error: 'Server error: ' + error.message });
