@@ -24,7 +24,9 @@ export default function Register() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const success = await register(name, email, password, language);
+    const cleanName = name ? name.trim() : '';
+    const cleanEmail = email ? email.trim() : '';
+    const success = await register(cleanName, cleanEmail, password, language);
     if (success) {
       const urlParams = new URLSearchParams(window.location.search);
       const redirect = urlParams.get('redirect');

@@ -21,7 +21,8 @@ export default function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const success = await login(email, password);
+    const cleanEmail = email ? email.trim() : '';
+    const success = await login(cleanEmail, password);
     if (success) {
       const urlParams = new URLSearchParams(window.location.search);
       const redirect = urlParams.get('redirect');

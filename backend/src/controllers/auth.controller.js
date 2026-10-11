@@ -10,8 +10,14 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_for_dev';
 exports.register = async (req, res) => {
   try {
     const { name, email, password, preferredLanguage } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
     
-    const existingUser = await prisma.user.findUnique({ where: { email } });
+    const cleanEmail = email.trim().toLowerCase();
+    const existingUser = await prisma.user.findFirst({
+      where: { email: { equals: cleanEmail, mode: 'insensitive' } }
+    });
     if (existingUser) return res.status(400).json({ error: 'User already exists' });
 
     const salt = await bcrypt.genSalt(10);
@@ -19,16 +25,17 @@ exports.register = async (req, res) => {
 
     const user = await prisma.user.create({
       data: {
-        name,
-        email,
+        name: name ? name.trim() : 'User',
+        email: cleanEmail,
         passwordHash,
         preferredLanguage: preferredLanguage || 'en',
       }
     });
 
+    console.log(`[Auth] Registered new user: ${cleanEmail} (ID: ${user.id})`);
     res.status(201).json({ message: 'User registered successfully', userId: user.id });
   } catch (error) {
-    console.error(error);
+    console.error('[Auth] Register error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 };
@@ -36,12 +43,35 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
     
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) return res.status(400).json({ error: 'Invalid credentials' });
+    const cleanEmail = email.trim().toLowerCase();
+    console.log(`[Auth] Login attempt for email: "${cleanEmail}"`);
+
+    // Case-insensitive lookup so "Divyansh@gmail.com" matches "divyansh@gmail.com"
+    const user = await prisma.user.findFirst({
+      where: {
+        email: {
+          equals: cleanEmail,
+          mode: 'insensitive'
+        }
+      }
+    });
+
+    if (!user) {
+      console.warn(`[Auth] Login failed: No user found for email "${cleanEmail}"`);
+      return res.status(400).json({ error: 'Invalid credentials' });
+    }
 
     const isMatch = await bcrypt.compare(password, user.passwordHash);
-    if (!isMatch) return res.status(400).json({ error: 'Invalid credentials' });
+    if (!isMatch) {
+      console.warn(`[Auth] Login failed: Password mismatch for user "${user.email}"`);
+      return res.status(400).json({ error: 'Invalid credentials' });
+    }
+
+    console.log(`[Auth] Login successful for: ${user.email} (ID: ${user.id})`);
 
     const token = jwt.sign(
       { userId: user.id, role: user.role, language: user.preferredLanguage },
@@ -51,7 +81,7 @@ exports.login = async (req, res) => {
 
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, language: user.preferredLanguage, avatar: user.avatar } });
   } catch (error) {
-    console.error(error);
+    console.error('[Auth] Login error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 };
