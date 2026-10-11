@@ -364,15 +364,17 @@ function setupSocket(server) {
     });
 
     // Handle WebRTC signaling
-    socket.on('meeting:status_update', ({ isAudioOn, isVideoOn }) => {
+    socket.on('meeting:status_update', ({ isAudioOn, isVideoOn, isScreenSharing }) => {
       socket.isAudioOn = isAudioOn !== undefined ? isAudioOn : socket.isAudioOn;
       socket.isVideoOn = isVideoOn !== undefined ? isVideoOn : socket.isVideoOn;
+      socket.isScreenSharing = isScreenSharing !== undefined ? isScreenSharing : socket.isScreenSharing;
       if (socket.meetingId) {
         socket.to(socket.meetingId).emit('participant:status_update', {
           socketId: socket.id,
           userId: socket.userId,
           isAudioOn,
-          isVideoOn
+          isVideoOn,
+          isScreenSharing: socket.isScreenSharing
         });
       }
     });
@@ -406,7 +408,8 @@ function setupSocket(server) {
         userId: data.userId,
         avatar: data.avatar,
         isAudioOn: data.isAudioOn,
-        isVideoOn: data.isVideoOn
+        isVideoOn: data.isVideoOn,
+        isScreenSharing: data.isScreenSharing
       });
     });
 

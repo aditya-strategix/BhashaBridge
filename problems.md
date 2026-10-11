@@ -244,5 +244,32 @@ Accurately measure, statistically profile, and document real-world latency times
 
 Raw benchmark JSON output is persisted at [`backend/scripts/benchmark-results.json`](file:///E:/BhashaBridge/BhashaBridge/backend/scripts/benchmark-results.json).
 
+---
+
+## Problem 12: Screen Share WebRTC Track Replacement & State Desynchronization
+
+### Symptoms:
+1. **Camera Off Black Screen / Hidden Tile:** If a user had their camera turned off (`isVideoOn === false`) and clicked "Share Screen", neither the sharer nor remote participants could see the shared screen. The video element remained hidden (`display: none`), displaying only the avatar placeholder.
+2. **Stream Overwrite Flashing:** Re-renders triggered by state changes (`isVideoOn`, `isAudioOn`, participant joins) caused the media synchronizer `useEffect` and `handleUserVideoRef` to overwrite the active screen share stream with the camera stream.
+3. **Peer Status Desynchronization:** Starting or stopping screen sharing did not notify the signaling server or remote peers of the updated video/screen state (`meeting:status_update`), leaving remote participant video tiles disabled.
+
+### Root Cause:
+* In `frontend/src/app/meeting/[id]/page.js`, video element visibility in both the self tile and `VideoPeer` was bound solely to `isVideoOn ? 'block' : 'none'`, ignoring `isScreenSharing`.
+* The `handleUserVideoRef` callback and `useEffect` synchronizers always referenced `streamRef.current || stream` (the webcam) rather than prioritizing `screenStreamRef.current`.
+* `stopScreenShare` and `toggleScreenShare` failed to propagate `isScreenSharing` to the backend Socket.IO signaling plane, leaving remote peers unaware that a video stream track was active.
+
+### The Solution:
+1. **Comprehensive Track Replacement:**
+   * Updated `toggleScreenShare` and `stopScreenShare` to locate active RTCRtpSenders (`sender.track?.kind === 'video'`) and replace them with `screenTrack` (or restored `videoTrack` on stop).
+   * Automatically hook `screenTrack.onended` to `stopScreenShare()` so the browser's native "Stop sharing" UI bar cleanly restores camera tracks.
+2. **Stream Priority in Video Synchronizer:**
+   * Updated `handleUserVideoRef` and the active stream `useEffect` to prioritize `screenStreamRef.current || streamRef.current || stream`, preventing re-renders from stomping on the shared screen feed.
+3. **Dual State Visibility Condition:**
+   * Updated both the Self `<video>` element and `<VideoPeer>` component to evaluate `const showVideo = isVideoOn || isScreenSharing; style={{ display: showVideo ? 'block' : 'none' }}`.
+4. **Signaling Plane Propagation:**
+   * Updated `backend/src/socket/index.js` and frontend socket handlers (`meeting:status_update` and `audio:signal`) to broadcast `isScreenSharing`.
+   * Added the green `<Monitor size={12} color="#10B981" />` indicator on active screen-sharer name pills for both self and remote peer tiles.
+
+
 
 
