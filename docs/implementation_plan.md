@@ -1,9 +1,7 @@
 # BhashaBridge — Implementation Plan
 
 > **Multilingual Real-Time Meeting Platform**
-> *Team: Lazy Legends (Divyansh Nagar, Aditya Kumar, Shlok Deshmukh, Ashutosh Shukla)*
 
----
 
 ## 1. Project Overview
 
