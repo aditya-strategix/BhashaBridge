@@ -881,3 +881,120 @@ A critical compounding failure previously occurred when users navigated back and
    - **Client Lifecycle Guard & Singleton Socket**: The frontend meeting component uses cancellation guards during `getUserMedia` and `fetch`. Before creating any new socket, any existing `socketRef.current` has all listeners stripped via `removeAllListeners()` and is disconnected.
    - **Resilient Translation Pipeline with Timeout Boundary**: Translation requests against external neural APIs are bounded with a 4-second timeout race and fallback to MyMemory (`AbortSignal.timeout(3000)`), preventing stalled external HTTP requests from freezing real-time caption dispatch.
 
+
+
+---
+
+## 13. Mobile vs. Desktop Audio Architecture & Google Meet Comparison
+
+This section explains in **simple, everyday words** why speech-to-speech translation works differently on laptops versus mobile phones, what actually happens inside the mobile phone operating system (Android and iOS), and how industrial platforms like **Google Meet** structure their architectures.
+
+---
+
+### 13.1 The Big Question: Why is Sending Audio Allowed, but Browser STT Restricted?
+
+* **Sending Video and Audio over WebRTC (100% Allowed):**
+  When your phone sends video and microphone sound in a meeting, the browser is acting like a **simple pipe**. It captures raw sound vibrations (0s and 1s) and streams them over the network. Every mobile browser (Android Chrome, iPhone Safari) allows this because it is a standard W3C feature that doesn't require any artificial intelligence on the phone.
+* **Browser Speech-to-Text (`webkitSpeechRecognition`) (Heavily Restricted):**
+  When a web page tries to convert speech into text inside the phone browser, it is **not** just streaming bytes. It has to call into the **phone's operating system keyboard voice typing engine** (Google Voice Typing on Android, or Siri Dictation on iPhone). Mobile operating systems treat this very strictly due to hardware locks, privacy rules, and battery life.
+
+---
+
+### 13.2 What Actually Happens Inside the Phone OS (Android & iOS)?
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        LAPTOP (Windows / Mac)                          │
+│                                                                        │
+│   Hardware Mic ───► Chrome Software Mixer in RAM                       │
+│                           ├───► WebRTC Stream (Sent to Meeting)        │
+│                           └───► Web Speech API (Transcribed to Text)   │
+│   Result: Both get audio simultaneously. No collision.                │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────┐
+│                        PHONE (Android / iPhone)                        │
+│                                                                        │
+│   Hardware Mic ───► Phone Hardware Audio Chip (DSP)                   │
+│                           │                                            │
+│                           ├───► WebRTC Call (LOCKED in VOIP mode)      │
+│                           │                                            │
+│                           └───X SpeechRecognizer (BLOCKED by OS!)     │
+│   Result: Phone OS blocks the mic or sends zeros (total silence).      │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 1. The Microphone Hardware Chip Lock (The DSP Conflict)
+* **On Laptop:** The operating system has a **software audio mixer** in RAM. When you join a meeting, Chrome captures your microphone once and creates multiple virtual copies in memory. One copy goes to WebRTC (to send to peers), and another copy goes to Speech Recognition (to transcribe). Both run smoothly at the same time.
+* **On Phone:** A phone has a dedicated hardware chip called a **DSP (Digital Signal Processor)** connected directly to the microphone.
+  1. When WebRTC starts your meeting audio, the phone OS puts the mic into **`MODE_IN_COMMUNICATION`** (exclusive VOIP mode with hardware Acoustic Echo Cancellation).
+  2. When the browser calls `webkitSpeechRecognition`, it asks the phone OS for the mic in **`VOICE_RECOGNITION`** mode.
+  3. The phone's audio chip **cannot run in two opposite hardware modes at the same time**. The phone's OS (`AudioPolicyManager`) blocks the second request and feeds it **total silence (zeros)** or aborts with an `audio-capture` error.
+
+#### 2. The Anti-Eavesdropping & Battery Protection Guard
+* Laptops are plugged into wall power, so Windows or Mac allows Chrome to listen to the microphone for hours without interruption.
+* Phones run on battery and protect user privacy. If a web page inside a browser tab tries to listen continuously:
+  - The phone OS suspects that a background tab might be spyware or draining the battery.
+  - The OS has a built-in **Silence Watchdog**: if you pause speaking for more than **1.5 seconds**, the phone OS automatically shuts down the dictation session (`stopListening()`).
+
+#### 3. Keyboard Dictation Engines (Gboard / Siri)
+* On Android, Chrome's speech recognition delegates to the **Google App (Gboard voice typing)**.
+* Gboard was designed for **typing short text messages or Google searches**—speak one sentence, detect silence, and turn off. It was never engineered to stay open continuously for an entire 45-minute live conference meeting.
+
+---
+
+### 13.3 How Google Meet Solves This: The Central Server Architecture (SFU)
+
+Many people wonder: *"How does Google Meet show live captions and translations on every device without breaking?"*
+
+The secret is simple: **Google Meet NEVER uses the browser's `SpeechRecognition` API—not even on desktop!**
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    GOOGLE MEET ARCHITECTURE (Server-Side)                    │
+│                                                                              │
+│  User Phone/PC              Google Cloud Media Server (SFU)     All Clients  │
+│  ┌───────────┐              ┌─────────────────────────────┐    ┌───────────┐ │
+│  │ User Mic  │──WebRTC─────►│ 1. Forwards video to peers  │───►│ Watchers  │ │
+│  │ (Audio)   │   Audio      │                             │    │ (Screen)  │ │
+│  └───────────┘              │ 2. Forks audio to Google    │    └───────────┘ │
+│                             │    Cloud TPU Supercomputers │          ▲       │
+│                             └──────────────┬──────────────┘          │       │
+│                                            │                         │       │
+│                                            ▼                         │       │
+│                             ┌─────────────────────────────┐          │       │
+│                             │ Google Universal Speech AI  │──────────┘       │
+│                             │ (Transcribes text in cloud) │  Live Subtitles  │
+│                             └─────────────────────────────┘  Data Channel    │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+1. **You Send Audio Only Once:** Your phone sends raw microphone sound over WebRTC to Google's central media server (**SFU - Selective Forwarding Unit**).
+2. **The Cloud Server Does the Listening:** Google's cloud server receives your voice and forks a copy directly into **Google Cloud TPU clusters** running Google's Universal Speech Model (USM).
+3. **Captions Broadcast Back as Text:** The cloud server transcribes and translates the speech in the cloud, attaches your name, and broadcasts text subtitles back to everyone in the meeting room over a lightweight data channel.
+4. **Why this works everywhere:** Because the phone browser never attempts to transcribe the sound locally! The phone only does what it is great at: streaming raw microphone bytes to the server.
+
+---
+
+### 13.4 How BhashaBridge Handles This: The Hybrid Architecture
+
+BhashaBridge combines the **zero-cost, ultra-low-latency benefits of Client-Side Web Speech** with **resilient mobile fallbacks**:
+
+| Feature | Desktop Google Chrome | Mobile Phone Web (Android / iOS) |
+|---|---|---|
+| **Speech-to-Text (STT)** | Free browser Web Speech API (`continuous: true`, sub-300ms latency, zero cloud bill). | Mobile auto-restart loop: uses `continuous = false` with instant 150ms reboot on `onend`, preventing OS dictation timeouts. |
+| **Language Tags** | Flexible short codes (`hi`, `en`, `es`). | Normalized **BCP-47** dialect tags (`hi-IN`, `en-US`, `ta-IN`) preventing phone OS voice rejection. |
+| **Audio Playback (TTS)** | Instant native `speechSynthesis`. | **Dual Fallback (`playTtsAudio`)**: First tries native engine with `window._activeUtterance` (stops Safari garbage-collection). If phone lacks regional voices or errors out, automatically plays the backend Google TTS MP3 stream (`/api/tts`). |
+| **Autoplay Policy** | Permissive (plays after first tab click). | One-time touch gesture listener (`touchstart` / `click`) primes `SpeechSynthesisUtterance` and resumes suspended `AudioContext`. |
+| **Dynamic Host Resolution** | Uses `localhost:5000` or local ports. | `getApiUrl()` and `getSocketUrl()` automatically bind to `window.location.origin` (e.g. `https://bhashabridge.aditya-kumar.in`), preventing mixed-content and connection refused errors. |
+
+---
+
+### 13.5 Summary Comparison
+
+| Metric | Peer-to-Peer + Web Speech (BhashaBridge) | Central SFU + Cloud TPU (Google Meet) |
+|---|---|---|
+| **Cloud Server Cost** | **$0.00 / month** (Runs free on standard VMs) | Millions of dollars in cloud TPU/GPU infrastructure |
+| **Bandwidth Usage** | Direct peer mesh (optimal for small groups 2–6) | Centralized SFU (scales up to 250–1,000 participants) |
+| **Mobile Speech Handling** | Handled via rapid restart loops and backend MP3 fallbacks | Handled 100% on cloud servers via audio stream forking |
+| **Latency** | **~285 ms (Near-instant)** | ~600–1,200 ms (Network round-trip to cloud GPU cluster) |

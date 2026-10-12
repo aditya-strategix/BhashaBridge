@@ -327,3 +327,41 @@ Raw benchmark JSON output is persisted at [`backend/scripts/benchmark-results.js
    * **Safari Utterance Retention:** Anchored active utterances to `window._activeUtterance` with cleanup on `onend`/`onerror`.
    * **Automatic Backend MP3 Fallback:** Created `playTtsAudio` with an automatic fallback: if native synthesis encounters `onerror`, lacks voices, or stalls for > 1.8 seconds, it transparently fetches and streams audio from `${getApiUrl()}/tts?text=...&lang=...`.
    * **Mobile Speech Recognition Loop:** Switched mobile devices (`isMobile`) to `continuous = false` with rapid 150ms `onend` auto-restarts, ensuring uninterrupted voice transcription across iOS Safari and Android Chrome.
+---
+
+## Problem 14: English-to-Hindi Speech-to-Speech Working vs. English-to-Tamil Failing (Silent Audio & Browser TTS Voice Disparity)
+
+### Symptoms:
+- In a multilingual meeting, when a participant speaks English and the receiver has **Hindi (`hi`)** selected as their Speech-to-Speech language, the receiver clearly hears the translated Hindi audio spoken aloud.
+- However, when the receiver selects **Tamil (`ta`)**, **Telugu (`te`)**, or **Bengali (`bn`)**, the translated captions appear on screen, but **no translated audio is ever heard (complete silence)**.
+
+### Root Cause Analysis:
+1. **The Operating System & Browser Native Voice Asymmetry:**
+   - Desktop and mobile browsers (Chrome, Edge, Safari) on Windows, macOS, and Linux bundle built-in speech synthesis voices for a limited set of major world languages:
+     - `en` (English - Microsoft David/Mark/Zira, Google US/UK English)
+     - `hi` (Hindi - Google हिन्दी, Microsoft Ravi/Kalpana)
+     - `es` (Spanish), `fr` (French), `de` (German), `zh` (Chinese)
+   - **Crucially, browsers and desktop operating systems DO NOT ship with built-in native speech synthesis voices for Indian regional languages like Tamil (`ta`), Telugu (`te`), Bengali (`bn`), Marathi (`mr`), Gujarati (`gu`), or Kannada (`kn`).**
+2. **The Asynchronous `getVoices()` & Silent Browser Fallback Trap:**
+   - In Chrome, `window.speechSynthesis.getVoices()` is evaluated asynchronously and returns an empty array `[]` on initial page load before `voiceschanged` fires.
+   - The previous guard `if (voices.length > 0 && !matchingVoice)` failed because `0 > 0` is `false`.
+   - As a result, the code bypassed the backend TTS fallback and invoked `window.speechSynthesis.speak(utterance)` with `utterance.lang = 'ta-IN'`.
+   - Because Chrome lacked a Tamil voice, it queued the utterance using the default English voice. English voice synthesizers cannot parse or pronounce Tamil Unicode glyphs (`வணக்கம், நலமா?`), producing **complete silence**.
+   - Furthermore, because Chrome keeps the utterance in its internal queue with `window.speechSynthesis.speaking = true`, the synthesis watchdog timer never triggered and `onerror` never fired. The backend Google TTS proxy was never invoked.
+3. **Backend TTS Proxy 200-Character Limitation:**
+   - The backend `/api/tts` endpoint proxied requests directly to Google TTS (`translate_tts?client=tw-ob`).
+   - Google TTS returns `HTTP 400 Bad Request` if a single query parameter exceeds 180–200 characters. For multi-sentence meeting speech, translations longer than 200 characters crashed with `500 Failed to fetch audio`.
+
+### The Solution:
+1. **Direct Backend Routing for Regional Languages:**
+   - Defined an explicit whitelist of languages with verified native browser voices: `NATIVE_VOICE_LANGS = new Set(['en', 'hi', 'es', 'fr', 'de', 'zh'])`.
+   - If `!NATIVE_VOICE_LANGS.has(shortLang)` (e.g., Tamil, Telugu, Bengali, Marathi), `playTtsAudio` **immediately and unconditionally routes to the backend Google TTS MP3 proxy**, bypassing `window.speechSynthesis` entirely.
+2. **Persistent Audio Instance & Garbage Collection Protection:**
+   - In `playViaBackend()`, created audio instances with `preload = 'auto'` and `crossOrigin = 'anonymous'`, and anchored the active instance to `window._activeTtsAudio`.
+   - Prior to playing new audio, any existing audio is paused and disposed (`pause(); src = ''`) to prevent overlapping audio channels.
+3. **Multi-Chunk Sentence Splitting & MP3 Buffer Concatenation in Backend Proxy:**
+   - Updated `backend/src/routes/tts.routes.js` with `splitTextIntoChunks(text, 140)` that safely splits long text on sentence and punctuation boundaries (`.`, `,`, `!`, `?`, `।`).
+   - Fetched all chunks via Google TTS concurrently using `Promise.all` and merged the resulting audio buffers using `Buffer.concat(buffers)` before sending the MPEG stream with proper `Content-Length` and caching headers. This supports arbitrarily long spoken sentences without 400 errors.
+4. **Voice Preloading & Web Audio Gesture Unlocking:**
+   - Attached `window.speechSynthesis.onvoiceschanged` to cache browser voices into `availableVoicesRef.current`.
+   - Enhanced user gesture unlocking on `click` and `touchstart` to unlock both Web Audio (`AudioContext.resume()`) and HTML5 `<audio>` playback.

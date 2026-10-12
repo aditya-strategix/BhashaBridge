@@ -292,8 +292,26 @@ export default function MeetingRoom() {
   const isJoiningInProgressRef = useRef(false);
   const processedCaptionIdsRef = useRef(new Set());
   const activeSpeechRecRef = useRef(null);
+  const availableVoicesRef = useRef([]);
 
   useEffect(() => {
+    // Cache browser speechSynthesis voices as soon as they become ready
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      const loadVoices = () => {
+        try {
+          const v = window.speechSynthesis.getVoices();
+          if (v && v.length > 0) {
+            availableVoicesRef.current = v;
+          }
+        } catch (_) {}
+      };
+      loadVoices();
+      window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+  }, []);
+
+  useEffect(() => {
+    // Unlock Web Audio / SpeechSynthesis / HTMLAudio on first user gesture
     const unlockAudio = () => {
       if (typeof window !== 'undefined') {
         if ('speechSynthesis' in window) {
@@ -312,6 +330,11 @@ export default function MeetingRoom() {
             }
           }
         } catch (_) {}
+        try {
+          const silentAudio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==');
+          silentAudio.volume = 0.01;
+          silentAudio.play().catch(() => {});
+        } catch (_) {}
       }
     };
     window.addEventListener('touchstart', unlockAudio, { once: true, passive: true });
@@ -323,51 +346,111 @@ export default function MeetingRoom() {
   }, []);
 
   const playTtsAudio = useCallback((cleanText, targetLangCode, bcpLang) => {
+    if (!cleanText || !cleanText.trim()) return;
     isTtsPlayingRef.current = true;
     let playedViaBackend = false;
+
+    const shortLang = (targetLangCode || 'en').toLowerCase().split('-')[0];
 
     const playViaBackend = () => {
       if (playedViaBackend) return;
       playedViaBackend = true;
       try {
+        if (window._activeTtsAudio) {
+          try {
+            window._activeTtsAudio.pause();
+            window._activeTtsAudio.src = '';
+          } catch (_) {}
+          window._activeTtsAudio = null;
+        }
+
         const backendUrl = getApiUrl();
-        const shortLang = (targetLangCode || 'en').split('-')[0];
         const url = `${backendUrl}/tts?text=${encodeURIComponent(cleanText)}&lang=${shortLang}`;
         const audio = new Audio(url);
+        audio.preload = 'auto';
+        audio.crossOrigin = 'anonymous';
+        window._activeTtsAudio = audio;
+
         audio.onended = () => {
-          setTimeout(() => { isTtsPlayingRef.current = false; }, 600);
+          if (window._activeTtsAudio === audio) {
+            window._activeTtsAudio = null;
+          }
+          setTimeout(() => { isTtsPlayingRef.current = false; }, 400);
         };
-        audio.onerror = () => {
-          setTimeout(() => { isTtsPlayingRef.current = false; }, 300);
+        audio.onerror = (e) => {
+          console.warn('[Meeting TTS] Backend audio element error:', e);
+          if (window._activeTtsAudio === audio) {
+            window._activeTtsAudio = null;
+          }
+          setTimeout(() => { isTtsPlayingRef.current = false; }, 200);
         };
-        audio.play().catch(e => {
-          isTtsPlayingRef.current = false;
-          console.warn('[Meeting TTS] Backend audio play failed:', e);
-        });
+
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(e => {
+            isTtsPlayingRef.current = false;
+            if (window._activeTtsAudio === audio) {
+              window._activeTtsAudio = null;
+            }
+            console.warn('[Meeting TTS] Backend audio play failed (autoplay or network):', e);
+          });
+        }
       } catch (err) {
+        console.warn('[Meeting TTS] playViaBackend exception:', err);
         isTtsPlayingRef.current = false;
       }
     };
 
+    // Browsers on desktop (Chrome, Edge, Firefox, Safari) only have native voices for:
+    // en, hi, es, fr, de, zh.
+    // Regional languages like Tamil ('ta'), Telugu ('te'), Bengali ('bn'), Marathi ('mr'), etc.
+    // have NO native speech synthesis voices installed in OS / browser by default.
+    // For these, IMMEDIATELY route directly to backend Google TTS proxy for authentic pronunciation!
+    const NATIVE_VOICE_LANGS = new Set(['en', 'hi', 'es', 'fr', 'de', 'zh']);
+    if (!NATIVE_VOICE_LANGS.has(shortLang)) {
+      console.log(`[Meeting TTS] Routing "${targetLangCode}" (${shortLang}) directly to backend Google TTS proxy.`);
+      playViaBackend();
+      return;
+    }
+
+    // For languages that DO have native browser voice support (en, hi, es, fr, de, zh):
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
+        const voices = (availableVoicesRef.current && availableVoicesRef.current.length > 0)
+          ? availableVoicesRef.current
+          : (window.speechSynthesis.getVoices() || []);
+
+        const matchingVoice = voices.find(v => {
+          const vLang = (v.lang || '').replace('_', '-').toLowerCase();
+          const target = (targetLangCode || '').toLowerCase();
+          const bcp = (bcpLang || '').toLowerCase();
+          return vLang === bcp || vLang === target || vLang.startsWith(target + '-');
+        });
+
+        // If no matching native voice exists in the browser, fallback to backend proxy immediately!
+        if (!matchingVoice) {
+          console.log(`[Meeting TTS] No matching native voice found for "${targetLangCode}". Falling back to backend.`);
+          playViaBackend();
+          return;
+        }
+
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(cleanText);
         utterance.lang = bcpLang;
-        // Retain reference on window to prevent iOS Safari GC cutting speech prematurely
+        utterance.voice = matchingVoice;
         window._activeUtterance = utterance;
 
-        const voices = window.speechSynthesis.getVoices() || [];
-        if (voices.length > 0) {
-          const voice = voices.find(v => v.lang === bcpLang || v.lang.startsWith(targetLangCode));
-          if (voice) utterance.voice = voice;
-        }
-
         let endedOrErrored = false;
+        const speechStartTime = Date.now();
 
         utterance.onend = () => {
           endedOrErrored = true;
           window._activeUtterance = null;
+          if (cleanText.length > 3 && (Date.now() - speechStartTime < 120) && !playedViaBackend) {
+            console.warn(`[Meeting TTS] Native synthesis skipped "${targetLangCode}" instantly. Falling back to backend.`);
+            playViaBackend();
+            return;
+          }
           setTimeout(() => { isTtsPlayingRef.current = false; }, 600);
         };
 
@@ -378,7 +461,7 @@ export default function MeetingRoom() {
           playViaBackend();
         };
 
-        // Watchdog fallback for mobile if synthesis stalls without speaking
+        // Watchdog fallback if synthesis stalls without speaking
         setTimeout(() => {
           if (!endedOrErrored && !window.speechSynthesis.speaking && !playedViaBackend) {
             console.warn('[Meeting TTS] SpeechSynthesis watchdog fired, falling back to backend');
