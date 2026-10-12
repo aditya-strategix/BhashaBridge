@@ -148,17 +148,6 @@ BhashaBridge features an **Editorial Neo-Brutalist** aesthetic:
 
 ---
 
-## 👥 The Team — Lazy Legends
-
-Developed with ❤️ as part of an academic initiative at **IIIT Kottayam**:
-
-* **Aditya Kumar**
-* **Divyansh Nagar**
-* **Shlok Deshmukh**
-* **Ashutosh Shukla**
-
----
-
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
