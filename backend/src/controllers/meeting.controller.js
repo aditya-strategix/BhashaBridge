@@ -145,33 +145,18 @@ exports.createMeeting = async (req, res) => {
 exports.getSummary = async (req, res) => {
   try {
     const { link } = req.params;
-    const cleanLink = (link || '').trim();
-    let meeting = await prisma.meeting.findFirst({ where: { OR: [{ meetingLink: cleanLink }, { meetingLink: cleanLink.toLowerCase() }] } });
-    if (!meeting) {
-      const org = await prisma.organization.findFirst({ where: { OR: [{ accessCode: cleanLink }, { accessCode: cleanLink.toUpperCase() }] } });
-      if (org) {
-        meeting = await prisma.meeting.findFirst({
-          where: { organizationId: org.id },
-          orderBy: { createdAt: 'desc' }
-        });
-      }
-    }
+    const meeting = await resolveMeetingEntity(link, true);
 
     if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
     if (meeting.state === 'CANCELLED') return res.status(403).json({ error: 'This meeting was cancelled.' });
     if (meeting.state !== 'COMPLETED') return res.status(403).json({ error: 'This meeting is still ongoing. The summary will be available once the host ends the session.' });
 
-    
-      let isOrgAdmin = false;
-      if (meeting.organizationId) {
-        const org = await prisma.organization.findUnique({
-          where: { id: meeting.organizationId },
-          include: { coHosts: true }
-        });
-        if (org && (org.ownerId === req.user.userId || org.coHosts.some(c => c.id === req.user.userId))) {
-          isOrgAdmin = true;
-        }
+    let isOrgAdmin = false;
+    if (meeting.organization) {
+      if (meeting.organization.ownerId === req.user.userId || meeting.organization.coHosts.some(c => c.id === req.user.userId)) {
+        isOrgAdmin = true;
       }
+    }
 
       const isHost = meeting.hostId === req.user.userId || isOrgAdmin;
       const participant = await prisma.participant.findUnique({
