@@ -92,11 +92,7 @@ graph TB
 | Technology | Purpose |
 |-----------|---------|
 | **Next.js 14 (App Router)** | React framework with SSR/SSG, routing, API routes |
-<<<<<<< HEAD
-| **JavaScript** | Standard web scripting language |
-=======
 | **JavaScript (ES6+)** | Modern JavaScript across the codebase |
->>>>>>> ab81b9fb344b1b648a4e647b79b24b30a8bf2233
 | **Socket.IO Client** | Real-time bidirectional communication |
 | **WebRTC (simple-peer)** | Peer-to-peer audio/video streaming |
 | **Zustand** | Lightweight state management |
@@ -121,6 +117,17 @@ graph TB
 | **Speech-to-Text** | Google Cloud Speech-to-Text or OpenAI Whisper API |
 
 ---
+
+### Future Evolution: High-Scale & Enterprise Upgrades
+| Technology | Category | Purpose | Replaces |
+|---|---|---|---|
+| **Mediasoup / LiveKit (SFU)** | Media Server | Central Selective Forwarding Unit for $O(1)$ client uploads, multi-party scaling (50–100 peers), and server-side audio forking | P2P WebRTC Mesh (`simple-peer`) |
+| **Apache Avro (`.avsc`)** | Data Serialization | Compact binary event serialization & typed contracts for live captions, transcripts, and telemetry | Verbose JSON over WebSockets |
+| **Apache Kafka / Redis Streams** | Event Streaming | Decoupled asynchronous event broker for high-throughput translation workers | In-process Socket.IO monolithic event loop |
+| **WebTransport over HTTP/3 (QUIC)** | Transport Protocol | Unreliable datagrams for zero-wait subtitles + multiplexed reliable streams for state, eliminating Head-of-Line blocking | TCP WebSockets / Socket.IO |
+| **Geo-Distributed Cascaded SFU** | Global Media Mesh | Multi-region edge nodes (US-East, AP-South) connected via cloud backbone for cross-border telemedicine | Single centralized SFU datacenter |
+| **SFrame (RFC 9605) E2EE** | Zero-Trust Security | Application-layer frame encryption via WebRTC Insertable Streams; SFU routes packets without decryption keys | Server-side media decryption |
+| **pgvector / Real-Time RAG** | In-Meeting Intelligence | On-the-fly vector embeddings for meeting transcripts enabling instant semantic search and late-joiner catch-up | Static post-meeting batch summaries |
 
 ## 4. Data Model (from Class Diagram in Report)
 
@@ -686,6 +693,27 @@ Two admin types with distinct responsibilities:
 - [ ] Docker Compose setup
 - [ ] Deployment documentation
 
+### Phase 8: Architecture Evolution — SFU Media Server & Apache Avro Event Pipeline (Week 13–15)
+- [ ] Deploy Mediasoup / LiveKit SFU worker cluster in Docker container
+- [ ] Migrate client WebRTC from `simple-peer` Mesh to `mediasoup-client` (producing 1 audio/video stream, consuming $N-1$ downstream)
+- [ ] Implement adaptive Simulcast (1080p, 720p, 360p) with Transport-Wide Congestion Control (TWCC)
+- [ ] Define Apache Avro schemas (`CaptionStreamEvent.avsc`, `TranslatedCaptionEvent.avsc`, `AudioTapEvent.avsc`)
+- [ ] Extract `translation-service` into an independent asynchronous microservice
+- [ ] Connect Signaling Gateway to Translation Microservice via Avro binary serialization over Kafka / Redis Streams
+- [ ] Benchmark latency (< 150ms WebRTC SFU forwarding, < 300ms Avro translation relay) and inter-service bandwidth (65–75% reduction vs JSON)
+
+### Phase 9: WebTransport (HTTP/3) & Zero-Trust SFrame Security (Week 16–17)
+- [ ] Implement HTTP/3 WebTransport server gateway (supporting QUIC datagrams and streams)
+- [ ] Migrate client live subtitle and audio meter telemetry to Unreliable WebTransport Datagrams (zero Head-of-Line blocking)
+- [ ] Implement SFrame (RFC 9605) WebRTC Insertable Streams frame encryption on client audio/video tracks
+- [ ] Integrate Messaging Layer Security (MLS) for decentralized room key exchange; verify SFU forwards encrypted payloads without access to media
+
+### Phase 10: Geo-Distributed SFU Mesh & In-Flight Semantic RAG (Week 18–19)
+- [ ] Deploy multi-region SFU edge relays in US-East (Virginia) and AP-South (Mumbai) connected via private cloud trunk
+- [ ] Implement geo-DNS routing to connect participants to nearest regional SFU PoP
+- [ ] Implement real-time vector embedding pipeline using `pgvector` on caption streams
+- [ ] Build "Catch Me Up" in-meeting UI action powered by Gemini 3.7 Flash semantic proximity search
+
 ---
 
 ## 11. User Review Required
@@ -758,3 +786,273 @@ npx playwright test
 - Added UI to Organization Dashboard to toggle Permanent Co-Hosts.
 - Added UI to Meeting Members sidebar to toggle live Co-Hosts.
 - Emits participant:promoted via socket to instantly update permissions.
+
+
+---
+
+## 14. Architecture Evolution: Migrating to SFU Media Server & Apache Avro Event-Driven Microservices
+
+This section outlines the architectural transition from the MVP's **P2P WebRTC Mesh + Monolithic JSON Signaling** to an enterprise-grade **SFU Media Server + Apache Avro Event-Driven Microservice Architecture**.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ NEXT-GEN EVOLUTION ARCHITECTURE                                                                  │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                                  │
+│   [ Client 1 (Speaker) ] ──(1 Upload Stream: Opus/VP8)──► ┌──────────────────────────────────┐   │
+│   [ Client 2 (Speaker) ] ──(1 Upload Stream: Opus/VP8)──► │     MEDIASOUP / LIVEKIT SFU      │   │
+│                                                           │   Selective Forwarding Unit      │   │
+│   [ Client 3..N (Viewers)] ◄──(N Downstream Tracks)────── │   $O(1)$ Upload / Simulcast      │   │
+│                                                           └────────────────┬─────────────────┘   │
+│                                                                            │                     │
+│                                                   Server-side Audio Tap    │ Opus raw audio      │
+│                                                   (Zero client penalty)    ▼                     │
+│   ┌──────────────────────────────────────────────────┐    ┌──────────────────────────────────┐   │
+│   │   CORE SIGNALING GATEWAY (Node.js/Socket.IO)     │    │   AUDIO SPEECH-TO-TEXT WORKER    │   │
+│   │   Auth, Room Lifecycle, Lobby, State Events      │    │   High-performance Whisper / STT │   │
+│   └────────────────────────┬─────────────────────────┘    └────────────────┬─────────────────┘   │
+│                            │                                               │                     │
+│                            │ Emits Avro Binary                             │ Emits Avro Binary   │
+│                            │ `CaptionStreamEvent.avsc`                     │ `AudioTapEvent.avsc`│
+│                            ▼                                               ▼                     │
+│         ════════════════════════════════════════════════════════════════════════════             │
+│                     APACHE KAFKA / REDIS STREAM (HIGH-THROUGHPUT EVENT BUS)                      │
+│         ════════════════════════════════════════════════════════════════════════════             │
+│                                                    │                                             │
+│                                                    ▼ Consumes binary Avro packets (<1ms)         │
+│                                       ┌──────────────────────────────────────────────┐           │
+│                                       │   TRANSLATION & AI MICROSERVICE              │           │
+│                                       │   • Stateless worker pool                    │           │
+│                                       │   • NMT Translation Engine (Google / DeepL)  │           │
+│                                       │   • Regional TTS MP3 synthesis cache         │           │
+│                                       │   • Emits `TranslatedCaptionEvent.avsc`      │           │
+│                                       └──────────────────────────────────────────────┘           │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 14.1 Why Replace P2P WebRTC Mesh with an SFU (Selective Forwarding Unit)
+
+#### 1. The $O(N^2)$ Bandwidth Bottleneck in P2P Mesh
+* In the current P2P mesh (`simple-peer`), each participant must encode and upload a separate video/audio stream to every other participant ($N - 1$ outgoing streams).
+* For a room with **8 participants**, each user must continuously upload **7 video streams ($\approx 12.6\text{ Mbps}$)**.
+* Most consumer and mobile broadband connections feature asymmetric upload speeds capped at 5–10 Mbps, resulting in severe packet loss, audio dropouts, and browser thermal throttling.
+* **The SFU Solution:**
+  * **$O(1)$ Client Upload:** Every client uploads **exactly 1 video stream and 1 audio stream** to the SFU server, regardless of whether there are 5 or 500 participants in the room.
+  * **Zero Transcoding Delay:** Unlike MCUs that decode and re-encode video (adding 300–500ms delay), the SFU simply inspects RTP packet headers and routes raw UDP packets to subscribers in **< 2 milliseconds**.
+  * **Simulcast & Dynamic Layer Adaptation:** Clients encode 3 resolution layers (1080p, 720p, 360p). The SFU forwards the optimal resolution based on each receiver's available downlink bandwidth, eliminating bufferbloat.
+
+#### 2. Server-Side Audio Tapping for Speech-to-Text
+* In P2P Mesh, speech recognition must run locally on the client's device (which fails on mobile browsers due to hardware mic locks).
+* With an SFU, the media server can directly **fork the incoming Opus audio track** on the server side into an internal audio pipe, routing it to high-accuracy STT engines (Whisper / Google Cloud Speech) with **zero extra upload bandwidth on the user's phone or laptop**.
+
+---
+
+### 14.2 Why Adopt Apache Avro & Event-Driven Microservices
+
+#### 1. Limitations of Monolithic JSON-over-WebSocket
+* **Payload Overhead:** Live subtitle transcription streams words every 200–400ms. In JSON, sending repeated keys (`meetingId`, `speakerId`, `originalText`, `timestamp`, `sourceLanguage`, `targetLanguage`) consumes ~160 bytes per packet. Across 100 concurrent rooms, this creates continuous string encoding and parsing overhead.
+* **Event Loop Contention:** In a monolithic Node.js server, translation API requests (HTTP fetches to Google Translate / LibreTranslate) and heavy JSON string parsing run inside the same single-threaded event loop that handles WebRTC signaling and Socket.IO heartbeat pings. Under load, translation delays freeze WebRTC signaling handshakes.
+
+#### 2. The Apache Avro Advantage
+* **Compact Binary Serialization (60–75% Bandwidth Reduction):** Avro encodes records into ultra-compact binary format without including field names in every message. A 160-byte JSON caption packet is compressed to **~35–45 bytes**.
+* **Strict Type Contracts & Pre-compiled Schemas:** Prevents schema drift and runtime type errors between distributed microservices.
+* **Schema Evolution (Backward & Forward Compatibility):** New fields (e.g., `confidenceScore`, `emotionTag`, `dialectTag`) can be added to the schema without breaking existing consumers or requiring lock-step deployments.
+* **Decoupled Asynchronous Processing:** The signaling gateway simply emits an Avro event to the message bus (Kafka / Redis Streams) and returns immediately. A dedicated pool of stateless `translation-service` workers consumes and processes the events in parallel, completely isolating translation latency from WebRTC signaling.
+
+---
+
+### 14.3 Apache Avro Schema Specifications (`.avsc`)
+
+#### 1. Raw Caption Stream Event (`CaptionStreamEvent.avsc`)
+```json
+{
+  "type": "record",
+  "name": "CaptionStreamEvent",
+  "namespace": "in.bhashabridge.events",
+  "doc": "Emitted when a participant speaks a sentence in a meeting",
+  "fields": [
+    { "name": "eventId", "type": "string", "doc": "UUID v4 event identifier" },
+    { "name": "meetingId", "type": "string", "doc": "CUID or UUID meeting room ID" },
+    { "name": "speakerId", "type": "string", "doc": "User ID of the speaking participant" },
+    { "name": "speakerName", "type": "string", "doc": "Display name of the speaker" },
+    { "name": "text", "type": "string", "doc": "Original transcript text recognized by STT" },
+    { "name": "sourceLang", "type": "string", "doc": "BCP-47 language tag (e.g. en-US, hi-IN)" },
+    { "name": "targetLangs", "type": { "type": "array", "items": "string" }, "doc": "List of target languages requested by active room members" },
+    { "name": "confidence", "type": "float", "default": 1.0, "doc": "STT confidence score (0.0 to 1.0)" },
+    { "name": "timestamp", "type": "long", "doc": "Epoch timestamp in milliseconds" }
+  ]
+}
+```
+
+#### 2. Multilingual Translated Caption Event (`TranslatedCaptionEvent.avsc`)
+```json
+{
+  "type": "record",
+  "name": "TranslatedCaptionEvent",
+  "namespace": "in.bhashabridge.events",
+  "doc": "Emitted by translation microservice after neural machine translation",
+  "fields": [
+    { "name": "eventId", "type": "string", "doc": "UUID v4 event identifier" },
+    { "name": "originalEventId", "type": "string", "doc": "Reference to parent CaptionStreamEvent" },
+    { "name": "meetingId", "type": "string", "doc": "Meeting room ID" },
+    { "name": "speakerId", "type": "string", "doc": "Speaker user ID" },
+    { "name": "translations", "type": {
+        "type": "map",
+        "values": "string"
+      },
+      "doc": "Map of language code to translated string (e.g. {'hi': 'नमस्ते', 'ta': 'வணக்கம்'})"
+    },
+    { "name": "ttsAudioAvailable", "type": "boolean", "default": false },
+    { "name": "ttsAudioUrl", "type": ["null", "string"], "default": null },
+    { "name": "processingLatencyMs", "type": "int", "doc": "Time taken by translation service in ms" },
+    { "name": "timestamp", "type": "long", "doc": "Completion timestamp in milliseconds" }
+  ]
+}
+```
+
+#### 3. SFU Server-Side Audio Tap Event (`AudioTapEvent.avsc`)
+```json
+{
+  "type": "record",
+  "name": "AudioTapEvent",
+  "namespace": "in.bhashabridge.events",
+  "doc": "Raw Opus audio chunks tapped from SFU media router for cloud STT",
+  "fields": [
+    { "name": "meetingId", "type": "string" },
+    { "name": "participantId", "type": "string" },
+    { "name": "sequenceNumber", "type": "long" },
+    { "name": "audioData", "type": "bytes", "doc": "Raw Opus binary frame payload" },
+    { "name": "sampleRate", "type": "int", "default": 48000 },
+    { "name": "channels", "type": "int", "default": 1 },
+    { "name": "timestamp", "type": "long" }
+  ]
+}
+```
+
+---
+
+### 14.4 Implementation Steps & Milestones
+
+| Step | Milestone | Key Deliverables |
+|---|---|---|
+| **Step 1** | **Avro Tooling & Schema Registry** | • Install `avsc` npm package.<br>• Create `schemas/avro/` directory with strict `.avsc` contracts.<br>• Implement `AvroSerializer` and `AvroDeserializer` utility modules with automated schema validation unit tests. |
+| **Step 2** | **Translation Microservice Extraction** | • Spin up independent `services/translation-service/` service.<br>• Connect via Redis Streams / Kafka message bus using Avro binary serialization.<br>• Offload all NMT translation APIs (`google-translate-api-x`, MyMemory) from main signaling server. |
+| **Step 3** | **SFU Media Server Deployment** | • Deploy Mediasoup / LiveKit media server instance.<br>• Expose WebRTC router endpoints.<br>• Migrate frontend WebRTC hook from `simple-peer` Mesh to SFU client (`mediasoup-client`).<br>• Enable Simulcast (1080p/720p/360p) and adaptive layer switching. |
+| **Step 4** | **SFU Server Audio Tapping** | • Route speaker Opus audio track directly from SFU router into server-side STT worker via `AudioTapEvent.avsc`.<br>• Solves mobile phone hardware microphone lockouts by eliminating client-side STT dependencies. |
+| **Step 5** | **Benchmarking & Validation** | • Verify 65–75% reduction in caption network payload size.<br>• Verify end-to-end translation latency < 300 ms.<br>• Stress-test 50 concurrent participants in a single room on modest server hardware. |
+
+
+---
+
+### 14.5 WebTransport over HTTP/3: Eradicating TCP Head-of-Line Blocking
+
+#### 1. The Head-of-Line (HoL) Blocking Flaw in WebSockets
+* Socket.IO runs on standard **TCP**. In rural village Wi-Fi or fluctuating 4G networks, packet loss occurs frequently (2%–5% packet loss).
+* In TCP, every single byte must be acknowledged sequentially. If packet #14 is dropped:
+  * The browser and OS network stack **freeze and buffer all subsequent packets** (#15, #16, #17) waiting for packet #14 to be retransmitted.
+  * Live subtitles, audio volume indicators, and chat messages **freeze for 800ms–2,000ms**, causing a jarring visual stall followed by a sudden flood of catch-up text.
+
+#### 2. The WebTransport (HTTP/3 over QUIC/UDP) Architecture
+WebTransport operates directly over UDP via the QUIC protocol, offering dual communication primitives on a single TLS 1.3 encrypted connection:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│ WEBTRANSPORT MULTI-PRIMITIVE CONNECTION (Port 443 over UDP/QUIC)                           │
+├─────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                             │
+│  [ UNRELIABLE DATAGRAMS ] ──► Used for Live Captions, Subtitles, Audio Meter Telemetry      │
+│  • Zero-Retransmission overhead.                                                            │
+│  • If a subtitle word packet is dropped in rural Wi-Fi, DROP IT IMMEDIATELY.                │
+│  • The next word renders instantly with ZERO delay or queue freezing!                       │
+│                                                                                             │
+│  [ MULTIPLEXED INDEPENDENT STREAMS ] ──► Used for Room State, Chat Messages, Join/Leave    │
+│  • Reliable, in-order byte streams.                                                         │
+│  • Packet loss in a Chat stream NEVER blocks or delays the Live Subtitle stream!            │
+│                                                                                             │
+└─────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+* **Performance Impact:** Reduces live subtitle arrival jitter by **40%–60% on unstable networks**, eradicates Head-of-Line blocking, and eliminates the heavy HTTP upgrade handshake of WebSockets.
+
+---
+
+### 14.6 Geo-Distributed Cascaded SFU Mesh: Multi-Region Edge Routing
+
+#### 1. The Cross-Border Latency Dilemma in Telemedicine
+* A specialist cardiologist in New York or London consulting with a patient in a village clinic in Bihar faces an intercontinental distance of **~12,000 km**.
+* In a single centralized SFU architecture (e.g. server in Mumbai):
+  * The New York doctor must route all UDP packets across the public internet to Mumbai: **Ping ~220–260 ms**.
+  * Public internet trans-oceanic routing suffers from random jitter, BGP route flapping, and packet loss.
+
+#### 2. Cascaded SFU Edge Architecture
+Instead of all users connecting to a single central machine, BhashaBridge deploys **geographically distributed SFU edge nodes** connected via a high-speed private cloud backbone (e.g. AWS Global Accelerator or Cloudflare Edge):
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│ CASCADED SFU EDGE TOPOLOGY                                                                  │
+├─────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                             │
+│   [ Doctor in New York ]                          [ Patient in Rural Bihar ]                │
+│            │                                                  │                             │
+│            ▼ (18ms local ping over public internet)           ▼ (24ms local ping)           │
+│   ┌─────────────────────────┐                        ┌─────────────────────────┐            │
+│   │   US-EAST SFU EDGE      │                        │   AP-SOUTH SFU EDGE     │            │
+│   │   (N. Virginia PoP)     │                        │   (Mumbai PoP)          │            │
+│   └────────────┬────────────┘                        └────────────┬────────────┘            │
+│                │                                                  │                         │
+│                ════════════════════════════════════════════════════                         │
+│                  OPTIMIZED PRIVATE CLOUD TRUNK (ZERO PACKET LOSS)                           │
+│                  Direct Fiber Backbone (Round-Trip Latency: ~135ms)                         │
+│                                                                                             │
+└─────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+* **Ingress at the Nearest Edge:** The doctor connects to the New York edge node; the patient connects to the Mumbai edge node.
+* **Private Backbone Transit:** Traffic hops onto a private, QoS-prioritized fiber trunk immediately, bypassing public internet congestion and cutting intercontinental audio round-trip latency by **50–80 milliseconds**.
+
+---
+
+### 14.7 Zero-Trust End-to-End Encryption (E2EE) with SFrame (RFC 9605)
+
+#### 1. The SFU Security Vulnerability
+* In standard WebRTC SFUs (including commercial Zoom and Google Meet setups without specialized E2EE), media is encrypted via DTLS-SRTP between the client and the SFU.
+* **The Vulnerability:** The SFU server decrypts the SRTP packet in server RAM before re-encrypting it for downstream recipients. A rogue cloud administrator, compromised media server, or government subpoena could inspect raw video and voice consultations. For rural telemedicine and medical diagnosis, this violates strict patient-confidentiality regulations (HIPAA, GDPR Health Data).
+
+#### 2. SFrame Architecture (Secure Frame via WebRTC Insertable Streams)
+BhashaBridge implements **SFrame (RFC 9605)**:
+* **Application-Layer Frame Encryption:** Video and audio frames are encrypted *inside the browser tab* using WebRTC Insertable Streams before the RTP packetizer is invoked.
+* **Zero-Knowledge Media Router:** The SFU receives packets with unencrypted RTP headers (allowing it to inspect sequence numbers, timestamps, and routing metadata for forwarding), but **the audio/video payload itself is completely opaque ciphertext**.
+* **Key Distribution via Messaging Layer Security (MLS):** Room encryption keys are negotiated directly between participants using ratchet trees; the SFU never receives or stores the decryption keys.
+* **Result:** Absolute zero-trust privacy for remote medical diagnostics, psychiatric consultations, and sensitive administrative hearings.
+
+---
+
+### 14.8 In-Flight Semantic Search & Late-Joiner Catch-Up (`pgvector` / Real-Time RAG)
+
+#### 1. The Late-Joiner Dilemma
+* In consultations and multi-party meetings, participants frequently join 15–30 minutes late due to power cuts, rural connectivity delays, or overlapping schedules.
+* Currently, late joiners must either interrupt the speaker to ask *"What did I miss?"*, or wait until the meeting concludes to read the post-meeting AI summary.
+
+#### 2. In-Flight Vector Streaming Pipeline
+As live captions stream through the translation microservice, they are chunked into 30-second conversational windows, embedded into vector representations, and indexed on-the-fly:
+
+```
+[ Live Translated Captions ] ──► [ Sliding Window Chunking (30s) ] 
+                                             │
+                                             ▼
+                                 [ Embedding Worker (FastEmbed) ] 
+                                 Generates 384-dimensional dense vector
+                                             │
+                                             ▼
+                                 [ PostgreSQL + pgvector ]
+                                 HNSW Index for sub-5ms vector proximity search
+```
+
+#### 3. The "Catch Me Up" Feature Workflow
+* A doctor or participant joins 20 minutes into the consultation and clicks **"⚡ Catch Me Up"**.
+* The client sends a query to the backend: `GET /api/meetings/:id/catch-up?joinedAt=...`.
+* The server performs a vector similarity search comparing the participant's role/context against recent discussion chunks.
+* Google Gemini 3.7 Flash synthesizes an instant, private 3-bullet briefing delivered directly to the late joiner's sidebar:
+  > *"Summary of the last 20 minutes: The patient described abdominal pain lasting 3 days; Dr. Mehta reviewed past medical history; lab tests were ordered for blood count."*
+* The meeting continues uninterrupted without wasting valuable clinical or administrative time.

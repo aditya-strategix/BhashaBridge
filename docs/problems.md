@@ -361,3 +361,43 @@ ewStatus = 'WAITING' for any returning normal participant. It forcefully updated
   3. Peer B targets `60001` (from STUN signaling), but Router A only accepts Peer B on `60842`. All packets are dropped.
 **Why This CANNOT Be Solved in Client-Side Code:** Port mutation occurs inside the cellular tower's CGNAT or enterprise firewall hardware. Browser code cannot predict what random external port the carrier will assign for Peer B's IP, making direct P2P mathematically impossible.
 **Why TURN Solves This 100% of the Time:** With TURN, the client sends 100% of its packets to the **same single destination** (`TURN_SERVER_IP:3478`). Because the destination IP and port never change, the Symmetric NAT **never mutates the port**, keeping port `60001` locked for the entire session. The TURN server reliably relays media without any port mismatch.
+
+---
+
+## Problem 23: Mobile Browser Hardware Microphone Lockout, Audio Focus Contention & Dictation Timeouts (Why Real-Time Speech Translation Requires Village Desktop Kiosks)
+
+### Symptoms:
+- When participants attempt to join a BhashaBridge meeting and use live speech translation from a smartphone mobile web browser (Android Chrome, iOS Safari):
+  1. The speech recognition engine stops transcribing after 2–3 seconds and goes completely dead.
+  2. The mobile browser throws silent `audio-capture-failed` or `not-allowed` errors.
+  3. The other participant in the video call suddenly stops hearing the speaker's voice because the WebRTC audio track is forcibly muted or disconnected.
+  4. When the translated synthesized audio plays through the phone speaker, incoming call audio cuts off or crashes.
+
+### Root Cause Analysis:
+1. **The Physical Microphone Hardware Lockout (WebRTC vs. STT Contention):**
+   * A smartphone has a single physical microphone hardware chip managed by strict mobile kernel security (Android `AudioRecord` / iOS `AVAudioSession`).
+   * When WebRTC joins a meeting, it requests the microphone via `navigator.mediaDevices.getUserMedia({ audio: true })`. The mobile OS grants an **exclusive, dedicated hardware handle** to the WebRTC telephony audio pipeline.
+   * At the same exact second, BhashaBridge's real-time translation engine invokes `webkitSpeechRecognition` to transcribe the speaker's words so they can be translated into Hindi, Tamil, etc.
+   * **The Desktop vs. Mobile Divide:**
+     - On **Desktop PCs (Windows / macOS / Linux)**, the OS audio engine (Windows WASAPI / macOS CoreAudio) features a multi-client software audio mixer. It transparently clones and multiplexes the microphone input stream to multiple concurrent web APIs without hardware collision.
+     - On **Mobile Operating Systems (Android / iOS)**, the OS security architecture prohibits concurrent audio recording by multiple browser pipelines. The mobile kernel denies microphone access to `webkitSpeechRecognition` (`audio-capture-failed`), or violently revokes the microphone from the active WebRTC call.
+2. **Mobile "Audio Focus" State Collisions (Telephony Call vs. Media Playback):**
+   * Mobile operating systems manage audio through strict **Audio Focus** modes:
+     - WebRTC two-way conversation is treated as a **Telephony Voice Call** (routed to the phone's top earpiece, low-latency DSP mode, hardware echo canceller active).
+     - Synthesized translated MP3 audio (played via an HTML5 `<audio>` tag or Web Audio API) is classified as **Media Playback** (routed to the loud bottom loudspeaker).
+   * When the translated MP3 audio plays, Android's `AudioManager` requests exclusive media focus, which automatically ducks, silences, or crashes the active WebRTC voice call stream!
+3. **The "Single-Shot Dictation" Trap & Battery-Saver Throttling:**
+   * Desktop Chrome supports permanent continuous speech recognition (`recognition.continuous = true`), staying active for hours.
+   * Mobile OSs treat Web Speech as a **keyboard voice-typing utility**. As soon as the speaker pauses for 1.5–2 seconds, the mobile OS triggers `onend` and terminates the microphone session. Rapid auto-restart loops in JavaScript are quickly flagged and throttled by mobile power-management watchdogs.
+   * When the mobile screen dims after 30 seconds of inactivity, the mobile OS throttles background JavaScript threads to save battery, freezing translation processing entirely.
+
+### Why This CANNOT Be Solved in Pure Mobile Client-Side Code:
+No amount of frontend JavaScript can rewrite the Android Linux kernel's audio driver or bypass iOS's `AVAudioSession` exclusive hardware lock. The browser sandbox is physically restricted by the underlying mobile operating system.
+
+### The Real-World Architectural Solution: The Village Kiosk / CSC Deployment Model (Jan Seva Kendra):
+To bring real-time speech translation to grassroots rural communities without requiring fragile mobile browsers:
+1. **Dedicated Village Kiosk Infrastructure:** BhashaBridge is deployed on dedicated desktop or laptop computers at local village centers (Gram Panchayat offices, Jan Seva Kendras, CSC booths, or rural clinics).
+2. **Desktop OS Multi-Client Audio Sharing:** Desktop Chrome/Edge running on Windows/Linux utilizes multi-channel OS audio mixing (WASAPI / ALSA / PulseAudio), allowing WebRTC and continuous Web Speech recognition to capture the microphone simultaneously with zero hardware lockouts.
+3. **Permanent Continuous Dictation (`continuous: true`):** Desktop browsers maintain open microphone channels without the 2-second dictation timeouts or aggressive battery-saving thread throttling inherent to mobile devices.
+4. **Wired Directional USB Headsets:** Village kiosks use dedicated noise-cancelling USB headsets, eliminating rural background noise (tractors, livestock, ambient chatter) and completely preventing acoustic echo.
+5. **Assisted Human Operator:** Local Village Level Entrepreneurs (VLEs) operate the computer for non-literate or elderly villagers, ensuring seamless access for citizens who do not own laptops or smartphones.

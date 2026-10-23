@@ -39,6 +39,106 @@ Traditional video platforms gate real-time speech interpretation behind expensiv
 
 ---
 
+## 🎯 Target Real-World Use Cases (The Grassroots Mission)
+
+While enterprise platforms like Google Meet and Microsoft Teams cater to Fortune 500 boardrooms and high-literacy knowledge workers who prefer silent text subtitles, **BhashaBridge is purpose-built for the Next Billion Users in the Global South**—where spoken language is the **sole gateway to digital inclusion** and functional illiteracy makes text subtitles ineffective.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│ TARGET PERSONA COMPARISON: GOOGLE MEET vs. BHASHABRIDGE                                     │
+├───────────────────────────────┬────────────────────────────┬────────────────────────────────┤
+│ Dimension                     │ Google Meet                │ BhashaBridge                   │
+├───────────────────────────────┼────────────────────────────┼────────────────────────────────┤
+│ Primary Target User           │ Enterprise Knowledge Worker│ The "Next Billion Users"       │
+│ Geography                     │ Global North & Tech Hubs   │ Global South (Bharat / Rural)  │
+│ Literacy Profile              │ High Literacy (Fast Reader)│ Low-Literacy / Non-Literate    │
+│ Meeting Cadence               │ Rapid agile debates        │ Structured 1-on-1 consultations│
+│ Conversational Tolerance      │ < 300 ms (Zero lag allowed)│ 1.5 – 2.5 s (Natural buffer)   │
+│ Primary Output Medium         │ Silent visual subtitles    │ Spoken regional audio out loud │
+│ Cloud Infrastructure Cost     │ Multi-million dollar SFUs  │ $0.00 Cloud GPU (Hybrid Edge)  │
+└───────────────────────────────┴────────────────────────────┴────────────────────────────────┘
+```
+
+### 1. 🏥 Rural Telemedicine & Primary Healthcare (The Lifesaver)
+* **Context:** An AIIMS specialist in New Delhi or a cardiologist in Bengaluru consulting remotely with a patient in a village primary health center in Bihar or Tamil Nadu.
+* **The Problem:** An elderly or sick villager speaking Bhojpuri, Marathi, or Tamil cannot read rapid English or Devanagari subtitles scrolling across a 5-inch phone screen. Functional illiteracy makes text captions 100% useless.
+* **Why BhashaBridge Wins:** 
+  * The patient explains symptoms in their native tongue $\rightarrow$ BhashaBridge plays natural translated speech to the doctor in English/Hindi $\rightarrow$ The doctor responds $\rightarrow$ The patient hears spoken advice in their own dialect.
+  * Medical consultations are inherently turn-based and consultative. There is no rapid-fire interruption; a 1.8-second translation buffer is respected as a deliberate, thoughtful interval that saves lives.
+
+### 2. 🌾 Agricultural Mandi & Grassroots Interstate Trade
+* **Context:** A farmer in Punjab or Haryana negotiating grain, vegetable, or livestock prices directly with a wholesale procurement trader in Maharashtra or Andhra Pradesh (Punjabi $\longleftrightarrow$ Marathi / Telugu).
+* **The Problem:** Farmers in crowded mandis cannot type or read text chats on a smartphone while handling produce. Intermediaries exploit language barriers to take excessive commissions.
+* **Why BhashaBridge Wins:** Direct voice-to-voice negotiation establishes mutual trust, eliminates exploitative middlemen, and allows farmers to communicate hands-free via earphones or speakerphone using BhashaBridge's intelligent acoustic ducking.
+
+### 3. 🏗️ Blue-Collar & Migrant Field Workforce Coordination
+* **Context:** Large-scale infrastructure projects (metro construction, highways, solar plants) where site managers speak Hindi or English, but migrant laborers speak Bengali, Odia, Assamese, or Kannada.
+* **The Problem:** Construction workers operating heavy machinery or scaffolding cannot look at subtitle banners on a screen. Safety protocols and hazard alerts must be heard.
+* **Why BhashaBridge Wins:** Morning safety briefings, daily hazard updates, and work orders are broadcast directly into workers' earphones in their mother tongue, ensuring zero language-related safety accidents.
+
+### 4. 🏛️ Civic Governance & Public Grievance Redressal (Jan Sunwai)
+* **Context:** District collectors and public officers reviewing welfare eligibility (PM-Kisan, pension disputes, ration card allocation, land deed verifications) with rural citizens speaking localized district dialects.
+* **The Problem:** Millions of citizens are disenfranchised from government welfare because administrative hearings and portals are conducted exclusively in English or formal state languages.
+* **Why BhashaBridge Wins:** Provides an equal voice to every citizen in public grievance hearings, allowing them to speak freely in their dialect and hear administrative resolutions spoken back clearly.
+
+### 5. 🌍 Cross-Border Grassroots Freelancing & Micro-Enterprise
+* **Context:** Traditional artisans (e.g. Jaipur textile weavers, brassware makers in Moradabad) pitching products or negotiating wholesale contracts with boutique buyers in Germany, France, or Japan.
+* **The Problem:** Talented artisans lose export opportunities because they lack English fluency, forcing them to rely on expensive export agents.
+* **Why BhashaBridge Wins:** Enables micro-entrepreneurs to conduct direct cross-border video pitches where both parties speak their native tongue effortlessly.
+
+### 6. 🆘 Disaster Relief & Humanitarian Aid Operations (NGOs)
+* **Context:** International relief volunteers, UN/Red Cross coordinators, and medical missions responding to flood, earthquake, or refugee crises in linguistically diverse regions.
+* **Why BhashaBridge Wins:** Zero-setup browser access on commodity smartphones with $0.00 infrastructure cost allows immediate cross-lingual triage without procuring specialized translation hardware.
+
+---
+
+## 🏛️ Village Kiosk & Assisted Tele-Centre Deployment Model (Jan Seva Kendra / CSC)
+
+A common question in grassroots tech deployment is:
+> *"Poor villagers in remote areas do not own high-end laptops or computers. If this platform is optimized for desktop/laptop web browsers rather than low-end mobile phones, how do villagers actually access BhashaBridge?"*
+
+BhashaBridge is designed around the **Village Kiosk / Common Service Centre (CSC) Model** (analogous to *Jan Seva Kendra* or *Gram Panchayat Telemedicine Booths*):
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│ THE VILLAGE TELE-CENTRE ARCHITECTURE                                                        │
+├─────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                             │
+│  [ Villager ] ──────────► Walks into Village Kiosk / Gram Panchayat Center                  │
+│       │                                                                                     │
+│       ▼                                                                                     │
+│  [ Kiosk Operator ] ────► Assisted Access: Opens Desktop Chrome, plugs in USB Headset,      │
+│   (Local Youth / VLE)     selects villager's dialect (e.g. Bhojpuri, Maithili, Tamil)       │
+│       │                                                                                     │
+│       ▼ (BhashaBridge on Desktop Web Browser: 100% Free Edge STT/TTS)                       │
+│  [ High-Speed Video Call ] ◄════════════════════════════════════════════════════════════►   │
+│  with Remote Specialist Doctor (AIIMS) / Agronomist / Civil Officer                         │
+│                                                                                             │
+└─────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Why the Desktop Kiosk Model Outperforms Personal Mobile Phones:
+1. **Microphone Hardware Lockout on Mobile OS:**
+   * On mobile phones, WebRTC acquires an exclusive hardware lock on the single microphone chip (Android `AudioRecord` / iOS `AVAudioSession`). When the browser's Web Speech engine attempts to capture voice for translation simultaneously, the mobile OS denies microphone access (`audio-capture-failed`) or violently disconnects the WebRTC call.
+   * Desktop computers (Windows/macOS/Linux) feature OS-level multi-client audio mixers (WASAPI / CoreAudio) that effortlessly split and share one microphone stream across WebRTC and speech recognition simultaneously with zero hardware collision.
+2. **Mobile Audio Focus Collisions (Telephony vs. Media):**
+   * Mobile operating systems treat WebRTC two-way calls as telephony (earpiece voice call) and translated MP3 speech as media playback (loudspeaker). Playing translated audio automatically pauses or silences the incoming video call.
+3. **Uninterrupted Speech Recognition vs. Dictation Timeouts:**
+   * Mobile phone browsers treat Web Speech as single-shot keyboard voice typing, forcefully terminating the microphone after 1.5–2 seconds of silence, while aggressive mobile battery-saver modes throttle background JavaScript threads.
+   * Desktop/Laptop Chrome provides permanent, continuous Web Speech API listening (`continuous: true`) with zero dictation timeouts.
+4. **Superior Hardware Acoustics & Echo Elimination:**
+   * Budget smartphones feature weak, noisy single microphones that pick up environmental village noise (wind, cattle, tractors).
+   * A village center uses a dedicated **noise-cancelling USB headset with directional mic**, eliminating 100% of acoustic feedback and ambient noise.
+5. **Assisted Digital Inclusion:**
+   * Non-literate or elderly citizens are not expected to configure WebRTC permissions, manage camera settings, or navigate complex UI menus.
+   * A trained Village Level Entrepreneur (VLE) acts as an assisted facilitator, operating the controls while the villager simply sits and speaks naturally.
+6. **Sustainable Micro-Economy:**
+   * The villager pays a nominal community fee (**₹20 to ₹50 / $0.25 – $0.60**) for the consultation.
+   * The local kiosk operator earns a sustainable rural livelihood.
+   * The remote doctor or expert delivers life-saving counsel without traveling.
+
+---
+
 ## 🏗️ System Architecture
 
 ```
@@ -146,8 +246,3 @@ BhashaBridge features an **Editorial Neo-Brutalist** aesthetic:
 * **Primary CTA:** Electric Cobalt (`#0022FF`)
 * **Accent & Live Marks:** Vivid Vermilion (`#FF3311`) & Emerald (`#10B981`)
 
----
-
-## 📄 License
-
-This project is licensed under the [MIT License](LICENSE).

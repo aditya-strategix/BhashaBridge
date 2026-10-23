@@ -998,6 +998,21 @@ BhashaBridge combines the **zero-cost, ultra-low-latency benefits of Client-Side
 | **Bandwidth Usage** | Direct peer mesh (optimal for small groups 2–6) | Centralized SFU (scales up to 250–1,000 participants) |
 | **Mobile Speech Handling** | Handled via rapid restart loops and backend MP3 fallbacks | Handled 100% on cloud servers via audio stream forking |
 | **Latency** | **~285 ms (Near-instant)** | ~600–1,200 ms (Network round-trip to cloud GPU cluster) |
+
+---
+
+### 13.6 The Architectural Implication: Why We Deploy Desktop Village Kiosks (CSC / Jan Seva Kendra Model)
+
+Because mobile smartphone operating systems enforce hardware microphone locks (`MODE_IN_COMMUNICATION` vs `VOICE_RECOGNITION`), Audio Focus collisions (telephony vs. media stream), and 2-second dictation timeouts, attempting to run full continuous real-time interpretation directly on budget smartphones in rural areas is fundamentally unreliable. Furthermore, rural villagers do not own laptops or high-end computers.
+
+To bypass these mobile OS limitations while serving rural and grassroots communities, **BhashaBridge adopts the Village Kiosk / Common Service Centre (CSC) Deployment Model**:
+
+1. **Dedicated Village Desktop Hub:** A single computer or laptop is installed at the local Gram Panchayat, Jan Seva Kendra, or rural health sub-centre.
+2. **Multi-Client Audio Sharing:** Desktop operating systems (Windows WASAPI / Linux ALSA) allow the browser to effortlessly clone the microphone stream across WebRTC and continuous Web Speech recognition simultaneously with **zero hardware lockouts**.
+3. **No Dictation Timeouts:** Desktop Chrome supports uninterrupted `continuous: true` listening, enabling 45-minute continuous consultations without dropping.
+4. **Wired Directional USB Headsets:** Eliminates village ambient acoustic interference (cattle, farm equipment, wind) and hardware acoustic echo loops.
+5. **Assisted Human Operator:** Local Village Level Entrepreneurs (VLEs) operate the controls for non-literate or elderly villagers, delivering life-saving tele-consultations and civic services through a sustainable ₹20–₹50 micro-transaction model.
+
 ---
 
 ## 14. Deep Neural Networks for Direct Speech-to-Speech Translation: Why Big Tech Does Not Deploy End-to-End Audio Models in Live Video Conferencing
@@ -1126,64 +1141,78 @@ In a video meeting, if Participant A speaks English and Participant B wants tran
 
 ---
 
-### 14.5 Target Audience & Mission: Google Meet (Enterprise Boardroom) vs. BhashaBridge (Grassroots Accessibility)
+### 14.5 Target Audience & Mission
 
-Given why Google Meet rejected spoken translated audio, why does BhashaBridge intentionally build and champion this architecture? The answer lies in fundamentally different target audiences, user personas, and communication contexts:
+*(For detailed clinical justifications, target grassroots audience breakdowns, and reasons to refer BhashaBridge, refer to [**`why_refer_bhashabridge.md`**](file:///e:/BhashaBridge/BhashaBridge/docs/why_refer_bhashabridge.md)).*
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────────────────┐
-│ AUDIENCE COMPARISON: GOOGLE MEET vs. BHASHABRIDGE                                           │
-├───────────────────────────────┬────────────────────────────┬────────────────────────────────┤
-│ Dimension                     │ Google Meet                │ BhashaBridge                   │
-├───────────────────────────────┼────────────────────────────┼────────────────────────────────┤
-│ Primary Target User           │ Enterprise Knowledge Worker│ The "Next Billion Users"       │
-│ Geography                     │ Global North & Tech Hubs   │ Global South (Bharat / Rural)  │
-│ Literacy Profile              │ High Literacy (Fast Reader)│ Low-Literacy / Non-Literate    │
-│ Meeting Format                │ High-speed agile debates   │ Structured consultations       │
-│ Acceptable Audio Latency      │ < 300 ms (Zero lag allowed)│ 1.5 – 2.5 s (Natural buffer)   │
-│ Primary Consumption Medium    │ Real-time visual subtitles │ Spoken regional audio out loud │
-│ Cloud Infrastructure Cost     │ Multi-million dollar SFUs  │ $0.00 Cloud GPU (Hybrid Edge)  │
-└───────────────────────────────┴────────────────────────────┴────────────────────────────────┘
-```
-
-#### 1. The Low-Literacy Barrier: Why Subtitles Fail the Next Billion Users
-In Fortune 500 boardrooms and software engineering standups, participants read text captions at 180+ words per minute without breaking stride. However, for the majority of the population in developing nations:
-* **Functional Illiteracy:** Hundreds of millions of citizens speak their regional mother tongue (Hindi, Tamil, Telugu, Marathi, Bengali, Odia, Gujarati) fluently, but cannot read written text—especially fast-scrolling subtitles on a 5-inch mobile smartphone screen.
-* **Script Diversity:** Even literate users in India often struggle to read complex Devanagari or Dravidian scripts when rendered in rapid, small subtitle fonts on low-end budget smartphones.
-* **The Accessibility Imperative:** For a rural farmer or an elderly patient, **text subtitles are completely useless**. Spoken voice in their native tongue is not an optional feature—it is the **sole gateway to comprehension and digital inclusion**.
-
-#### 2. Real-World Grassroots Use Cases Targeted by BhashaBridge
-
-##### A. Rural Telemedicine & Primary Healthcare
-* **Context:** An AIIMS specialist in New Delhi or a cardiologist in Bengaluru conducting a remote video consultation with a rural patient in a village clinic in Bihar or Tamil Nadu.
-* **Interaction:** The patient speaks Bhojpuri or Tamil describing their symptoms. The specialist speaks English or Hindi.
-* **Why BhashaBridge Works:** In medical consultations, patients and doctors do not engage in rapid-fire interruptions. The cadence is inherently consultative:
-  $$\text{Patient explains symptoms} \longrightarrow \text{1.8s Translation buffer} \longrightarrow \text{Doctor hears translated voice} \longrightarrow \text{Doctor advises}$$
-  A 1.8-second buffer is perceived by both parties not as a technical flaw, but as a deliberate, thoughtful translation interval that enables life-saving care.
-
-##### B. Agricultural Mandi & Grassroots Trade
-* **Context:** A farmer in Punjab negotiating crop prices with a wholesale merchant in Maharashtra or Andhra Pradesh.
-* **Interaction:** Punjabi $\longleftrightarrow$ Marathi / Telugu.
-* **Why BhashaBridge Works:** Direct voice negotiation establishes personal trust that cold text chat or unreadable subtitles cannot match. Both parties wear earphones or use speakerphone with BhashaBridge's acoustic ducking, enabling cross-state trade without middleman exploitation.
-
-##### C. Blue-Collar & Migrant Workforce Coordination
-* **Context:** Construction contractors, logistics dispatchers, and field service technicians coordinating across linguistic state borders in India.
-* **Interaction:** Hindi, Bengali, Assamese, and Kannada field workers receiving daily safety briefings and operational instructions from site managers.
-* **Why BhashaBridge Works:** Workers operating in the field cannot keep their eyes glued to subtitle banners. Hearing instructions spoken aloud through earphones allows hands-free operational compliance.
-
-##### D. Civic Governance & Grievance Redressal
-* **Context:** Government administrative officers reviewing public complaints and public welfare eligibility with rural citizens across diverse district dialects.
-
-#### 3. BhashaBridge's Tactical Solutions to the Audio Engineering Blockers
-To make translated audio viable in grassroots environments, BhashaBridge introduces specific technical mitigations:
-1. **Intelligent Acoustic Ducking:** When translated synthetic audio plays, BhashaBridge automatically attenuates (ducks) the remote speaker's original incoming audio volume to 15–20%. The listener hears the original voice softly in the background for natural emotional intonation, while the translated voice takes precedence.
-2. **Dual-Tier Edge/Cloud Synthesis:** When local client hardware supports native speech synthesis (`window.speechSynthesis`), audio is synthesized directly on the user's phone with zero cloud round-trip time. When regional dialect voices are missing, BhashaBridge transparently falls back to the backend Google TTS MP3 proxy stream (`/api/tts`).
-3. **Dual Visual & Auditory Output:** Users who can read subtitles receive near-instant visual captions (~285 ms), while low-literacy users listen to the spoken regional audio.
+*(For detailed clinical justifications, target grassroots audience breakdowns, and reasons to refer BhashaBridge, refer to [why_refer_bhashabridge.md](file:///e:/BhashaBridge/BhashaBridge/docs/why_refer_bhashabridge.md)).*
 
 ---
 
-### 14.6 Summary Architectural Takeaway
+## 15. Next-Generation Architecture: SFU, Server-Side Audio Tapping & Zero-Trust Privacy
 
-* **Google Meet is engineered for the Enterprise Boardroom:** Optimized for zero latency (<300 ms), high-density multi-party meetings (250+ participants), and high-literacy knowledge workers who prefer instant text subtitles over delayed audio synthesis.
-* **BhashaBridge is engineered for Grassroots Inclusivity:** Optimized for the Global South's linguistic diversity, low-literacy communities, and consultative 1-on-1 or small-group interactions where **hearing native spoken speech out loud** bridges real-world divides that text captions cannot solve.
-* **Zero-Cost Sustainability:** By leveraging Client-Side Web Speech for Speech-to-Text and hybrid edge-cloud audio rendering, BhashaBridge achieves this mission with **$0.00 cloud GPU infrastructure**, proving that democratized linguistic accessibility does not require multi-billion-dollar enterprise budgets.
+### 15.1 Resolving the Android Hardware Microphone Conflict
+As documented in Problem 23, mobile browsers on Android and iOS enforce an exclusive hardware microphone lock:
+* In the legacy model, running WebRTC voice calling alongside in-browser Web Speech API (`webkitSpeechRecognition`) caused Android's `AudioRecord` / `AudioFlinger` to abort with a hardware lock conflict.
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ THE ANDROID HARDWARE AUDIO RECORD CONFLICT RESOLUTION & AUDIO ROUTING                  │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                        │
+│   Smartphone Browser (Villager speaking Hindi)                                         │
+│    └── Single Request: getUserMedia({ audio: true }) ──► Standard WebRTC Voice Track   │
+│                 │                                                                      │
+│                 ▼                                                                      │
+│   [ Android Audio HAL / AudioRecord ]                                                  │
+│   ✅ SINGLE CLIENT GRANTED (Standard VoIP phone call; identical to WhatsApp/Meet)      │
+│                 │                                                                      │
+│                 ▼ (Opus voice over 4G UDP)                                             │
+│   [ Mediasoup SFU in Cloud ]                                                           │
+│                 │                                                                      │
+│        ┌────────┴────────────────────────────────────────┐                             │
+│        │                                                 │                             │
+│        ▼                                                 ▼                             │
+│  [ Raw Hindi Audio Track ]                    [ Digital Audio Tap in Cloud RAM ]       │
+│  • Muted for Doctor (or ducked to 15%         AudioTapEvent.avsc emitted to bus        │
+│    for tone/breathing cues)                              │                             │
+│                                                          ▼                             │
+│                                               [ Whisper / Bhashini STT ]               │
+│                                               Transcribes Hindi speech to text         │
+│                                                          │                             │
+│                                                          ▼                             │
+│                                               [ IndicTrans2 Translation Worker ]       │
+│                                               Translates Hindi text into English       │
+│                                                          │                             │
+│                                        ┌─────────────────┴─────────────────┐           │
+│                                        ▼                                   ▼           │
+│                             [ Text Subtitle Stream ]             [ Piper TTS Worker ]  │
+│                             Live English subtitles               Synthesizes English   │
+│                             sent via WebTransport                neural voice audio    │
+│                                        │                                   │           │
+│                                        └─────────────────┬─────────────────┘           │
+│                                                          ▼                             │
+│                                             [ Doctor's Screen & Speakers ]             │
+│                                             Doctor hears TRANSLATED ENGLISH AUDIO      │
+│                                             and reads live English subtitles!          │
+│                                                                                        │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Why Android Hardware Accepts This Architecture
+1. **Single AudioRecord Request:** The phone requests the microphone **only once** for standard WebRTC calling.
+2. **Zero In-Browser STT:** The phone does not execute speech-to-text algorithms or touch native SpeechRecognizer services.
+3. **Cloud Memory Duplication:** The voice stream is copied digitally in the Mediasoup SFU's RAM and routed to high-speed transcription workers.
+4. **Universal Accessibility:** Villagers with entry-level ₹5,000 Android Go smartphones can join multilingual calls with zero battery drain and zero overheating.
+
+
+### 15.2 Next-Generation Technology Stack Summary
+For the complete technical blueprint, refer to [**`newArchitecture.md`**](file:///e:/BhashaBridge/BhashaBridge/docs/newArchitecture.md).
+
+* **Media Router:** Mediasoup C++ SFU with Dynamic Simulcast and $O(1)$ uplink scaling.
+* **Low-Latency Transport:** WebTransport over HTTP/3 (QUIC/UDP) eliminating TCP Head-of-Line blocking.
+* **Microservice Framing:** Apache Avro (`.avsc`) packed binary schemas (65%–75% bandwidth reduction).
+* **Zero-Trust Media Privacy:** SFrame (RFC 9605) application-layer frame encryption with MLS ratchet key exchange.
+* **Sovereign Machine Translation:** Self-hosted **IndicTrans2** (AI4Bharat / IIT Madras) with Redis LRU caching ($0 per-token fee).
+* **Local Neural Speech:** In-browser `window.speechSynthesis` and server-side **Piper TTS** (open-source MIT, CPU-only, 10x-20x real-time).
+* **In-Flight Semantic RAG:** 30s sliding window transcription chunking + FastEmbed + PostgreSQL `pgvector` (HNSW) powering the **"⚡ Catch Me Up"** sub-second late-joiner briefing pipeline.
