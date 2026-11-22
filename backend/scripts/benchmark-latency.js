@@ -5,8 +5,10 @@ const { performance } = require('perf_hooks');
 const { createClient } = require('redis');
 const { io } = require('socket.io-client');
 const prisma = require('../src/prisma');
-const AIService = require('../src/services/ai.service');
-const TranslationService = require('../src/services/translation.service');
+const aiClient = require('../src/clients/ai.client');
+// TranslationService offloaded to decoupled AI service
+const TranslationService = { translate: (text, s, targets) => aiClient.translate(text, s, targets) };
+const avro = require('../src/avro');
 
 // Utility to calculate percentile
 function calculatePercentile(values, percentile) {
@@ -81,7 +83,7 @@ Speaker 1 (Host): Action item for Speaker 2: benchmark the latency between cold 
   for (let i = 1; i <= 3; i++) {
     const t0 = performance.now();
     try {
-      const summary = await AIService.summarizeTranscript(sampleTranscript, 'en');
+      const summary = await aiClient.summarizeTranscript(sampleTranscript, 'en');
       const t1 = performance.now();
       const elapsed = t1 - t0;
       geminiLatencies.push(elapsed);
@@ -275,6 +277,67 @@ Speaker 1 (Host): Action item for Speaker 2: benchmark the latency between cold 
     socketRtt: signalingStats
   };
 
+  // =========================================================================
+  // BENCHMARK 5: Binary Serialization & Wire Compression (Apache Avro vs. JSON)
+  // Pillar 3: Apache Avro (.avsc) vs Standard JSON Bloat
+  // =========================================================================
+  console.log('\n' + '-'.repeat(80));
+  console.log('BENCHMARK 5: Event Wire Serialization & Payload Compression');
+  console.log('Comparable States: Standard Verbose JSON vs. Packed Apache Avro (.avsc) Binary');
+  console.log('-'.repeat(80));
+
+  const sampleCaptionEvent = {
+    eventId: 'evt_bench_101',
+    meetingId: testMeeting?.id || 'meet_bench_delhi_1',
+    speakerId: 'usr_speaker_bench',
+    sourceLanguage: 'hi',
+    transcriptText: 'रोगी को पिछले 3 दिनों से लगातार बुखार और खांसी है।',
+    isFinal: true,
+    confidenceScore: 0.985,
+    timestamp: Date.now()
+  };
+
+  const jsonString = JSON.stringify(sampleCaptionEvent);
+  const jsonCaptionBytes = Buffer.byteLength(jsonString, 'utf8');
+
+  let avroCaptionBytes = 0;
+  let avroCaptionBuf = null;
+  const avroEncodeLatencies = [];
+  const jsonEncodeLatencies = [];
+
+  for (let i = 1; i <= 20; i++) {
+    // JSON serialization timing
+    const t0Json = performance.now();
+    const str = JSON.stringify(sampleCaptionEvent);
+    jsonEncodeLatencies.push(performance.now() - t0Json);
+
+    // Avro binary serialization timing
+    const t0Avro = performance.now();
+    avroCaptionBuf = avro.serialize('CaptionStreamEvent', sampleCaptionEvent);
+    avroEncodeLatencies.push(performance.now() - t0Avro);
+  }
+
+  avroCaptionBytes = avroCaptionBuf.length;
+  const captionCompressionStats = avro.getCompressionMetrics(sampleCaptionEvent, avroCaptionBuf);
+  const jsonEncodeStats = computeStats(jsonEncodeLatencies);
+  const avroEncodeStats = computeStats(avroEncodeLatencies);
+
+  console.log(`[5A] CaptionStreamEvent Wire Payload:`);
+  console.log(`     JSON Wire Size:   ${jsonCaptionBytes} bytes (Encode P50: ${jsonEncodeStats.p50} ms)`);
+  console.log(`     Avro Binary Size: ${avroCaptionBytes} bytes (Encode P50: ${avroEncodeStats.p50} ms)`);
+  console.log(`     Payload Reduction: ${captionCompressionStats.compressionRatio} (${captionCompressionStats.ratioFactor}x more compact)`);
+
+  results.avroSerialization = {
+    captionStream: {
+      jsonBytes: jsonCaptionBytes,
+      avroBytes: avroCaptionBytes,
+      reductionPercent: captionCompressionStats.compressionRatio,
+      ratioFactor: `${captionCompressionStats.ratioFactor}x`,
+      jsonEncodeLatency: jsonEncodeStats,
+      avroEncodeLatency: avroEncodeStats
+    }
+  };
+
   // Clean up Redis & Prisma
   await redisClient.del(benchmarkCacheKey);
   await redisClient.del(meetingCacheKey);
@@ -304,6 +367,8 @@ Speaker 1 (Host): Action item for Speaker 2: benchmark the latency between cold 
 |    - P50 (Median)                | Active: ${results.translation.activeTranslation.p50.toFixed(1)} ms   | Identity: ${results.translation.identityPassThrough.p50.toFixed(1)} ms    | -              |
 +-----------------------------------------------------------------------------------------------------+
 | 4. WebSocket Signaling Plane     | Relay RTT: Mean ${results.signaling.socketRtt.mean.toFixed(2)} ms (P50: ${results.signaling.socketRtt.p50.toFixed(2)} ms, P95: ${results.signaling.socketRtt.p95.toFixed(2)} ms, Min: ${results.signaling.socketRtt.min.toFixed(2)} ms)|
++-----------------------------------------------------------------------------------------------------+
+| 5. Avro Wire Serialization       | JSON Payload: ${results.avroSerialization.captionStream.jsonBytes} B     | Avro Binary: ${results.avroSerialization.captionStream.avroBytes} B       | ${results.avroSerialization.captionStream.reductionPercent} wire savings (${results.avroSerialization.captionStream.ratioFactor})|
 +-----------------------------------------------------------------------------------------------------+
 `);
 

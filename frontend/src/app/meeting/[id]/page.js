@@ -405,10 +405,10 @@ export default function MeetingRoom() {
     // en, hi, es, fr, de, zh.
     // Regional languages like Tamil ('ta'), Telugu ('te'), Bengali ('bn'), Marathi ('mr'), etc.
     // have NO native speech synthesis voices installed in OS / browser by default.
-    // For these, IMMEDIATELY route directly to backend Google TTS proxy for authentic pronunciation!
+    // For these, IMMEDIATELY route directly to backend Bhashini Indic-TTS proxy for authentic pronunciation!
     const NATIVE_VOICE_LANGS = new Set(['en', 'hi', 'es', 'fr', 'de', 'zh']);
     if (!NATIVE_VOICE_LANGS.has(shortLang)) {
-      console.log(`[Meeting TTS] Routing "${targetLangCode}" (${shortLang}) directly to backend Google TTS proxy.`);
+      console.log(`[Meeting TTS] Routing "${targetLangCode}" (${shortLang}) directly to backend Bhashini TTS proxy.`);
       playViaBackend();
       return;
     }

@@ -1,0 +1,16 @@
+{
+  "type": "record",
+  "name": "SummaryResponseEvent",
+  "namespace": "in.bhashabridge.events",
+  "doc": "Response event containing structured meeting summary",
+  "fields": [
+    { "name": "requestId", "type": "string" },
+    { "name": "meetingId", "type": "string" },
+    { "name": "summaryText", "type": "string" },
+    { "name": "targetLanguage", "type": "string" },
+    { "name": "providerUsed", "type": "string" },
+    { "name": "processingLatencyMs", "type": "int" },
+    { "name": "timestamp", "type": "long" }
+  ]
+}
+

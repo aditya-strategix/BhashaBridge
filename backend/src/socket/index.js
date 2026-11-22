@@ -1,7 +1,8 @@
 const { Server } = require('socket.io');
-const translate = require('google-translate-api-x');
+const aiClient = require('../clients/ai.client');
 const prisma = require('../prisma');
 const { withDbRetry } = require('../prisma');
+const avro = require('../avro');
 
 function setupSocket(server) {
   const io = new Server(server, {
@@ -348,21 +349,13 @@ function setupSocket(server) {
               targetLanguages.add(s.chatLang);
             }
           });
-          const translations = {};
-          for (let targetLang of targetLanguages) {
+          let translations = {};
+          if (targetLanguages.size > 0) {
             try {
-              const res = await translate(text, { to: targetLang, client: 'gtx' }).catch(async (e) => {
-                console.error("Google API failed, falling back to MyMemory...");
-                const fallbackUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${language}|${targetLang}`;
-                const fallbackRes = await fetch(fallbackUrl);
-                const fallbackData = await fallbackRes.json();
-                if (fallbackData?.responseData?.translatedText) {
-                  return { text: fallbackData.responseData.translatedText };
-                }
-                throw e;
-              });
-              translations[targetLang] = res.text;
-            } catch (err) { console.error("Translation Error:", err.message); }
+              translations = await aiClient.translate(text, language, Array.from(targetLanguages));
+            } catch (err) {
+              console.error("[IndicTrans2 Chat] Translation Error:", err.message);
+            }
           }
           io.to(meetingId).emit('chat:translated', { messageId: data.id, translations, sourceLanguage: language });
       } catch (error) {
@@ -459,36 +452,40 @@ function setupSocket(server) {
             }
           });
           console.log(`[CAPTION:TRANSLATING] clientsInRoom: ${clients.length}, targetLanguages:`, Array.from(targetLanguages));
-          const translations = {};
-          for (let targetLang of targetLanguages) {
+          let translations = {};
+          if (targetLanguages.size > 0) {
             try {
-              const translatePromise = (async () => {
-                try {
-                  return await translate(text, { to: targetLang, client: 'gtx' });
-                } catch (e) {
-                  console.warn("Google API failed, falling back to MyMemory...");
-                  const fallbackUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${language}|${targetLang}`;
-                  const fallbackRes = await fetch(fallbackUrl, { signal: AbortSignal.timeout(3000) });
-                  const fallbackData = await fallbackRes.json();
-                  if (fallbackData?.responseData?.translatedText) {
-                    return { text: fallbackData.responseData.translatedText };
-                  }
-                  throw e;
-                }
-              })();
-
-              const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Translation timeout')), 4000));
-              const res = await Promise.race([translatePromise, timeoutPromise]);
-              translations[targetLang] = res.text;
+              translations = await aiClient.translate(text, language, Array.from(targetLanguages));
             } catch (err) {
-              console.warn("Translation fallback for", targetLang, ":", err.message);
-              translations[targetLang] = text;
+              console.warn("[IndicTrans2 Caption] Translation error, falling back to original:", err.message);
+              for (let targetLang of targetLanguages) {
+                translations[targetLang] = text;
+              }
             }
           }
           const captionId = `cap_${speakerId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
           const captionPayload = { id: captionId, text, sourceLanguage: language, speakerId, senderSocketId: socket.id, translations };
           console.log(`[CAPTION:EMITTING] Emitting caption:translated to ${targetRoom}:`, captionPayload.id);
           io.to(targetRoom).emit('caption:translated', captionPayload);
+
+          // Pillar 3: Apache Avro Binary Serialization
+          try {
+            if (avro && avro.registry && avro.registry.hasSchema('TranslatedCaptionEvent')) {
+              const avroEvent = {
+                eventId: captionId,
+                originalEventId: `orig_${captionId}`,
+                meetingId: String(targetRoom),
+                speakerId: String(speakerId),
+                translations: translations,
+                processingLatencyMs: Date.now() - now,
+                timestamp: Date.now()
+              };
+              const avroBuffer = avro.registry.serialize('TranslatedCaptionEvent', avroEvent);
+              io.to(targetRoom).emit('caption:translated:avro', avroBuffer);
+            }
+          } catch (avroErr) {
+            console.warn('[Socket Avro] Caption serialization error:', avroErr.message);
+          }
       } catch (error) {
         console.error('Caption translation error:', error);
       }

@@ -1,0 +1,17 @@
+{
+  "type": "record",
+  "name": "CaptionStreamEvent",
+  "namespace": "in.bhashabridge.events",
+  "doc": "Live transcription frame emitted by edge Web Speech API or server audio tap worker",
+  "fields": [
+    { "name": "eventId", "type": "string" },
+    { "name": "meetingId", "type": "string" },
+    { "name": "speakerId", "type": "string" },
+    { "name": "sourceLanguage", "type": "string" },
+    { "name": "transcriptText", "type": "string" },
+    { "name": "isFinal", "type": "boolean" },
+    { "name": "confidenceScore", "type": "float" },
+    { "name": "timestamp", "type": "long" }
+  ]
+}
+

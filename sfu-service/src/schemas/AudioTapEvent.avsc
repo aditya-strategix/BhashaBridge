@@ -1,0 +1,15 @@
+{
+  "type": "record",
+  "name": "AudioTapEvent",
+  "namespace": "in.bhashabridge.events",
+  "doc": "Raw Opus/PCM audio frame tapped from Mediasoup SFU router for server-side STT",
+  "fields": [
+    { "name": "meetingId", "type": "string" },
+    { "name": "participantId", "type": "string" },
+    { "name": "sequenceNumber", "type": "long" },
+    { "name": "audioData", "type": "bytes" },
+    { "name": "sampleRate", "type": "int", "default": 48000 },
+    { "name": "timestamp", "type": "long" }
+  ]
+}
+

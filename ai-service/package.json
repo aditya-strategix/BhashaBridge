@@ -1,0 +1,35 @@
+{
+  "name": "bhashabridge-ai-service",
+  "version": "2.0.0",
+  "description": "BhashaBridge Sovereign Cognitive AI Microservice with Apache Avro Binary Serialization",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "test": "node tests/avro.test.js && node tests/ai-service.test.js",
+    "test:avro": "node tests/avro.test.js"
+  },
+  "keywords": [
+    "bhashabridge",
+    "avro",
+    "ai-service",
+    "webrtc",
+    "mediasoup",
+    "translation",
+    "indictrans2",
+    "gemini",
+    "bhashini-tts",
+    "bhashini-stt"
+  ],
+  "author": "BhashaBridge Team",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
+

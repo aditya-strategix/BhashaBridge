@@ -103,13 +103,42 @@ backend/src/
 │   ├── organization.controller.js   # Org management & code-based join requests
 │   ├── analytics.controller.js      # Participation time, message stats
 │   └── admin.controller.js          # Admin user/org management
+├── avro/
+│   └── index.js                     # Shared Apache Avro Registry & Binary Framing
 ├── services/
 │   ├── otp.service.js               # Dual-layer OTP store (Valkey + memory, rate limiting)
-│   ├── email.service.js             # Resend API + Nodemailer (invites & branded OTP emails)
-│   ├── ai.service.js                # Gemini 3.7 Flash AI Meeting Summarization
-│   └── translation.service.js       # Translation utility wrapper
+│   └── email.service.js             # Resend API + Nodemailer (invites & branded OTP emails)
 └── socket/
-    └── index.js                     # All real-time logic (see Section 5)
+    └── index.js                     # Real-time WebRTC, chat, and Avro caption stream emitter
+```
+
+### Cognitive AI Microservice (`ai-service/`)
+In alignment with the next-generation architecture (`newArchitecture.md`), all AI workloads are separated into an autonomous microservice with Apache Avro (`.avsc`) binary contracts:
+
+```
+ai-service/
+├── Dockerfile                        # Production Alpine container definition
+├── package.json                      # Microservice manifest and scripts
+├── src/
+│   ├── server.js                     # Standalone HTTP & Avro server (port 5001)
+│   ├── app.js                        # Express app with Avro octet-stream & JSON parsers
+│   ├── schemas/                      # Production Apache Avro (.avsc) schemas
+│   │   ├── CaptionStreamEvent.avsc   # 71.4% wire bandwidth reduction (185B -> 53B)
+│   │   ├── TranslatedCaptionEvent.avsc # Multilingual translation subtitle contract
+│   │   ├── AudioTapEvent.avsc        # Raw Opus/PCM binary audio tap from SFU
+│   │   ├── SummaryRequestEvent.avsc  # Meeting summarization request contract
+│   │   ├── SummaryResponseEvent.avsc # Structured executive summary contract
+│   │   ├── ChatMessageEvent.avsc     # Chat message event
+│   │   └── RagContextEvent.avsc      # 30-second conversational chunk for pgvector HNSW
+│   ├── avro/                         # Registry with 64-bit FNV-1a fingerprints & Avro serializer
+│   ├── adapters/                     # Provider-Agnostic Abstraction Layer
+│   │   ├── summarization/            # Gemini 3.5/3.7/3.8 Flash + Structural Heuristic
+│   │   ├── translation/              # IndicTrans2 (IIT Madras) + Google + MyMemory
+│   │   ├── stt/                      # Faster-Whisper SFU Audio Tap
+│   │   └── tts/                      # Piper TTS (CPU ONNX)
+│   ├── services/                     # Business services (Summarization, Translation, Captions)
+│   └── client/
+│       └── ai-service.client.js      # Resilient Client SDK with Avro framing & local fallback
 ```
 
 ### REST API Endpoints

@@ -1,0 +1,15 @@
+{
+  "type": "record",
+  "name": "SummaryRequestEvent",
+  "namespace": "in.bhashabridge.events",
+  "doc": "Request event for meeting executive summarization",
+  "fields": [
+    { "name": "requestId", "type": "string" },
+    { "name": "meetingId", "type": "string" },
+    { "name": "transcriptText", "type": "string" },
+    { "name": "targetLanguage", "type": "string", "default": "en" },
+    { "name": "preferredModel", "type": "string", "default": "gemini-3.7-flash" },
+    { "name": "timestamp", "type": "long" }
+  ]
+}
+

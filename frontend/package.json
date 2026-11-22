@@ -22,5 +22,9 @@
     "@tailwindcss/postcss": "^4",
     "eslint": "^9",
     "eslint-config-next": "16.3.4"
+  },
+  "optionalDependencies": {
+    "@next/swc-linux-x64-gnu": "^16.4.3",
+    "lightningcss-linux-x64-gnu": "^1.33.0"
   }
 }

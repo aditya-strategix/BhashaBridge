@@ -1,0 +1,16 @@
+{
+  "type": "record",
+  "name": "TranslatedCaptionEvent",
+  "namespace": "in.bhashabridge.events",
+  "doc": "Multilingual translated subtitle frame broadcast to meeting participants",
+  "fields": [
+    { "name": "eventId", "type": "string" },
+    { "name": "originalEventId", "type": "string" },
+    { "name": "meetingId", "type": "string" },
+    { "name": "speakerId", "type": "string" },
+    { "name": "translations", "type": { "type": "map", "values": "string" } },
+    { "name": "processingLatencyMs", "type": "int" },
+    { "name": "timestamp", "type": "long" }
+  ]
+}
+

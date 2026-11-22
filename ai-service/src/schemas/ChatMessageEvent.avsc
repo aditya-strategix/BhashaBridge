@@ -1,0 +1,15 @@
+{
+  "type": "record",
+  "name": "ChatMessageEvent",
+  "namespace": "in.bhashabridge.events",
+  "doc": "Chat message event before translation",
+  "fields": [
+    { "name": "messageId", "type": "string" },
+    { "name": "meetingId", "type": "string" },
+    { "name": "senderId", "type": "string" },
+    { "name": "text", "type": "string" },
+    { "name": "language", "type": "string" },
+    { "name": "timestamp", "type": "long" }
+  ]
+}
+

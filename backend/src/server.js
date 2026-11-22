@@ -15,6 +15,6 @@ const io = setupSocket(server);
 global.prisma = prisma;
 global.io = io;
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
 });

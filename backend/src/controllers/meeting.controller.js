@@ -10,7 +10,7 @@ const generateMeetingCode = (orgAccessCode) => {
   return `bha-${randLetters(4)}-${randLetters(3)}`;
 };
 
-const AIService = require('../services/ai.service');
+const aiClient = require('../clients/ai.client');
 const { sendMeetingInvitation } = require('../services/email.service');
 
 const { createClient } = require('redis');
@@ -217,7 +217,7 @@ exports.getSummary = async (req, res) => {
 
       // 3. Generate new summary via Gemini
       console.log(`[Summary Cache] No cache found for meeting ${meeting.id}. Generating summary via Gemini...`);
-      const summary = await AIService.summarizeTranscript(transcriptText, targetLang);
+      const summary = await aiClient.summarizeTranscript(transcriptText, targetLang, { meetingId: meeting.id });
 
       // 4. Save to Redis / Valkey Cache (86400s = 24hr TTL for completed meetings, 300s = 5min TTL for ongoing meetings)
       if (cache) {

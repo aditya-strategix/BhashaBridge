@@ -1,0 +1,17 @@
+{
+  "type": "record",
+  "name": "RagContextEvent",
+  "namespace": "in.bhashabridge.events",
+  "doc": "30-second conversational chunk for semantic embedding and fast pgvector HNSW indexing",
+  "fields": [
+    { "name": "chunkId", "type": "string" },
+    { "name": "meetingId", "type": "string" },
+    { "name": "speakerId", "type": "string" },
+    { "name": "speakerName", "type": "string" },
+    { "name": "content", "type": "string" },
+    { "name": "language", "type": "string" },
+    { "name": "startTime", "type": "long" },
+    { "name": "endTime", "type": "long" }
+  ]
+}
+
