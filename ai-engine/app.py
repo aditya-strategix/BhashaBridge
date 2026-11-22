@@ -173,7 +173,11 @@ def translate(req: TranslateRequest):
 
 # --- B. SPEECH-TO-TEXT (Faster-Whisper) ---
 @app.post("/v1/audio/transcriptions")
-async def transcribe(request: Request, file: Optional[UploadFile] = File(None)):
+async def transcribe(
+    request: Request,
+    file: Optional[UploadFile] = File(None),
+    language: Optional[str] = Form(None)
+):
     t0 = time.time()
     try:
         model = get_whisper()
@@ -186,12 +190,17 @@ async def transcribe(request: Request, file: Optional[UploadFile] = File(None)):
             raise HTTPException(status_code=400, detail="No audio data provided")
 
         audio_file = io.BytesIO(audio_bytes)
-        segments, info = model.transcribe(audio_file, beam_size=2)
+        transcribe_kwargs = {"beam_size": 2}
+        if language and language.strip():
+            transcribe_kwargs["language"] = language.strip().lower()
+
+        segments, info = model.transcribe(audio_file, **transcribe_kwargs)
         text = " ".join([seg.text for seg in segments]).strip()
 
         return {
             "text": text,
-            "language": info.language,
+            "language": language.strip().lower() if (language and language.strip()) else info.language,
+            "detected_language": info.language,
             "duration": getattr(info, 'duration', 0.0),
             "latency_ms": int((time.time() - t0) * 1000)
         }
