@@ -23,6 +23,95 @@ const getApiUrl = () => getApiBaseUrl();
 const SOCKET_URL = getSocketUrl();
 const API_URL = getApiUrl();
 
+// PipeWire/WirePlumber sometimes exposes a Bluetooth *output monitor* as the
+// default "microphone". Capturing it records speaker/TTS audio instead of the
+// user's voice (the classic "you you you" feedback loop). Detect and avoid it.
+const isMonitorAudioTrack = (track) => /monitor|loopback|output/i.test(track?.label || '');
+
+async function acquireNonMonitorMicrophone() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error('getUserMedia is not supported in this browser');
+  }
+
+  const first = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const firstTrack = first.getAudioTracks?.()[0];
+  if (!firstTrack || !isMonitorAudioTrack(firstTrack)) {
+    return first;
+  }
+
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const candidates = devices.filter(
+      (device) => device.kind === 'audioinput'
+        && device.deviceId
+        && !isMonitorAudioTrack({ label: device.label })
+    );
+    for (const device of candidates) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { deviceId: { exact: device.deviceId } }
+        });
+        first.getTracks().forEach((track) => { try { track.stop(); } catch (_) {} });
+        console.log('[Mic] Switched away from monitor to:', device.label || device.deviceId);
+        return stream;
+      } catch (_) {}
+    }
+  } catch (_) {}
+
+  console.warn('[Mic] Default input looks like a monitor and no alternative was found:', firstTrack.label);
+  return first;
+}
+
+function downsampleTo16k(samples, inputSampleRate) {
+  if (!inputSampleRate || inputSampleRate === 16000) return samples;
+  const ratio = inputSampleRate / 16000;
+  const newLength = Math.round(samples.length / ratio);
+  const result = new Float32Array(newLength);
+  let offsetResult = 0;
+  let offsetBuffer = 0;
+  while (offsetResult < result.length) {
+    const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+    let accum = 0;
+    let count = 0;
+    for (let i = offsetBuffer; i < nextOffsetBuffer && i < samples.length; i++) {
+      accum += samples[i];
+      count++;
+    }
+    result[offsetResult] = count > 0 ? accum / count : 0;
+    offsetResult++;
+    offsetBuffer = nextOffsetBuffer;
+  }
+  return result;
+}
+
+function encodeWav(samples, sampleRate = 16000) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+  const writeString = (offset, str) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM format
+  view.setUint16(22, 1, true); // Mono channel
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true); // 16-bit
+  writeString(36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++, offset += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+  return new Uint8Array(buffer);
+}
+
 const BCP47_LANG_MAP = {
   en: 'en-US',
   hi: 'hi-IN',
@@ -185,6 +274,14 @@ export default function MeetingRoom() {
   const [currentCaption, setCurrentCaption] = useState(null);
   const [spokenLanguage, setSpokenLanguage] = useState(useAuthStore.getState().user?.language || 'en');
   const [isDemoActive, setIsDemoActive] = useState(false);
+  const isDemoActiveRef = useRef(false);
+  const [showCustomSpeech, setShowCustomSpeech] = useState(false);
+  const [customSpeechText, setCustomSpeechText] = useState('');
+  const [customSpeechLang, setCustomSpeechLang] = useState('hi');
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
+  const micVolumeRef = useRef(0);
+  const [isSpeakingLive, setIsSpeakingLive] = useState(false);
+  const [speechStatusText, setSpeechStatusText] = useState('');
   const [isTtsEnabled, setIsTtsEnabled] = useState(true);
   const [participantStatus, setParticipantStatus] = useState(null);
   const [participantRole, setParticipantRole] = useState(null);
@@ -207,6 +304,9 @@ export default function MeetingRoom() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const meetingStartTimeRef = useRef(null);
   const [micVolume, setMicVolume] = useState(0);
+  const [micTestStatus, setMicTestStatus] = useState('idle');
+  const [micTestError, setMicTestError] = useState('');
+  const [micRevision, setMicRevision] = useState(0);
   const membersToggleBtnRef = useRef(null);
 
   useEffect(() => {
@@ -237,31 +337,67 @@ export default function MeetingRoom() {
 
   useEffect(() => {
     if (!stream || !isAudioOn) {
+      micVolumeRef.current = 0;
       setMicVolume(0);
       return;
     }
     let audioContext;
     let animId;
+    let removeGesture = null;
+
+    const audioTrack = stream.getAudioTracks?.()[0];
+    console.log('[Mic Meter] track:', audioTrack ? {
+      readyState: audioTrack.readyState,
+      enabled: audioTrack.enabled,
+      muted: audioTrack.muted,
+      label: audioTrack.label
+    } : 'none');
+
     try {
       audioContext = new (window.AudioContext || window.webkitAudioContext)();
       const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 64;
+      analyser.fftSize = 256;
       const source = audioContext.createMediaStreamSource(stream);
       source.connect(analyser);
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const dataArray = new Uint8Array(analyser.fftSize);
+
+      const resume = () => {
+        if (audioContext && audioContext.state === 'suspended') {
+          audioContext.resume().catch(() => {});
+        }
+      };
+      resume();
+      window.addEventListener('pointerdown', resume, { passive: true });
+      window.addEventListener('keydown', resume);
+      removeGesture = () => {
+        window.removeEventListener('pointerdown', resume);
+        window.removeEventListener('keydown', resume);
+      };
 
       const updateVolume = () => {
-        analyser.getByteFrequencyData(dataArray);
-        const sum = dataArray.reduce((acc, val) => acc + val, 0);
-        const avg = sum / dataArray.length;
-        setMicVolume(Math.min(100, Math.round((avg / 128) * 100)));
+        analyser.getByteTimeDomainData(dataArray);
+        let sumSquares = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          const x = (dataArray[i] - 128) / 128;
+          sumSquares += x * x;
+        }
+        const rms = Math.sqrt(sumSquares / dataArray.length);
+        const vol = Math.min(100, Math.round(rms * 200));
+        micVolumeRef.current = vol;
+        setMicVolume(vol);
         animId = requestAnimationFrame(updateVolume);
       };
       updateVolume();
-    } catch (_) {}
+      setTimeout(() => {
+        console.log('[Mic Meter] context:', audioContext?.state);
+      }, 1200);
+    } catch (err) {
+      console.log('[Mic Meter] failed:', err?.message);
+    }
 
     return () => {
       if (animId) cancelAnimationFrame(animId);
+      if (removeGesture) removeGesture();
       if (audioContext) {
         try { audioContext.close(); } catch (_) {}
       }
@@ -283,6 +419,8 @@ export default function MeetingRoom() {
   const captionTimerRef = useRef(null);
   const lastTtsPlaybackRef = useRef({ text: '', timestamp: 0 });
   const lastTtsAtRef = useRef(0);
+  const pendingAudioPlaybackRef = useRef(null);
+  const audioUnlockedRef = useRef(false);
   const demoTimerRef = useRef(null);
   const lastSpeechEmitRef = useRef({ text: '', timestamp: 0 });
   const myLastSpokenTextRef = useRef('');
@@ -308,40 +446,8 @@ export default function MeetingRoom() {
     }
   }, []);
 
-  useEffect(() => {
-    // Unlock Web Audio / SpeechSynthesis / HTMLAudio on first user gesture
-    const unlockAudio = () => {
-      if (typeof window !== 'undefined') {
-        if ('speechSynthesis' in window) {
-          try {
-            const u = new SpeechSynthesisUtterance(' ');
-            u.volume = 0.01;
-            window.speechSynthesis.speak(u);
-          } catch (_) {}
-        }
-        try {
-          const AudioCtx = window.AudioContext || window.webkitAudioContext;
-          if (AudioCtx) {
-            const ctx = new AudioCtx();
-            if (ctx.state === 'suspended') {
-              ctx.resume();
-            }
-          }
-        } catch (_) {}
-        try {
-          const silentAudio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==');
-          silentAudio.volume = 0.01;
-          silentAudio.play().catch(() => {});
-        } catch (_) {}
-      }
-    };
-    window.addEventListener('touchstart', unlockAudio, { once: true, passive: true });
-    window.addEventListener('click', unlockAudio, { once: true, passive: true });
-    return () => {
-      window.removeEventListener('touchstart', unlockAudio);
-      window.removeEventListener('click', unlockAudio);
-    };
-  }, []);
+  // Audio unlock is installed after playTtsAudio is defined (see below) so a
+  // blocked first playback can be retried on the next user gesture.
 
   const isDummyAudioText = (t) => {
     if (!t || !t.trim()) return true;
@@ -355,15 +461,21 @@ export default function MeetingRoom() {
     // Global guard: never chain TTS clips faster than this. Prevents echo
     // feedback from turning into a rapid "you you you" loop.
     const startedAt = Date.now();
-    if (!options.force && startedAt - lastTtsAtRef.current < 1500) return;
+    if (!options.force && startedAt - lastTtsAtRef.current < 500) return;
     lastTtsAtRef.current = startedAt;
 
-    // Remember what we are about to say so the microphone recognizer can
-    // discard its own echo, and stop any in-flight recognition immediately.
-    lastTtsPlaybackRef.current = { text: cleanText.toLowerCase(), timestamp: startedAt };
-    if (activeSpeechRecRef.current) {
-      try { activeSpeechRecRef.current.abort(); } catch (_) {}
+    // Safety watchdog: ensure isTtsPlayingRef never gets stuck
+    if (typeof window !== 'undefined') {
+      if (window._ttsPlayingTimeout) clearTimeout(window._ttsPlayingTimeout);
+      window._ttsPlayingTimeout = setTimeout(() => {
+        isTtsPlayingRef.current = false;
+      }, 5000);
     }
+
+    // Remember what we are about to say so the microphone recognizer can
+    // discard its own echo. Do NOT abort recognition here: that made the mic
+    // deaf for several seconds after every TTS clip (including Test Audio).
+    lastTtsPlaybackRef.current = { text: cleanText.toLowerCase(), timestamp: startedAt };
 
     const shortLang = (targetLangCode || 'en').toLowerCase().split('-')[0];
     let backendAttempted = false;
@@ -450,7 +562,15 @@ export default function MeetingRoom() {
             isTtsPlayingRef.current = false;
             return;
           }
-          console.warn('[Meeting TTS] SpeechSynthesis error:', e);
+          // Autoplay policy: no gesture yet on this tab. Ask for a tap and
+          // retry the same caption once audio is unlocked.
+          if (errType === 'not-allowed') {
+            pendingAudioPlaybackRef.current = { text: cleanText, lang: targetLangCode, bcp: bcpLang };
+            setAlertMessage('Tap anywhere once to enable translated audio.');
+            isTtsPlayingRef.current = false;
+            return;
+          }
+          console.warn('[Meeting TTS] SpeechSynthesis error:', errType || e);
           if (!allowAnyVoice && !backendAttempted) {
             playViaBackend();
           } else {
@@ -460,12 +580,12 @@ export default function MeetingRoom() {
 
         // Watchdog: if synthesis stalls without speaking, try the neural engine.
         setTimeout(() => {
-          if (!endedOrErrored && !window.speechSynthesis.speaking && !backendAttempted) {
+          if (!endedOrErrored && !backendAttempted) {
             console.warn('[Meeting TTS] SpeechSynthesis watchdog fired, falling back to backend');
             try { window.speechSynthesis.cancel(); } catch (_) {}
             playViaBackend();
           }
-        }, 1800);
+        }, 700);
 
         window.speechSynthesis.speak(utterance);
         return true;
@@ -482,6 +602,7 @@ export default function MeetingRoom() {
       if (backendAttempted) return;
       backendAttempted = true;
       isTtsPlayingRef.current = true;
+      let backendRetried = false;
 
       try {
         stopActive();
@@ -494,7 +615,8 @@ export default function MeetingRoom() {
         const url = `${backendUrl}/tts?text=${encodeURIComponent(cleanText)}&lang=${shortLang}`;
         const audio = new Audio(url);
         audio.preload = 'auto';
-        audio.crossOrigin = 'anonymous';
+        // Do not set crossOrigin: plain media playback does not need CORS and
+        // setting it turns a missing header into a hard load failure.
         window._activeTtsAudio = audio;
 
         audio.onended = () => {
@@ -505,6 +627,19 @@ export default function MeetingRoom() {
         };
         audio.onerror = () => {
           if (audio.__bbStopped) return;
+          // One retry covers transient network/engine hiccups (e.g. a 503 while
+          // the TTS model is loading) before falling back to a native voice.
+          if (!backendRetried) {
+            backendRetried = true;
+            try {
+              audio.src = `${url}&retry=1`;
+              audio.load();
+              const p = audio.play();
+              if (p && typeof p.catch === 'function') p.catch(() => {});
+              return;
+            } catch (_) {}
+          }
+          console.warn('[Meeting TTS] Backend audio error:', audio.error?.code);
           console.warn('[Meeting TTS] Neural TTS unavailable. Using an available real browser voice.');
           if (window._activeTtsAudio === audio) {
             window._activeTtsAudio = null;
@@ -524,7 +659,14 @@ export default function MeetingRoom() {
             if (audio.__bbStopped || e?.name === 'AbortError') {
               return;
             }
-            console.warn('[Meeting TTS] Backend audio play failed (autoplay or network):', e);
+            // Autoplay policy: require one tap, then retry the same phrase.
+            if (e?.name === 'NotAllowedError') {
+              pendingAudioPlaybackRef.current = { text: cleanText, lang: targetLangCode, bcp: bcpLang };
+              setAlertMessage('Tap anywhere once to enable translated audio.');
+              isTtsPlayingRef.current = false;
+              return;
+            }
+            console.warn('[Meeting TTS] Backend audio play failed (autoplay or network):', e?.name, e?.message);
             if (!speakNative(true)) {
               isTtsPlayingRef.current = false;
             }
@@ -538,16 +680,60 @@ export default function MeetingRoom() {
       }
     };
 
-    // Browsers on desktop (Chrome, Edge, Firefox, Safari) only reliably ship
-    // native voices for en, hi, es, fr, de, zh. Regional languages such as
-    // Tamil, Telugu, Bengali, Marathi, etc. have no OS voice by default, so
-    // route them straight to the neural Indic-TTS backend for authentic speech.
-    const NATIVE_VOICE_LANGS = new Set(['en', 'hi', 'es', 'fr', 'de', 'zh']);
-    if (NATIVE_VOICE_LANGS.has(shortLang) && speakNative(false)) {
-      return;
-    }
+    // Primary path: Use high-fidelity sovereign neural GPU TTS (Bhashini Indic-TTS on :5000/api/tts).
+    // If neural backend encounters an error, playViaBackend automatically falls back to speakNative(true).
     playViaBackend();
   }, []);
+
+  useEffect(() => {
+    // Browsers gate audio behind a user gesture. Keep listening (not once) and
+    // retry a playback that was blocked with NotAllowedError.
+    const unlockAudio = () => {
+      if (typeof window === 'undefined') return;
+      if ('speechSynthesis' in window) {
+        try {
+          const u = new SpeechSynthesisUtterance(' ');
+          u.volume = 0.01;
+          window.speechSynthesis.speak(u);
+        } catch (_) {}
+      }
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          if (ctx.state === 'suspended') ctx.resume();
+        }
+      } catch (_) {}
+      try {
+        const silentAudio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==');
+        silentAudio.volume = 0.01;
+        silentAudio.play().catch(() => {});
+      } catch (_) {}
+
+      audioUnlockedRef.current = true;
+      setAudioUnlocked(true);
+      if (typeof window !== 'undefined') window.__bbUnlockAudio = unlockAudio;
+      const pending = pendingAudioPlaybackRef.current;
+      if (pending) {
+        pendingAudioPlaybackRef.current = null;
+        setTimeout(() => {
+          try { playTtsAudio(pending.text, pending.lang, pending.bcp, { force: true }); } catch (_) {}
+        }, 80);
+      }
+    };
+
+    window.addEventListener('touchstart', unlockAudio, { passive: true });
+    window.addEventListener('pointerdown', unlockAudio, { passive: true });
+    window.addEventListener('click', unlockAudio, { passive: true });
+    window.addEventListener('keydown', unlockAudio);
+    unlockAudio();
+    return () => {
+      window.removeEventListener('touchstart', unlockAudio);
+      window.removeEventListener('pointerdown', unlockAudio);
+      window.removeEventListener('click', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
+    };
+  }, [playTtsAudio]);
 
   const handleCopyInviteLink = () => {
     const url = `${window.location.origin}/meeting/${meetingId}`;
@@ -1206,12 +1392,11 @@ export default function MeetingRoom() {
         }
 
         let currentStream;
-        const audioConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
         try {
-          currentStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: audioConstraints });
+          currentStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         } catch {
           try {
-            currentStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: audioConstraints });
+            currentStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
             setIsVideoOn(false);
             videoRef.current = false;
           } catch {
@@ -1221,10 +1406,33 @@ export default function MeetingRoom() {
             setIsAudioOn(false);
             videoRef.current = false;
             audioRef.current = false;
+            setAlertMessage('Microphone unavailable. Please allow microphone access and refresh the page.');
           }
         }
         currentStream.getAudioTracks().forEach(t => { t.enabled = audioRef.current; });
         currentStream.getVideoTracks().forEach(t => { t.enabled = videoRef.current; });
+
+        // If the browser defaulted to a PipeWire output monitor, replace it
+        // with a real microphone (otherwise we record our own TTS output).
+        try {
+          const defaultAudio = currentStream.getAudioTracks()[0];
+          if (defaultAudio && isMonitorAudioTrack(defaultAudio)) {
+            const micStream = await acquireNonMonitorMicrophone();
+            const micTrack = micStream.getAudioTracks()[0];
+            if (micTrack) {
+              currentStream.getAudioTracks().forEach((t) => {
+                try { t.stop(); } catch (_) {}
+                currentStream.removeTrack(t);
+              });
+              micTrack.enabled = audioRef.current;
+              currentStream.addTrack(micTrack);
+              console.log('[Mic] Replaced monitor with real microphone:', micTrack.label);
+            }
+          }
+        } catch (micErr) {
+          console.warn('[Mic] Monitor replacement failed:', micErr.message);
+        }
+
         setStream(currentStream);
         streamRef.current = currentStream;
         if (userVideo.current) userVideo.current.srcObject = currentStream;
@@ -1709,15 +1917,23 @@ export default function MeetingRoom() {
             const ttsEnabled = u.ttsEnabled ?? true;
             const ttsLang = u.ttsLang || 'original';
             
-            // Do not play TTS for own speech
-            if (ttsEnabled && data.speakerId !== u.id) {
+            // Do not play TTS for own speech. If testing on two tabs under same user, senderSocketId differentiates them.
+            const isOwnSpeech = Boolean(data.senderSocketId
+              ? (newSocket && data.senderSocketId === newSocket.id)
+              : (u?.id && String(data.speakerId) === String(u.id)));
+
+            // Allow playback if not own speech, OR if testing alone in 1-person room with demo active
+            const allowPlayback = !isOwnSpeech || (peersRef.current.length === 0 && (isDemoActiveRef.current || isDemoActive));
+
+            if (ttsEnabled && allowPlayback) {
+              const normSrc = String(data.sourceLanguage || 'en').trim().toLowerCase().split(/[-_]/)[0];
+              const normUser = String(u.language || 'en').trim().toLowerCase().split(/[-_]/)[0];
               let targetLangCode = ttsLang;
-              if (targetLangCode === 'original' && u.language && u.language !== data.sourceLanguage) {
-                targetLangCode = u.language;
+              if (targetLangCode === 'original') {
+                targetLangCode = (normUser && normUser !== normSrc) ? normUser : (normSrc === 'hi' ? 'en' : 'hi');
               }
-              const textToSpeak = (targetLangCode !== 'original' && data.translations?.[targetLangCode])
-                ? data.translations[targetLangCode]
-                : (ttsLang === 'original' ? data.text : (data.translations?.[ttsLang] || data.text));
+              const shortTarget = String(targetLangCode || 'en').trim().toLowerCase().split(/[-_]/)[0];
+              const textToSpeak = (data.translations?.[targetLangCode] || data.translations?.[shortTarget] || data.text);
 
               if (textToSpeak && textToSpeak.trim()) {
                 const cleanText = textToSpeak.trim();
@@ -1739,14 +1955,16 @@ export default function MeetingRoom() {
                   return;
                 }
 
-                const actualLangCode = targetLangCode === 'original' ? (data.sourceLanguage || 'en') : targetLangCode;
+                const actualLangCode = (data.translations?.[targetLangCode] || data.translations?.[shortTarget])
+                  ? shortTarget
+                  : normSrc;
                 const bcpLang = BCP47_LANG_MAP[actualLangCode] || actualLangCode || 'en-US';
                 const normKey = `${actualLangCode}:${cleanText.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim()}`;
                 const now = Date.now();
 
-                // 1. Deduplication: Don't repeat identical audio within 5 seconds
+                // 1. Deduplication: Don't repeat identical audio within 2.5 seconds
                 const lastPlayed = recentTtsMapRef.current.get(normKey) || 0;
-                if (now - lastPlayed < 10000) {
+                if (now - lastPlayed < 2500) {
                   return;
                 }
                 recentTtsMapRef.current.set(normKey, now);
@@ -1756,12 +1974,13 @@ export default function MeetingRoom() {
                   }
                 }
 
-                // 2. Self-echo suppression: If this sentence matches what I just spoke, skip
-                if (myLastSpokenTextRef.current && cleanText.toLowerCase().includes(myLastSpokenTextRef.current) && (now - myLastSpokenTimeRef.current < 6000)) {
+                // 2. Self-echo suppression: If this sentence is an exact repeat of what I spoke recently, skip
+                if (myLastSpokenTextRef.current && cleanText.toLowerCase().trim() === myLastSpokenTextRef.current.trim() && (now - myLastSpokenTimeRef.current < 4000)) {
                   return;
                 }
 
-                // 3. Play TTS audio via native speech synthesis or backend /api/tts
+                // 3. Play TTS audio via sovereign neural GPU backend /api/tts
+                console.log(`[Meeting TTS] Playing ${actualLangCode} caption from ${data.speakerName || data.speakerId}: "${cleanText.slice(0, 60)}"`);
                 playTtsAudio(cleanText, actualLangCode, bcpLang);
               }
             }
@@ -1839,12 +2058,21 @@ export default function MeetingRoom() {
   // Speech recognition - starts when mic is unmuted and participant is admitted
   useEffect(() => {
     if (!socket || !user) return;
-    if (!isAudioOn) return;
+    if (!isAudioOn) {
+      console.log('[Meeting STT] Mic is muted; speech recognition disabled');
+      return;
+    }
     if (meetingEnded) return;
-    if (participantStatus !== 'ADMITTED' && !isHostOrCoHost) return;
+    if (participantStatus !== 'ADMITTED' && !isHostOrCoHost) {
+      console.log('[Meeting STT] Participant not admitted yet; recognition disabled');
+      return;
+    }
 
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) return;
+    if (!SR) {
+      console.log('[Meeting STT] SpeechRecognition API not available in this browser');
+      return;
+    }
     if (activeSpeechRecRef.current) {
       try { activeSpeechRecRef.current.abort(); } catch (_) {}
       activeSpeechRecRef.current = null;
@@ -1855,49 +2083,80 @@ export default function MeetingRoom() {
     rec.continuous = !isMobile;
     rec.interimResults = !isMobile;
     rec.lang = BCP47_LANG_MAP[spokenLanguage] || spokenLanguage || 'en-US';
+    console.log('[Meeting STT] Listening in', rec.lang);
     let stopped = false;
     let restartTimer = null;
+    let interimDebounceTimer = null;
+    let pendingInterimText = '';
 
-    rec.onresult = (ev) => {
-      // Acoustic echo suppression: never transcribe our own TTS output.
-      if (isTtsPlayingRef.current || (typeof window !== 'undefined' && window.speechSynthesis?.speaking)) {
+    const emitSpeech = (txt) => {
+      if (!txt || !txt.trim()) return;
+      const clean = txt.trim();
+      const norm = clean.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
+      if (!norm) return;
+
+      // Echo suppression
+      const lastTts = lastTtsPlaybackRef.current;
+      const ttsRecentlyPlayed = Boolean(lastTts.text) && (Date.now() - lastTts.timestamp < 2500);
+      if (ttsRecentlyPlayed && (lastTts.text.includes(norm) || (norm.length > 5 && lastTts.text.startsWith(norm)))) {
         return;
       }
-      const lastTts = lastTtsPlaybackRef.current;
-      const ttsRecentlyPlayed = Boolean(lastTts.text) && (Date.now() - lastTts.timestamp < 6000);
+
+      const now = Date.now();
+      if (lastSpeechEmitRef.current.text === norm && (now - lastSpeechEmitRef.current.timestamp < 2000)) {
+        return;
+      }
+      lastSpeechEmitRef.current = { text: norm, timestamp: now };
+      myLastSpokenTextRef.current = norm;
+      myLastSpokenTimeRef.current = now;
+
+      console.log('[Meeting STT] Emitting caption:', clean.slice(0, 80));
+      socket.emit('caption:text', {
+        meetingId,
+        speakerId: user?.id || socket.id,
+        text: clean,
+        language: spokenLanguage
+      });
+      pendingInterimText = '';
+    };
+
+    rec.onresult = (ev) => {
+      // Acoustic echo suppression: never transcribe while our own TTS output is actively synthesizing
+      if (isTtsPlayingRef.current) {
+        return;
+      }
+
+      let latestTranscript = '';
+      let isFinal = false;
 
       for (let i = ev.resultIndex; i < ev.results.length; ++i) {
-        if (ev.results[i].isFinal || isMobile) {
-          const txt = ev.results[i][0].transcript.trim();
-          if (txt) {
-            const norm = txt.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
-            if (!norm) continue;
-
-            // Delayed echo from speakers often arrives after playback ended.
-            // Short fragments ("you", "the") and substrings of the phrase we
-            // just spoke are almost always our own TTS, not real speech.
-            if (ttsRecentlyPlayed) {
-              const isEcho = norm.length <= 4
-                || lastTts.text.includes(norm)
-                || norm.includes(lastTts.text)
-                || lastTts.text.startsWith(norm);
-              if (isEcho) {
-                continue;
-              }
-            }
-
-            const now = Date.now();
-            // Outgoing deduplication: Do not re-emit duplicate sentence within 3.5 seconds
-            if (lastSpeechEmitRef.current.text === norm && (now - lastSpeechEmitRef.current.timestamp < 8000)) {
-              continue;
-            }
-            lastSpeechEmitRef.current = { text: norm, timestamp: now };
-            myLastSpokenTextRef.current = norm;
-            myLastSpokenTimeRef.current = now;
-
-            socket.emit('caption:text', { meetingId, speakerId: user.id, text: txt, language: spokenLanguage });
+        const item = ev.results[i];
+        if (item && item[0] && item[0].transcript) {
+          const t = item[0].transcript.trim();
+          if (t) {
+            latestTranscript = t;
+            if (item.isFinal) isFinal = true;
           }
         }
+      }
+
+      if (!latestTranscript) return;
+
+      if (isFinal || isMobile) {
+        if (interimDebounceTimer) {
+          clearTimeout(interimDebounceTimer);
+          interimDebounceTimer = null;
+        }
+        emitSpeech(latestTranscript);
+      } else {
+        // Desktop interim debounce: emit if user pauses for 900ms without waiting for Chrome's delayed isFinal
+        pendingInterimText = latestTranscript;
+        if (interimDebounceTimer) clearTimeout(interimDebounceTimer);
+        interimDebounceTimer = setTimeout(() => {
+          if (pendingInterimText) {
+            emitSpeech(pendingInterimText);
+          }
+        }, 900);
       }
     };
     rec.onerror = (e) => {
@@ -1911,28 +2170,218 @@ export default function MeetingRoom() {
       }
     };
     rec.onend = () => {
+      if (interimDebounceTimer) {
+        clearTimeout(interimDebounceTimer);
+        interimDebounceTimer = null;
+      }
+      if (pendingInterimText) {
+        emitSpeech(pendingInterimText);
+      }
       if (!stopped && audioRef.current) {
-        // If TTS just started, wait for it to finish before listening again.
-        const lastTts = lastTtsPlaybackRef.current;
-        const ttsActive = isTtsPlayingRef.current
-          || (Boolean(lastTts.text) && Date.now() - lastTts.timestamp < 2000);
-        const restartDelay = ttsActive ? 2500 : (isMobile ? 150 : 350);
         restartTimer = setTimeout(() => {
           if (!stopped && audioRef.current) {
-            try { rec.start(); } catch (_) {}
+            try { rec.start(); } catch (e) {
+              console.log('[Meeting STT] restart failed:', e?.message || e);
+            }
           }
-        }, restartDelay);
+        }, isMobile ? 150 : 350);
       }
     };
-    try { rec.start(); } catch (_) {}
+    try { rec.start(); } catch (e) {
+      console.log('[Meeting STT] start failed:', e?.message || e);
+    }
     return () => {
       stopped = true;
+      if (interimDebounceTimer) clearTimeout(interimDebounceTimer);
       if (restartTimer) clearTimeout(restartTimer);
       try { rec.abort(); } catch (_) {
         try { rec.stop(); } catch (_) {}
       }
     };
-  }, [socket, user?.id, isAudioOn, spokenLanguage, meetingId, participantStatus, isHostOrCoHost, meetingEnded]);
+  }, [socket, user?.id, isAudioOn, spokenLanguage, meetingId, participantStatus, isHostOrCoHost, meetingEnded, micRevision]);
+
+  // Sovereign GPU Faster-Whisper Web Audio VAD Speech Ingress
+  useEffect(() => {
+    if (!socket || !isAudioOn || meetingEnded) return;
+
+    const mediaStream = streamRef.current || stream;
+    const audioTrack = mediaStream?.getAudioTracks?.()[0];
+    if (!audioTrack || !audioTrack.enabled) return;
+
+    let audioCtx = null;
+    let sourceNode = null;
+    let processorNode = null;
+    let silenceGain = null;
+    let isCancelled = false;
+
+    let speechChunks = [];
+    let isSpeaking = false;
+    let silenceTimer = null;
+    let maxSpeechTimer = null;
+
+    const sendSpeechBuffer = () => {
+      if (isCancelled || speechChunks.length === 0) return;
+      if (isTtsPlayingRef.current) {
+        speechChunks = [];
+        return;
+      }
+
+      const totalLength = speechChunks.reduce((acc, c) => acc + c.length, 0);
+      const sampleRate = audioCtx?.sampleRate || 44100;
+      const minSamples = Math.round(sampleRate * 0.4); // At least 0.4s
+
+      if (totalLength < minSamples) {
+        speechChunks = [];
+        return;
+      }
+
+      const merged = new Float32Array(totalLength);
+      let offset = 0;
+      for (const chunk of speechChunks) {
+        merged.set(chunk, offset);
+        offset += chunk.length;
+      }
+      speechChunks = [];
+
+      const downsampled = downsampleTo16k(merged, sampleRate);
+      const wavBytes = encodeWav(downsampled, 16000);
+
+      let binary = '';
+      const len = wavBytes.byteLength;
+      for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(wavBytes[i]);
+      }
+      const base64 = btoa(binary);
+
+      console.log(`[Meeting VAD] Emitting speech WAV (${(downsampled.length / 16000).toFixed(1)}s) to Faster-Whisper`);
+      setSpeechStatusText('Transcribing speech...');
+
+      socket.emit('caption:audio', {
+        meetingId,
+        speakerId: user?.id || socket.id,
+        speakerName: user?.name,
+        language: spokenLanguage,
+        audioBase64: base64
+      });
+
+      setTimeout(() => {
+        setSpeechStatusText('');
+      }, 2500);
+    };
+
+    try {
+      const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AudioCtxClass();
+
+      if (audioCtx.state === 'suspended') {
+        const resumeCtx = () => {
+          if (audioCtx && audioCtx.state === 'suspended') {
+            audioCtx.resume().catch(() => {});
+          }
+        };
+        window.addEventListener('pointerdown', resumeCtx, { once: true });
+        window.addEventListener('keydown', resumeCtx, { once: true });
+        audioCtx.resume().catch(() => {});
+      }
+
+      sourceNode = audioCtx.createMediaStreamSource(mediaStream);
+      processorNode = audioCtx.createScriptProcessor(4096, 1, 1);
+
+      silenceGain = audioCtx.createGain();
+      silenceGain.gain.value = 0;
+
+      processorNode.onaudioprocess = (e) => {
+        if (isCancelled || !audioRef.current) return;
+        const inputData = e.inputBuffer.getChannelData(0);
+
+        let sum = 0;
+        for (let i = 0; i < inputData.length; i++) {
+          sum += inputData[i] * inputData[i];
+        }
+        const rms = Math.sqrt(sum / inputData.length);
+        const vol = Math.min(100, Math.round(rms * 250));
+        micVolumeRef.current = vol;
+
+        if (isTtsPlayingRef.current) {
+          if (isSpeaking) {
+            isSpeaking = false;
+            setIsSpeakingLive(false);
+            speechChunks = [];
+          }
+          return;
+        }
+
+        const isVoiceEnergy = rms >= 0.012;
+
+        if (isVoiceEnergy) {
+          if (!isSpeaking) {
+            isSpeaking = true;
+            setIsSpeakingLive(true);
+            setSpeechStatusText('Speaking...');
+          }
+
+          if (silenceTimer) {
+            clearTimeout(silenceTimer);
+            silenceTimer = null;
+          }
+
+          speechChunks.push(new Float32Array(inputData));
+
+          if (!maxSpeechTimer) {
+            maxSpeechTimer = setTimeout(() => {
+              maxSpeechTimer = null;
+              if (isSpeaking) {
+                isSpeaking = false;
+                setIsSpeakingLive(false);
+                sendSpeechBuffer();
+              }
+            }, 6000);
+          }
+        } else if (isSpeaking) {
+          if (speechChunks.length < 150) {
+            speechChunks.push(new Float32Array(inputData));
+          }
+
+          if (!silenceTimer) {
+            silenceTimer = setTimeout(() => {
+              silenceTimer = null;
+              if (maxSpeechTimer) {
+                clearTimeout(maxSpeechTimer);
+                maxSpeechTimer = null;
+              }
+              isSpeaking = false;
+              setIsSpeakingLive(false);
+              sendSpeechBuffer();
+            }, 650);
+          }
+        }
+      };
+
+      sourceNode.connect(processorNode);
+      processorNode.connect(silenceGain);
+      silenceGain.connect(audioCtx.destination);
+    } catch (vadErr) {
+      console.warn('[Meeting VAD] Init error:', vadErr.message);
+    }
+
+    return () => {
+      isCancelled = true;
+      if (silenceTimer) clearTimeout(silenceTimer);
+      if (maxSpeechTimer) clearTimeout(maxSpeechTimer);
+      if (processorNode) {
+        try { processorNode.disconnect(); } catch (_) {}
+      }
+      if (sourceNode) {
+        try { sourceNode.disconnect(); } catch (_) {}
+      }
+      if (silenceGain) {
+        try { silenceGain.disconnect(); } catch (_) {}
+      }
+      if (audioCtx && audioCtx.state !== 'closed') {
+        try { audioCtx.close(); } catch (_) {}
+      }
+    };
+  }, [socket, stream, isAudioOn, meetingEnded, spokenLanguage, micRevision]);
 
   const toggleVideo = () => {
     if (videoLockedRef.current) {
@@ -1966,6 +2415,62 @@ export default function MeetingRoom() {
       sfuClientRef.current.setProducerPaused('audio', !nextAudio).catch(() => {});
     }
     if (socket) socket.emit('meeting:status_update', { isAudioOn: nextAudio, isVideoOn: videoRef.current });
+  };
+
+  const testAndUseMicrophone = async () => {
+    setMicTestStatus('testing');
+    setMicTestError('');
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('getUserMedia is not supported in this browser');
+      }
+      const fresh = await acquireNonMonitorMicrophone();
+      const track = fresh.getAudioTracks()[0];
+      if (!track) throw new Error('The browser returned no audio track');
+
+      const settings = typeof track.getSettings === 'function' ? track.getSettings() : null;
+      console.log('[Mic Test] track', {
+        label: track.label,
+        enabled: track.enabled,
+        muted: track.muted,
+        readyState: track.readyState,
+        settings
+      });
+
+      // Replace the meeting's audio track while keeping the existing video.
+      const old = streamRef.current || stream;
+      const videoTracks = old ? old.getVideoTracks() : [];
+      if (old) {
+        old.getAudioTracks().forEach((t) => {
+          try { t.stop(); } catch (_) {}
+        });
+      }
+      const merged = new MediaStream([track, ...videoTracks]);
+      setStream(merged);
+      streamRef.current = merged;
+      audioRef.current = true;
+      setIsAudioOn(true);
+      setMicRevision((rev) => rev + 1);
+      if (userVideo.current) userVideo.current.srcObject = merged;
+
+      // Publish the new track to the SFU if it is already carrying media.
+      const sfu = sfuClientRef.current;
+      if (sfu) {
+        if (sfu.audioProducer) {
+          await sfu.audioProducer.replaceTrack({ track }).catch(() => {});
+        } else if (sfu.sendTransport) {
+          sfu.audioProducer = await sfu.sendTransport
+            .produce({ track, stopTracks: false, appData: { source: 'mic' } })
+            .catch(() => null);
+        }
+      }
+
+      setMicTestStatus('ok');
+    } catch (err) {
+      console.error('[Mic Test] failed', err);
+      setMicTestStatus('error');
+      setMicTestError(`${err?.name || 'Error'}: ${err?.message || String(err)}`);
+    }
   };
 
   const updateUserSettings = (key, value) => {
@@ -2175,6 +2680,7 @@ export default function MeetingRoom() {
     const phrase = 'Hello, this is a live test of the BhashaBridge translation system.';
 
     setIsDemoActive(true);
+    isDemoActiveRef.current = true;
     setAlertMessage('Playing audio test phrase...');
 
     // Play locally as well: caption TTS intentionally skips the speaker's own
@@ -2193,8 +2699,40 @@ export default function MeetingRoom() {
     if (demoTimerRef.current) clearTimeout(demoTimerRef.current);
     demoTimerRef.current = setTimeout(() => {
       setIsDemoActive(false);
+      isDemoActiveRef.current = false;
       demoTimerRef.current = null;
+      isTtsPlayingRef.current = false;
+      try { window.speechSynthesis?.cancel(); } catch (_) {}
     }, 4000);
+  };
+
+  const handleDemoSpeech = (lang, text) => {
+    if (!socket) {
+      setAlertMessage('Meeting socket is not connected yet.');
+      return;
+    }
+    const clean = (text || '').trim();
+    if (!clean) return;
+
+    setIsDemoActive(true);
+    isDemoActiveRef.current = true;
+    setAlertMessage(`🎙️ Speaking Demo (${lang.toUpperCase()}): "${clean.slice(0, 45)}..."`);
+
+    socket.emit('caption:text', {
+      meetingId,
+      speakerId: user?.id || socket.id,
+      speakerName: user?.name || 'Demo Speaker',
+      text: clean,
+      language: lang
+    });
+
+    if (demoTimerRef.current) clearTimeout(demoTimerRef.current);
+    demoTimerRef.current = setTimeout(() => {
+      setIsDemoActive(false);
+      isDemoActiveRef.current = false;
+      demoTimerRef.current = null;
+      isTtsPlayingRef.current = false;
+    }, 5000);
   };
 
   useEffect(() => () => {
@@ -2823,8 +3361,150 @@ export default function MeetingRoom() {
               <Radio size={14} />
               <span>{isDemoActive ? 'Demo Playing...' : '⚡ Test Audio'}</span>
             </button>
+
+            {/* Demo Speech Hindi */}
+            <button
+              onClick={() => handleDemoSpeech('hi', 'नमस्ते डॉक्टर साहब, मुझे दो दिन से तेज बुखार है और सिर में दर्द है')}
+              className={styles.headerBtn}
+              title="Speak Hindi Demo into meeting pipeline"
+            >
+              <span>🇮🇳 Speak Hindi</span>
+            </button>
+
+            {/* Demo Speech English */}
+            <button
+              onClick={() => handleDemoSpeech('en', 'Hello doctor, I have a severe headache and sore throat')}
+              className={styles.headerBtn}
+              title="Speak English Demo into meeting pipeline"
+            >
+              <span>🇬🇧 Speak English</span>
+            </button>
+
+            {/* Quick Custom Speech Toggle */}
+            <button
+              onClick={() => setShowCustomSpeech(prev => !prev)}
+              className={`${styles.headerBtn} ${showCustomSpeech ? styles.headerBtnLive : ''}`}
+              title="Type custom phrase to speak in meeting"
+            >
+              <Mic size={14} />
+              <span>Type to Speak</span>
+            </button>
           </div>
         </header>
+
+        {/* Quick Custom Speech Input Bar */}
+        {showCustomSpeech && (
+          <div style={{
+            background: '#F7F5F0',
+            borderBottom: '2px solid #0A0A0A',
+            padding: '0.6rem 1.25rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.6rem',
+            zIndex: 100
+          }}>
+            <span style={{ fontSize: '0.82rem', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>💬 QUICK SPEECH:</span>
+            <select
+              value={customSpeechLang}
+              onChange={e => setCustomSpeechLang(e.target.value)}
+              style={{
+                padding: '0.4rem 0.6rem',
+                border: '1.5px solid #0A0A0A',
+                background: 'white',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.82rem'
+              }}
+            >
+              <option value="hi">Hindi (हिन्दी)</option>
+              <option value="en">English</option>
+              <option value="ta">Tamil (தமிழ்)</option>
+              <option value="bn">Bengali (বাংলা)</option>
+              <option value="te">Telugu (తెలుగు)</option>
+              <option value="mr">Marathi (मराठी)</option>
+              <option value="gu">Gujarati (ગુજરાતી)</option>
+            </select>
+            <input
+              type="text"
+              placeholder={customSpeechLang === 'hi' ? 'यहाँ हिन्दी में कुछ लिखें (उदा: नमस्ते मुझे बुखार है)...' : 'Type speech phrase in English or selected language...'}
+              value={customSpeechText}
+              onChange={e => setCustomSpeechText(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && customSpeechText.trim()) {
+                  handleDemoSpeech(customSpeechLang, customSpeechText);
+                  setCustomSpeechText('');
+                }
+              }}
+              style={{
+                flex: 1,
+                padding: '0.45rem 0.8rem',
+                border: '1.5px solid #0A0A0A',
+                fontSize: '0.88rem',
+                fontFamily: 'inherit',
+                outline: 'none'
+              }}
+            />
+            <button
+              onClick={() => {
+                if (customSpeechText.trim()) {
+                  handleDemoSpeech(customSpeechLang, customSpeechText);
+                  setCustomSpeechText('');
+                }
+              }}
+              style={{
+                background: '#0022FF',
+                color: 'white',
+                border: 'none',
+                padding: '0.45rem 1rem',
+                fontWeight: 700,
+                fontSize: '0.82rem',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-mono)'
+              }}
+            >
+              ⚡ Speak in Meeting
+            </button>
+            <button
+              onClick={() => setShowCustomSpeech(false)}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#666' }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
+        {/* Audio Autoplay Unlock Banner */}
+        {!audioUnlocked && (
+          <div
+            onClick={() => {
+              if (typeof window !== 'undefined' && window.__bbUnlockAudio) {
+                window.__bbUnlockAudio();
+              }
+              setAudioUnlocked(true);
+            }}
+            style={{
+              position: 'fixed',
+              top: '60px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 99999,
+              background: '#0022FF',
+              color: '#FFFFFF',
+              padding: '0.55rem 1.25rem',
+              borderRadius: '2px',
+              boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              fontWeight: 700,
+              fontSize: '0.82rem',
+              fontFamily: 'var(--font-mono)'
+            }}
+          >
+            <Volume2 size={16} />
+            <span>Click once to enable live translated audio output</span>
+          </div>
+        )}
 
         <main className={styles.main}>
           {/* === VIDEO STAGE === */}
@@ -2925,6 +3605,48 @@ export default function MeetingRoom() {
                     {typeof currentCaption === 'object' ? currentCaption.text : currentCaption}
                   </p>
                 </div>
+              </div>
+            )}
+
+            {/* Live Mic Speech VAD Status Pill */}
+            {isAudioOn && (
+              <div style={{
+                position: 'absolute',
+                bottom: '88px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: 90,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                background: isSpeakingLive ? '#00FF66' : (speechStatusText ? '#0022FF' : 'rgba(10,10,10,0.85)'),
+                color: isSpeakingLive ? '#0A0A0A' : '#FFFFFF',
+                padding: '0.35rem 0.85rem',
+                borderRadius: '999px',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                transition: 'all 0.2s',
+                pointerEvents: 'none'
+              }}>
+                <span style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: isSpeakingLive ? '#0A0A0A' : (speechStatusText ? '#FFFFFF' : '#10B981'),
+                  display: 'inline-block'
+                }} />
+                <span>
+                  {isSpeakingLive
+                    ? `SPEAKING (${spokenLanguage.toUpperCase()})...`
+                    : (speechStatusText || `MIC READY: Speak in ${spokenLanguage.toUpperCase()}`)}
+                </span>
+                {micVolume > 0 && (
+                  <span style={{ opacity: 0.8, fontSize: '0.7rem' }}>
+                    {micVolume}%
+                  </span>
+                )}
               </div>
             )}
 
@@ -3280,6 +4002,36 @@ export default function MeetingRoom() {
                     <div className={styles.audioMeterTrack}>
                       <div className={styles.audioMeterFill} style={{ width: `${isAudioOn ? micVolume : 0}%` }} />
                     </div>
+                    {isAudioOn && micVolume === 0 && (
+                      <p style={{ margin: '0.55rem 0 0', fontSize: '0.72rem', color: '#FF3311', fontFamily: 'var(--font-mono)', lineHeight: 1.4 }}>
+                        No microphone signal detected. Check the input device, then toggle the mic off and on.
+                      </p>
+                    )}
+                    {!isAudioOn && (
+                      <button
+                        onClick={toggleAudio}
+                        style={{ marginTop: '0.6rem', width: '100%', padding: '0.6rem', background: '#0022FF', color: '#FFFFFF', border: 'none', fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
+                      >
+                        Unmute microphone
+                      </button>
+                    )}
+                    <button
+                      onClick={testAndUseMicrophone}
+                      disabled={micTestStatus === 'testing'}
+                      style={{ marginTop: '0.6rem', width: '100%', padding: '0.6rem', background: micTestStatus === 'testing' ? '#9CA3AF' : '#0A0A0A', color: '#FFFFFF', border: 'none', fontWeight: 700, cursor: micTestStatus === 'testing' ? 'wait' : 'pointer', fontFamily: 'var(--font-mono)' }}
+                    >
+                      {micTestStatus === 'testing' ? 'Testing microphone…' : 'Test / Reconnect Microphone'}
+                    </button>
+                    {micTestStatus === 'ok' && (
+                      <p style={{ margin: '0.55rem 0 0', fontSize: '0.72rem', color: '#10B981', fontFamily: 'var(--font-mono)', lineHeight: 1.4 }}>
+                        Microphone connected. Speak now — the level above should move.
+                      </p>
+                    )}
+                    {micTestStatus === 'error' && (
+                      <p style={{ margin: '0.55rem 0 0', fontSize: '0.72rem', color: '#FF3311', fontFamily: 'var(--font-mono)', lineHeight: 1.4 }}>
+                        {micTestError}
+                      </p>
+                    )}
                   </div>
 
                   <div>

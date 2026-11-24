@@ -7,9 +7,9 @@ const app = express();
 
 app.use(cors());
 
-// Support both pure binary Avro octet-streams and standard JSON
+// Support binary Avro, audio payloads, and standard JSON
 app.use(express.raw({
-  type: ['application/avro', 'application/octet-stream'],
+  type: ['application/avro', 'application/octet-stream', 'audio/*'],
   limit: '50mb'
 }));
 app.use(express.json({ limit: '50mb' }));

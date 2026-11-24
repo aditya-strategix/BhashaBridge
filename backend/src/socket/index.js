@@ -182,6 +182,7 @@ function setupSocket(server) {
             isVideoOn: socket.isVideoOn
           };
           socket.to(meeting.id).emit('participant:joined', joinedPayload);
+          socket.emit('meeting:joined', { meetingId: meeting.meetingLink, dbMeetingId: meeting.id, role: effectiveRole });
           console.log(`User ${userId} joined meeting ${meeting.meetingLink}`);
           
           // If a host/co-host joins, send them the list of anyone currently waiting in the lobby
@@ -518,91 +519,174 @@ function setupSocket(server) {
       });
     });
 
-    // Handle captions
-    socket.on('caption:text', async (data = {}) => {
-      if (socket.isWaiting || !data.text || !String(data.text).trim()) return;
-      // Verified identity / canonical room win over client-supplied fields.
-      const speakerId = socket.authUser?.userId || data.speakerId;
-      const meetingId = socket.dbMeetingId || socket.meetingId || data.meetingId;
-      const text = String(data.text);
-      const language = data.language;
-      if (!speakerId || !meetingId) return;
-      const cleanText = text.trim();
+    async function processAndBroadcastCaption({ socket, speakerId, speakerName, meetingId, text, language, rawData = {} }) {
+      if (socket.isWaiting || !text || !String(text).trim()) return;
+      const cleanText = String(text).trim();
       const lower = cleanText.toLowerCase();
       if (cleanText.startsWith('[') || lower.includes('audio stream') || lower.includes('stream chunk') || lower.includes('875 bytes') || lower.includes('ऑडियो स्ट्रीम')) {
         return;
       }
 
+      const rawLanguage = language || 'en';
+      const normSrcLang = String(rawLanguage).trim().toLowerCase().split(/[-_]/)[0] || 'en';
       const now = Date.now();
       const normCaption = cleanText.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
-      if (socket.lastCaption && socket.lastCaption.norm === normCaption && (now - socket.lastCaption.time < 8000)) {
+      if (socket.lastCaption && socket.lastCaption.norm === normCaption && (now - socket.lastCaption.time < 2000)) {
         return;
       }
       socket.lastCaption = { text: cleanText, norm: normCaption, time: now };
 
-      const targetRoom = socket.dbMeetingId || meetingId;
-
-      // Broadcast live caption once to canonical room
-      console.log(`[CAPTION:TEXT] targetRoom: ${targetRoom}, speakerId: ${speakerId}, text: "${cleanText}"`);
-      io.to(targetRoom).emit('caption:text', { ...data, speakerId, meetingId: targetRoom, text: cleanText });
-        if (socket.dbMeetingId) {
-          prisma.caption.create({
-            data: { meetingId: socket.dbMeetingId, speakerId, originalText: cleanText, originalLanguage: language }
-          }).catch(err => console.error("DB caption save error:", err));
-        }
+      // Ensure room aliases are fully populated
+      if (!socket.dbMeetingId && meetingId) {
         try {
-          const clients = await io.in(targetRoom).fetchSockets();
-          const targetLanguages = new Set();
-          clients.forEach(c => {
-            const s = c.userSettings || {};
-            const clientLang = s.language || c.userLanguage || 'en';
-            const effCaptionLang = (s.captionLang && s.captionLang !== 'original') ? s.captionLang : clientLang;
-            const effTtsLang = (s.ttsLang && s.ttsLang !== 'original') ? s.ttsLang : clientLang;
-
-            if ((s.captionEnabled ?? true) && effCaptionLang && effCaptionLang !== language) {
-              targetLanguages.add(effCaptionLang);
-            }
-            if ((s.ttsEnabled ?? true) && effTtsLang && effTtsLang !== language) {
-              targetLanguages.add(effTtsLang);
-            }
-          });
-          console.log(`[CAPTION:TRANSLATING] clientsInRoom: ${clients.length}, targetLanguages:`, Array.from(targetLanguages));
-          let translations = {};
-          if (targetLanguages.size > 0) {
-            try {
-              translations = await aiClient.translate(text, language, Array.from(targetLanguages));
-            } catch (err) {
-              console.warn("[IndicTrans2 Caption] Translation error, falling back to original:", err.message);
-              for (let targetLang of targetLanguages) {
-                translations[targetLang] = text;
-              }
-            }
+          const m = await resolveMeeting(meetingId);
+          if (m) {
+            socket.dbMeetingId = m.id;
+            socket.meetingId = m.meetingLink;
           }
-          const captionId = `cap_${speakerId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-          const captionPayload = { id: captionId, text, sourceLanguage: language, speakerId, speakerName: socket.userName || data.speakerName || 'Speaker', senderSocketId: socket.id, translations };
-          console.log(`[CAPTION:EMITTING] Emitting caption:translated to ${targetRoom}:`, captionPayload.id);
-          io.to(targetRoom).emit('caption:translated', captionPayload);
+        } catch (_) {}
+      }
 
-          // Pillar 3: Apache Avro Binary Serialization
+      const targetRoom = socket.dbMeetingId || meetingId;
+      const roomAliases = new Set([targetRoom, meetingId, socket.meetingId, socket.cleanLink, socket.dbMeetingId].filter(Boolean));
+
+      console.log(`[CAPTION:TEXT] targetRoom: ${targetRoom}, speakerId: ${speakerId}, lang: ${normSrcLang}, text: "${cleanText}"`);
+      for (const r of roomAliases) {
+        io.to(r).emit('caption:text', { ...rawData, speakerId, meetingId: targetRoom, text: cleanText, language: normSrcLang });
+      }
+
+      if (socket.dbMeetingId) {
+        prisma.caption.create({
+          data: { meetingId: socket.dbMeetingId, speakerId, originalText: cleanText, originalLanguage: normSrcLang }
+        }).catch(err => console.error("DB caption save error:", err));
+      }
+
+      try {
+        const allSockets = [];
+        for (const r of roomAliases) {
+          const socks = await io.in(r).fetchSockets();
+          allSockets.push(...socks);
+        }
+        const clients = Array.from(new Map(allSockets.map(s => [s.id, s])).values());
+        const targetLanguages = new Set();
+
+        // Always translate across the bridge language pair (Hindi <-> English) as a minimum
+        if (normSrcLang === 'hi') {
+          targetLanguages.add('en');
+        } else if (normSrcLang === 'en') {
+          targetLanguages.add('hi');
+        }
+
+        clients.forEach(c => {
+          const s = c.userSettings || {};
+          const clientLang = ((s.language || c.userLanguage || 'en')).toLowerCase().split(/[-_]/)[0];
+          const effCaptionLang = (s.captionLang && s.captionLang !== 'original') ? s.captionLang.toLowerCase().split(/[-_]/)[0] : clientLang;
+          const effTtsLang = (s.ttsLang && s.ttsLang !== 'original') ? s.ttsLang.toLowerCase().split(/[-_]/)[0] : clientLang;
+
+          if ((s.captionEnabled ?? true) && effCaptionLang && effCaptionLang !== normSrcLang) {
+            targetLanguages.add(effCaptionLang);
+          }
+          if ((s.ttsEnabled ?? true) && effTtsLang && effTtsLang !== normSrcLang) {
+            targetLanguages.add(effTtsLang);
+          }
+        });
+
+        console.log(`[CAPTION:TRANSLATING] clientsInRoom: ${clients.length}, targetLanguages:`, Array.from(targetLanguages));
+        let translations = {};
+        if (targetLanguages.size > 0) {
           try {
-            if (avro && avro.registry && avro.registry.hasSchema('TranslatedCaptionEvent')) {
-              const avroEvent = {
-                eventId: captionId,
-                originalEventId: `orig_${captionId}`,
-                meetingId: String(targetRoom),
-                speakerId: String(speakerId),
-                translations: translations,
-                processingLatencyMs: Date.now() - now,
-                timestamp: Date.now()
-              };
-              const avroBuffer = avro.registry.serialize('TranslatedCaptionEvent', avroEvent);
-              io.to(targetRoom).emit('caption:translated:avro', avroBuffer);
+            translations = await aiClient.translate(cleanText, normSrcLang, Array.from(targetLanguages));
+          } catch (err) {
+            console.warn("[IndicTrans2 Caption] Translation error, falling back to original:", err.message);
+            for (let targetLang of targetLanguages) {
+              translations[targetLang] = cleanText;
             }
-          } catch (avroErr) {
-            console.warn('[Socket Avro] Caption serialization error:', avroErr.message);
           }
+        }
+
+        const captionId = `cap_${speakerId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        const captionPayload = {
+          id: captionId,
+          text: cleanText,
+          sourceLanguage: normSrcLang,
+          speakerId,
+          speakerName: speakerName || socket.userName || rawData.speakerName || 'Speaker',
+          senderSocketId: socket.id,
+          translations
+        };
+
+        console.log(`[CAPTION:EMITTING] Emitting caption:translated to aliases:`, Array.from(roomAliases), captionPayload.id);
+        for (const r of roomAliases) {
+          io.to(r).emit('caption:translated', captionPayload);
+        }
+
+        // Pillar 3: Apache Avro Binary Serialization
+        try {
+          if (avro && avro.registry && avro.registry.hasSchema('TranslatedCaptionEvent')) {
+            const avroEvent = {
+              eventId: captionId,
+              originalEventId: `orig_${captionId}`,
+              meetingId: String(targetRoom),
+              speakerId: String(speakerId),
+              translations: translations,
+              processingLatencyMs: Date.now() - now,
+              timestamp: Date.now()
+            };
+            const avroBuffer = avro.registry.serialize('TranslatedCaptionEvent', avroEvent);
+            for (const r of roomAliases) {
+              io.to(r).emit('caption:translated:avro', avroBuffer);
+            }
+          }
+        } catch (avroErr) {
+          console.warn('[Socket Avro] Caption serialization error:', avroErr.message);
+        }
       } catch (error) {
         console.error('Caption translation error:', error);
+      }
+    }
+
+    // Handle captions
+    socket.on('caption:text', async (data = {}) => {
+      if (socket.isWaiting || !data.text || !String(data.text).trim()) return;
+      const speakerId = socket.authUser?.userId || data.speakerId;
+      const meetingId = socket.dbMeetingId || socket.meetingId || data.meetingId;
+      if (!speakerId || !meetingId) return;
+
+      await processAndBroadcastCaption({
+        socket,
+        speakerId,
+        speakerName: socket.userName || data.speakerName,
+        meetingId,
+        text: data.text,
+        language: data.language,
+        rawData: data
+      });
+    });
+
+    // Handle real-time audio chunk for sovereign Whisper STT
+    socket.on('caption:audio', async (data = {}) => {
+      if (socket.isWaiting || !data.audioBase64) return;
+      const speakerId = socket.authUser?.userId || data.speakerId;
+      const meetingId = socket.dbMeetingId || socket.meetingId || data.meetingId;
+      if (!speakerId || !meetingId) return;
+
+      try {
+        const audioBuffer = Buffer.from(data.audioBase64, 'base64');
+        const sttResult = await aiClient.transcribeSTT(audioBuffer, data.language || 'auto');
+        if (sttResult.text && sttResult.text.trim()) {
+          console.log(`[CAPTION:AUDIO:STT] Transcribed (${sttResult.language}): "${sttResult.text.trim()}"`);
+          await processAndBroadcastCaption({
+            socket,
+            speakerId,
+            speakerName: socket.userName || data.speakerName,
+            meetingId,
+            text: sttResult.text.trim(),
+            language: sttResult.language || data.language || 'hi',
+            rawData: data
+          });
+        }
+      } catch (sttErr) {
+        console.error('[Socket caption:audio] STT error:', sttErr.message);
       }
     });
 

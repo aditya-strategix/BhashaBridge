@@ -419,8 +419,18 @@ def synthesize_tts(req: TTSRequest):
         if audio.size == 0 or not np.all(np.isfinite(audio)):
             raise RuntimeError("Neural TTS produced empty or non-finite audio")
 
-        # Guard against clipping without altering the voice.
+        # Guards against a valid but effectively silent clip (the model can
+        # return a 1-2 sample WAV for very short inputs, which sounds like
+        # nothing on the client).
         peak = float(np.max(np.abs(audio)))
+        min_samples = max(1024, int(sample_rate * 0.12))
+        if audio.size < min_samples or peak < 1e-4:
+            raise RuntimeError(
+                f"Neural TTS produced too-short/silent audio "
+                f"({audio.size} samples, peak={peak:.6f})"
+            )
+
+        # Guard against clipping without altering the voice.
         if peak > 1.0:
             audio = audio / peak
 

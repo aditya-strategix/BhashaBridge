@@ -179,7 +179,33 @@ router.get('/tts', async (req, res) => {
   }
 });
 
-// 6. Schema Registry Endpoints (Inspect registered .avsc contracts)
+// 6. Sovereign Whisper Speech-to-Text (STT)
+router.post('/stt', async (req, res) => {
+  try {
+    const { language = 'auto' } = req.query || {};
+    let audioBuffer;
+    if (Buffer.isBuffer(req.body)) {
+      audioBuffer = req.body;
+    } else if (req.body && req.body.audioBase64) {
+      audioBuffer = Buffer.from(req.body.audioBase64, 'base64');
+    } else {
+      return res.status(400).json({ error: 'Audio payload required (raw buffer or audioBase64)' });
+    }
+
+    const result = await defaultSTT.transcribe(audioBuffer, { language });
+    return res.status(200).json({
+      text: result.text,
+      language: result.language,
+      confidence: result.confidence,
+      latencyMs: result.latencyMs
+    });
+  } catch (err) {
+    console.error('[AIService] /stt error:', err);
+    res.status(500).json({ error: err.message || 'STT transcription error' });
+  }
+});
+
+// 7. Schema Registry Endpoints (Inspect registered .avsc contracts)
 router.get('/schemas', (req, res) => {
   res.status(200).json({
     registry: 'BhashaBridge Apache Avro Schema Registry',

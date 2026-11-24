@@ -401,3 +401,65 @@ To bring real-time speech translation to grassroots rural communities without re
 3. **Permanent Continuous Dictation (`continuous: true`):** Desktop browsers maintain open microphone channels without the 2-second dictation timeouts or aggressive battery-saving thread throttling inherent to mobile devices.
 4. **Wired Directional USB Headsets:** Village kiosks use dedicated noise-cancelling USB headsets, eliminating rural background noise (tractors, livestock, ambient chatter) and completely preventing acoustic echo.
 5. **Assisted Human Operator:** Local Village Level Entrepreneurs (VLEs) operate the computer for non-literate or elderly villagers, ensuring seamless access for citizens who do not own laptops or smartphones.
+
+---
+
+## Problem 16: Browser Microphone Voice Ingestion Failure: Web Speech API Cloud Lockout, Instantaneous Volume Drop, and In-Browser Web Audio VAD Architecture
+
+### Symptoms:
+1. When participants clicked "Test Audio" or pressed demo speech buttons in the meeting room, translations and neural speech synthesis worked with pristine clarity on remote participants' devices.
+2. However, when a participant unmuted their physical microphone and spoke naturally (e.g. in Hindi or English), **zero captions were emitted, no translations appeared, and remote attendees heard complete silence**.
+3. Sockets remained connected, WebRTC peer audio was connected, but the real-time AI translation pipeline never triggered from live human speech.
+
+### Root Cause Analysis:
+1. **Google Web Speech API Cloud Lockout (`SpeechRecognition`):**
+   * The frontend relied exclusively on `window.SpeechRecognition || window.webkitSpeechRecognition`.
+   * On Linux distributions (Chromium, Brave, Firefox), Google's cloud speech recognition keys are omitted by package maintainers or blocked by privacy shields (Brave Shields).
+   * When the user spoke, the browser emitted silent `service-not-allowed` or `network` errors to `rec.onerror`. The code responded with `stopped = true`, permanently terminating the speech recognition loop without alerting the user.
+   * In Mozilla Firefox, `window.SpeechRecognition` is completely unsupported and returns `undefined`.
+2. **The "Instantaneous Volume" Drop Bug:**
+   * A previous chunk recorder attempted to record audio slices every 3.5 seconds with `MediaRecorder`.
+   * However, it validated speech using an instantaneous volume check: `if (micVolumeRef.current < 2) return;`.
+   * When humans finish speaking an utterance, they naturally pause for 200–500ms at the end of the sentence. Because the fixed 3.5-second timer elapsed during that trailing pause, `micVolumeRef.current` was sampled at `0%` volume at that exact millisecond.
+   * Consequently, the browser **discarded the entire 3.5-second speech buffer as silence** and never transmitted it to the server.
+3. **Broken WebM Container Headers on Timesliced MediaRecorder:**
+   * Calling `MediaRecorder.start(timeslice)` emits timeslice chunks of a continuous WebM container.
+   * In WebM specifications, the EBML container header is placed exclusively on Chunk #1. Slices 2, 3, and 4 contained raw cluster data without EBML headers.
+   * When received by the backend, audio decoders (ffmpeg, soundfile) failed with header parse errors: `Invalid data found when processing input`.
+4. **Browser Autoplay Audio Gating & Suspended AudioContext:**
+   * Modern browser security policies automatically suspend new `AudioContext` instances until an explicit user gesture (click or tap) occurs inside the document.
+   * While suspended, `analyser.getByteTimeDomainData` returned flatline zero values, freezing microphone energy meters.
+   * On the receiver's tab, incoming `audio.play()` calls threw `NotAllowedError` until a gesture unlocked the audio subsystem.
+5. **PulseAudio / PipeWire Output Monitor Loopback Capture:**
+   * On Linux desktop systems, `navigator.mediaDevices.getUserMedia({ audio: true })` occasionally defaulted to the audio driver's "Monitor of Built-in Audio Analog Stereo" (the speaker loopback) instead of the physical microphone hardware.
+
+### Architectural Solution & Technical Implementation:
+
+1. **In-Browser Web Audio Voice Activity Detection (VAD) Engine:**
+   * Instead of relying on Google's cloud Web Speech API, we implemented an in-browser audio graph connected directly to the physical microphone stream via `AudioContext` and `ScriptProcessorNode(4096, 1, 1)` in [frontend/src/app/meeting/[id]/page.js](file:///run/media/this_is_aditya/New%20Volume1/E/BhashaBridge/BhashaBridge/frontend/src/app/meeting/[id]/page.js):
+   * **Real-Time RMS Energy Calculation:**
+     $$\text{RMS} = \sqrt{\frac{1}{N} \sum_{i=0}^{N-1} x[i]^2}$$
+   * **Energy Threshold Detection:** When $\text{RMS} \ge 0.012$ (~3% volume), speech state activates (`isSpeaking = true`), accumulating raw Float32 audio samples into a continuous `speechChunks` buffer and updating the live UI.
+   * **Natural Silence Watchdog:** When $\text{RMS} < 0.012$, a 650ms debounce silence timer starts. If silence persists for 650ms (or continuous speech reaches 6 seconds), the utterance boundary is finalized without cutting words in half.
+
+2. **In-Memory 16kHz 16-Bit PCM WAV Encoding (`encodeWav` & `downsampleTo16k`):**
+   * Downsamples the raw Float32 buffer from native sample rates (44.1kHz / 48kHz) to **16,000 Hz** (Faster-Whisper's native input rate).
+   * Assembles a self-contained 44-byte RIFF/WAVE header and writes 16-bit signed PCM samples in client JavaScript.
+   * Eliminates all WebM container header corruption, Opus codec mismatch, and container fragmentation issues.
+   * A 3-second utterance encodes into a compact ~96 KB binary buffer, which is Base64 encoded and emitted over WebSocket via `caption:audio`.
+
+3. **Sovereign GPU Faster-Whisper Pipeline (`/v1/audio/transcriptions`):**
+   * In [backend/src/socket/index.js](file:///run/media/this_is_aditya/New%20Volume1/E/BhashaBridge/BhashaBridge/backend/src/socket/index.js), incoming `caption:audio` events decode the binary WAV buffer and forward it to the local GPU AI Core on port 8000.
+   * **Faster-Whisper on NVIDIA RTX 4060 Laptop GPU** (`whisper-small`, CUDA float16) transcribes the speech in **~350ms**.
+   * **IndicTrans2** translates the transcript into all active participants' chosen languages in **~150ms**.
+   * Emits `caption:translated` across all room aliases (`meetingLink`, UUID, cleanLink).
+   * Remote participant browsers automatically synthesize and stream the audio via sovereign Bhashini/Indic-Parler TTS (`/api/tts`).
+
+4. **Live Visual Speech Feedback Pill & Autoplay Unlock Banner:**
+   * Added a real-time status pill above the controls dock:
+     - **Idle:** `🎙️ MIC READY: Speak in HI` (or user's selected language).
+     - **Speaking:** Glows bright green: `🟢 SPEAKING (HI)... 34%` with dynamic volume percentage.
+     - **Transcribing:** `⚡ Transcribing speech...` upon sentence pause.
+   * Added an **Autoplay Unlock Banner** (`Click once to enable live translated audio output`) so browsers never silently mute incoming translation audio.
+5. **Interactive Demo Speech & Custom Phrase Tools:**
+   * Added `🇮🇳 Speak Hindi`, `🇬🇧 Speak English`, and `Type to Speak` quick actions in the meeting header, enabling one-click testability of the full speech-to-speech loop across multiple participant tabs.

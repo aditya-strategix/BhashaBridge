@@ -166,6 +166,64 @@ class AIServiceClient {
 
     throw new Error(`AI Microservice caption stream failed HTTP ${response.status}`);
   }
+
+  /**
+   * Transcribe speech audio via sovereign Faster-Whisper GPU model
+   */
+  async transcribeSTT(audioBuffer, language = 'auto') {
+    if (!audioBuffer || audioBuffer.length === 0) {
+      return { text: '', language: language || 'en' };
+    }
+
+    // Try AI Microservice first
+    try {
+      const normLang = (language || 'auto').split(/[-_]/)[0];
+      const res = await fetch(`${this.getBaseUrl()}/api/v1/ai/stt?language=${normLang}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: audioBuffer,
+        signal: AbortSignal.timeout(15000)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          text: data.text || '',
+          language: data.language || normLang,
+          confidence: data.confidence || 0
+        };
+      }
+    } catch (msErr) {
+      console.warn('[aiClient] Microservice STT error, trying direct GPU engine:', msErr.message);
+    }
+
+    // Direct GPU AI Engine fallback on :8000
+    try {
+      const formData = new FormData();
+      const blob = new Blob([audioBuffer], { type: 'audio/wav' });
+      formData.append('file', blob, 'audio.wav');
+      const normLang = (language || 'auto').split(/[-_]/)[0];
+      if (normLang && normLang !== 'auto') {
+        formData.append('language', normLang);
+      }
+      const directRes = await fetch('http://127.0.0.1:8000/v1/audio/transcriptions', {
+        method: 'POST',
+        body: formData,
+        signal: AbortSignal.timeout(15000)
+      });
+      if (directRes.ok) {
+        const data = await directRes.json();
+        return {
+          text: data.text || '',
+          language: data.language || normLang,
+          confidence: data.confidence || 0
+        };
+      }
+    } catch (directErr) {
+      console.error('[aiClient] Direct GPU Whisper STT error:', directErr.message);
+    }
+
+    return { text: '', language: language || 'en' };
+  }
 }
 
 module.exports = new AIServiceClient();
