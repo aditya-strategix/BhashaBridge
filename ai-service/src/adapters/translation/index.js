@@ -19,47 +19,69 @@ class CompositeTranslationAdapter {
   }
 
   async translateOne(text, sourceLang = 'en', targetLang = 'hi') {
-    if (!text || !text.trim() || sourceLang === targetLang) {
+    if (!text || !text.trim()) {
+      return text;
+    }
+
+    const src = (sourceLang || 'en').toLowerCase().split(/[-_]/)[0];
+    const tgt = (targetLang || '').toLowerCase().split(/[-_]/)[0];
+    if (src === tgt) {
       return text;
     }
 
     const cleanText = text.trim();
-    const cacheKey = this._getCacheKey(cleanText, sourceLang, targetLang);
+    const cacheKey = this._getCacheKey(cleanText, src, tgt);
     if (this.cache.has(cacheKey)) {
       return this.cache.get(cacheKey);
     }
 
-    // 1. Primary: IndicTrans2 (Sovereign AI4Bharat / IIT Madras Neural Translation)
-    if (this.indicTrans2.isAvailable() && this.indicTrans2.isLanguageSupported(targetLang)) {
+    // 1. Primary: IndicTrans2 for English → Indic (the checkpoint this
+    //    deployment hosts). Non-English sources are routed to the fallback,
+    //    because an en→indic model silently mangled them before.
+    if (src === 'en' && this.indicTrans2.isAvailable() && this.indicTrans2.isLanguageSupported(tgt)) {
       try {
-        const translated = await this.indicTrans2.translateOne(cleanText, sourceLang, targetLang);
-        this._setCache(cacheKey, translated);
-        return translated;
+        const translated = await this.indicTrans2.translateOne(cleanText, src, tgt);
+        if (translated && translated.trim()) {
+          this._setCache(cacheKey, translated);
+          return translated;
+        }
       } catch (err) {
-        console.warn(`[IndicTrans2] Inference offline: ${err.message}. Routing to sovereign fallback.`);
+        console.warn(`[IndicTrans2] Inference failed: ${err.message}. Routing to fallback.`);
       }
     }
 
     // 2. Open Web / MyMemory Fallback (Non-Google)
     try {
-      const translated = await this.myMemory.translateOne(cleanText, sourceLang, targetLang);
-      this._setCache(cacheKey, translated);
-      return translated;
+      const translated = await this.myMemory.translateOne(cleanText, src, tgt);
+      if (translated && translated.trim() && translated.trim() !== cleanText) {
+        this._setCache(cacheKey, translated);
+        return translated;
+      }
     } catch (err) {
-      console.warn(`[Translation] Translation fallback for "${cleanText.slice(0, 30)}..." -> ${targetLang}`);
-      return cleanText; // Safe identity fallback
+      console.warn(`[Translation] Fallback failed for "${cleanText.slice(0, 30)}..." -> ${tgt}: ${err.message}`);
     }
+
+    // Never cache an identity fallback: a transient outage would otherwise
+    // poison the phrase for the lifetime of the process.
+    console.warn(`[Translation] No engine produced a translation for "${cleanText.slice(0, 30)}..." -> ${tgt}`);
+    return cleanText;
   }
 
   async translateBatch(text, sourceLang, targetLangs) {
     if (!text || !text.trim()) return {};
+
+    const src = (sourceLang || 'en').toLowerCase().split(/[-_]/)[0];
+    const targets = (Array.isArray(targetLangs) ? targetLangs : String(targetLangs || '').split(','))
+      .map(lang => String(lang || '').trim().toLowerCase().split(/[-_]/)[0])
+      .filter(Boolean);
+
     const results = {};
     const langsToTranslate = [];
 
-    for (const lang of targetLangs) {
-      if (!lang || lang === sourceLang) {
+    for (const lang of targets) {
+      if (lang === src) {
         results[lang] = text;
-      } else {
+      } else if (!langsToTranslate.includes(lang)) {
         langsToTranslate.push(lang);
       }
     }
@@ -70,7 +92,7 @@ class CompositeTranslationAdapter {
 
     await Promise.all(
       langsToTranslate.map(async (target) => {
-        results[target] = await this.translateOne(text, sourceLang, target);
+        results[target] = await this.translateOne(text, src, target);
       })
     );
 

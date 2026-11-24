@@ -8,8 +8,12 @@ const config = require('./config');
 
 const app = express();
 
+const corsOrigin = config.service.corsOrigins.includes('*')
+  ? true
+  : config.service.corsOrigins;
+
 app.use(cors({
-  origin: config.service.corsOrigins,
+  origin: corsOrigin,
   credentials: true
 }));
 

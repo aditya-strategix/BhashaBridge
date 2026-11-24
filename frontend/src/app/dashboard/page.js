@@ -10,26 +10,10 @@ import {
   FileText, BarChart3, Globe, Calendar, Radio, Sparkles, Shield, Zap
 } from 'lucide-react';
 import { io } from 'socket.io-client';
+import { getApiBaseUrl, getSocketBaseUrl } from '../../services/urls';
 
-const getSocketUrl = () => {
-  if (process.env.NEXT_PUBLIC_SOCKET_URL && !process.env.NEXT_PUBLIC_SOCKET_URL.includes('localhost')) {
-    return process.env.NEXT_PUBLIC_SOCKET_URL;
-  }
-  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    return window.location.origin;
-  }
-  return process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
-};
-
-const getApiUrl = () => {
-  if (process.env.NEXT_PUBLIC_API_URL && !process.env.NEXT_PUBLIC_API_URL.includes('localhost')) {
-    return process.env.NEXT_PUBLIC_API_URL;
-  }
-  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    return `${window.location.origin}/api`;
-  }
-  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-};
+const getSocketUrl = () => getSocketBaseUrl();
+const getApiUrl = () => getApiBaseUrl();
 
 import useAuthStore from '../../stores/authStore';
 import api from '../../services/api';
@@ -256,7 +240,9 @@ function DashboardContent() {
     };
 
     // Socket.IO real-time channel
-    const socket = io(getSocketUrl());
+    const socket = io(getSocketUrl(), {
+      auth: { token: typeof window !== 'undefined' ? localStorage.getItem('token') : null }
+    });
     socket.on('dashboard:refresh', () => {
       console.log('[Socket] dashboard:refresh received -> refetching data');
       fetchData();

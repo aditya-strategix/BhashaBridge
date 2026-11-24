@@ -1,11 +1,23 @@
 const os = require('os');
 
+// Pick a routable LAN address unless the deployment explicitly announces one.
+// 127.0.0.1 ICE candidates make every remote browser fail to connect.
+function detectAnnouncedIp() {
+  if (process.env.MEDIASOUP_ANNOUNCED_IP) return process.env.MEDIASOUP_ANNOUNCED_IP;
+  for (const ifaces of Object.values(os.networkInterfaces())) {
+    for (const iface of ifaces || []) {
+      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+    }
+  }
+  return '127.0.0.1';
+}
+
 module.exports = {
   // Service configuration
   service: {
     name: 'bhashabridge-sfu-service',
     version: '2.0.0',
-    port: parseInt(process.env.SFU_PORT || '5002', 10),
+    port: parseInt(process.env.SFU_PORT || process.env.PORT || '5002', 10),
     host: process.env.SFU_HOST || '0.0.0.0',
     corsOrigins: (process.env.CORS_ORIGIN || '*').split(',').map(s => s.trim())
   },
@@ -72,7 +84,7 @@ module.exports = {
       listenIps: [
         {
           ip: process.env.MEDIASOUP_LISTEN_IP || '0.0.0.0',
-          announcedIp: process.env.MEDIASOUP_ANNOUNCED_IP || '127.0.0.1'
+          announcedIp: detectAnnouncedIp()
         }
       ],
       initialAvailableOutgoingBitrate: 1000000, // 1 Mbps
@@ -93,14 +105,26 @@ module.exports = {
     }
   },
 
+  // ICE servers handed to browsers for WebRTC negotiation.
+  iceServers: (process.env.SFU_ICE_SERVERS || 'stun:stun.l.google.com:19302')
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean)
+    .map((urls) => ({ urls })),
+
   // Audio Tap & AI Ingress Configuration (Pillar 3 & Pillar 5)
   audioTap: {
-    enabled: true,
+    // Opt-in: the browser already provides live STT, and an always-on server
+    // tap duplicates captions and can feed TTS audio back into itself.
+    enabled: process.env.SFU_AUDIO_TAP_ENABLED === 'true',
     aiServiceUrl: process.env.AI_SERVICE_URL || 'http://localhost:5001',
     sampleRate: 48000,
     channels: 2,
-    chunkDurationMs: 500, // 500ms audio chunks
-    format: 'opus',       // 'opus' or 'pcm'
-    forwardToAiService: true
+    chunkDurationMs: parseInt(process.env.SFU_AUDIO_TAP_CHUNK_MS || '500', 10),
+    format: 'wav',        // decoded PCM/WAV (Opus RTP is decoded by the tap)
+    forwardToAiService: true,
+    // Whisper inference can take several seconds; the old 3s budget always
+    // aborted before a transcript came back.
+    aiRequestTimeoutMs: parseInt(process.env.SFU_AUDIO_TAP_TIMEOUT_MS || '20000', 10)
   }
 };

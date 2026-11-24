@@ -5,7 +5,9 @@ const { withDbRetry } = require('../prisma');
 const { sendPasswordResetOtp } = require('../services/email.service');
 const otpService = require('../services/otp.service');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_for_dev';
+// Read at call time: dotenv is loaded by server.js before requests arrive,
+// and a module-level capture raced env loading in the old bootstrap order.
+const getJwtSecret = () => process.env.JWT_SECRET || 'fallback_secret_for_dev';
 
 exports.register = async (req, res) => {
   try {
@@ -75,11 +77,11 @@ exports.login = async (req, res) => {
 
     const token = jwt.sign(
       { userId: user.id, role: user.role, language: user.preferredLanguage },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: '24h' }
     );
 
-    res.json({ token, user: { id: user.id, name: user.name, email: user.email, language: user.preferredLanguage, avatar: user.avatar } });
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, language: user.preferredLanguage, avatar: user.avatar } });
   } catch (error) {
     console.error('[Auth] Login error:', error);
     res.status(500).json({ error: 'Server error' });
@@ -101,11 +103,11 @@ exports.updateProfile = async (req, res) => {
 
     const token = jwt.sign(
       { userId: user.id, role: user.role, language: user.preferredLanguage },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: '24h' }
     );
 
-    res.json({ token, user: { id: user.id, name: user.name, email: user.email, language: user.preferredLanguage, avatar: user.avatar } });
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, language: user.preferredLanguage, avatar: user.avatar } });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Server error' });
@@ -170,7 +172,7 @@ exports.forgotPasswordVerifyOtp = async (req, res) => {
     // Issue a short-lived reset token (valid for 10 minutes)
     const resetToken = jwt.sign(
       { email: normalizedEmail, purpose: 'password_reset' },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: '10m' }
     );
 
@@ -197,7 +199,7 @@ exports.forgotPasswordReset = async (req, res) => {
 
     if (resetToken) {
       try {
-        const decoded = jwt.verify(resetToken, JWT_SECRET);
+        const decoded = jwt.verify(resetToken, getJwtSecret());
         if (decoded.purpose !== 'password_reset' || !decoded.email) {
           return res.status(400).json({ error: 'Invalid reset session. Please request a new code.' });
         }

@@ -11,6 +11,7 @@ const generateMeetingCode = (orgAccessCode) => {
 };
 
 const aiClient = require('../clients/ai.client');
+const sfuClient = require('../clients/sfu.client');
 const { sendMeetingInvitation } = require('../services/email.service');
 
 const { createClient } = require('redis');
@@ -58,11 +59,20 @@ const resolveMeetingEntity = async (link, includeOrg = true) => {
       }
     }));
     if (org) {
+      // Prefer an active meeting over the latest completed one so an org code
+      // cannot accidentally end/inspect a historical meeting.
       meeting = await withDbRetry(p => p.meeting.findFirst({
-        where: { organizationId: org.id },
+        where: { organizationId: org.id, state: { in: ['ONGOING', 'SCHEDULED'] } },
         orderBy: { createdAt: 'desc' },
         include
       }));
+      if (!meeting) {
+        meeting = await withDbRetry(p => p.meeting.findFirst({
+          where: { organizationId: org.id },
+          orderBy: { createdAt: 'desc' },
+          include
+        }));
+      }
     }
   }
   return meeting;
@@ -149,7 +159,8 @@ exports.getSummary = async (req, res) => {
 
     if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
     if (meeting.state === 'CANCELLED') return res.status(403).json({ error: 'This meeting was cancelled.' });
-    if (meeting.state !== 'COMPLETED') return res.status(403).json({ error: 'This meeting is still ongoing. The summary will be available once the host ends the session.' });
+    // Live summaries are allowed for ONGOING meetings (the in-meeting AI
+    // Summary button); only CANCELLED is unavailable.
 
     let isOrgAdmin = false;
     if (meeting.organization) {
@@ -163,7 +174,7 @@ exports.getSummary = async (req, res) => {
         where: { userId_meetingId: { userId: req.user.userId, meetingId: meeting.id } }
       });
 
-      if (!isHost && !participant) {
+      if (!isHost && (!participant || !['ADMITTED', 'LEFT'].includes(participant.status))) {
       return res.status(403).json({ error: 'You are not authorized to view this summary' });
     }
 
@@ -582,6 +593,14 @@ exports.endMeeting = async (req, res) => {
       global.sseEmit('dashboard:refresh');
     }
 
+    // Release SFU room routers and media resources (best-effort).
+    const sfuRoomIds = new Set(
+      [meeting.meetingLink, cleanLink, meeting.id].filter(Boolean).map(String)
+    );
+    for (const roomId of sfuRoomIds) {
+      sfuClient.closeRoom(roomId).catch(() => {});
+    }
+
     res.json({ meeting: updated, endedBy });
   } catch (error) {
     console.error('endMeeting error:', error);
@@ -927,7 +946,7 @@ exports.getTranscript = async (req, res) => {
       where: { userId_meetingId: { userId: req.user.userId, meetingId: meeting.id } }
     }));
 
-    if (!isHost && !participant) {
+    if (!isHost && (!participant || !['ADMITTED', 'LEFT'].includes(participant.status))) {
       return res.status(403).json({ error: 'You are not authorized to view this transcript' });
     }
 
@@ -1015,8 +1034,26 @@ exports.removeParticipant = async (req, res) => {
 exports.getParticipants = async (req, res) => {
   try {
     const { link } = req.params;
-    const meeting = await resolveMeetingEntity(link, false);
+    const meeting = await resolveMeetingEntity(link, true);
     if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
+
+    // Only the host/org admins or an admitted participant may enumerate the
+    // admitted roster (it exposes user IDs used by the socket/signaling layer).
+    const isHost = meeting.hostId === req.user.userId;
+    let isOrgAdmin = false;
+    if (!isHost && meeting.organization) {
+      isOrgAdmin = meeting.organization.ownerId === req.user.userId
+        || meeting.organization.coHosts.some((c) => c.id === req.user.userId);
+    }
+    if (!isHost && !isOrgAdmin) {
+      const caller = await withDbRetry(p => p.participant.findUnique({
+        where: { userId_meetingId: { userId: req.user.userId, meetingId: meeting.id } },
+        select: { status: true }
+      }));
+      if (!caller || caller.status !== 'ADMITTED') {
+        return res.status(403).json({ error: 'You are not authorized to view this participant list' });
+      }
+    }
 
     const participants = await withDbRetry(p => p.participant.findMany({
       where: { meetingId: meeting.id, status: 'ADMITTED' },

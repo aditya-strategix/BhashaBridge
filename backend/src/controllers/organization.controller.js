@@ -104,7 +104,18 @@ exports.inviteMembers = async (req, res) => {
     const { emails } = req.body; // Array of emails
     if (!emails || !Array.isArray(emails)) return res.status(400).json({ error: 'Emails array is required' });
 
-    const org = await prisma.organization.findUnique({ 
+    // Normalise and de-duplicate so mixed-case addresses match the lowercased
+    // accounts created by registration.
+    const normalizedEmails = [...new Set(
+      emails
+        .map((email) => String(email || '').trim().toLowerCase())
+        .filter((email) => email.includes('@'))
+    )];
+    if (normalizedEmails.length === 0) {
+      return res.status(400).json({ error: 'No valid email addresses provided' });
+    }
+
+    const org = await prisma.organization.findUnique({
       where: { id },
       include: { owner: true, users: true }
     });
@@ -112,29 +123,32 @@ exports.inviteMembers = async (req, res) => {
     if (!org) return res.status(404).json({ error: 'Organization not found' });
     if (org.ownerId !== req.user.userId) return res.status(403).json({ error: 'Only the host can invite members' });
 
+    // Validate the whole batch before creating anything: a failure halfway
+    // through used to leave earlier invitations already created/sent.
+    const memberEmails = new Set(org.users.map((u) => String(u.email || '').toLowerCase()));
+    const pendingInvites = await prisma.organizationInvitation.findMany({
+      where: { organizationId: id, status: 'PENDING', email: { in: normalizedEmails } },
+      select: { email: true }
+    });
+    const pendingEmails = new Set(pendingInvites.map((invite) => String(invite.email || '').toLowerCase()));
+
+    const problems = [];
+    for (const email of normalizedEmails) {
+      if (memberEmails.has(email)) problems.push(`${email} is already a member.`);
+      else if (pendingEmails.has(email)) problems.push(`Invitation already sent to ${email}.`);
+    }
+    if (problems.length > 0) {
+      return res.status(400).json({ error: problems.join(' ') });
+    }
+
     const origin = req.headers.origin || (req.headers.referer ? new URL(req.headers.referer).origin : null);
     const frontendUrl = (origin && !origin.includes('localhost') && !origin.includes('127.0.0.1'))
       ? origin.replace(/\/$/, '')
       : (process.env.FRONTEND_URL || process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://bhashabridge.aditya-kumar.in').replace(/\/$/, '');
-    
+
     const results = [];
 
-    for (const email of emails) {
-      // Check if already a member
-      const isMember = org.users.some(u => u.email === email);
-      if (isMember) {
-        return res.status(400).json({ error: `${email} is already a member.` });
-      }
-
-      // Check for pending invitation
-      const existingInvite = await prisma.organizationInvitation.findFirst({
-        where: { email, organizationId: id, status: 'PENDING' }
-      });
-
-      if (existingInvite) {
-        return res.status(400).json({ error: `Invitation already sent to ${email}.` });
-      }
-
+    for (const email of normalizedEmails) {
       const token = generateToken();
       const invite = await prisma.organizationInvitation.create({
         data: {
@@ -154,8 +168,9 @@ exports.inviteMembers = async (req, res) => {
 
       // Push real-time notification if the invited user is online
       if (global.io) {
-        // Find the user by email to get their userId for the socket room
-        const invitedUser = await prisma.user.findUnique({ where: { email } });
+        const invitedUser = await prisma.user.findFirst({
+          where: { email: { equals: email, mode: 'insensitive' } }
+        });
         if (invitedUser) {
           global.io.to(`user:${invitedUser.id}`).emit('notification:invite', {
             token: invite.token,
@@ -380,14 +395,21 @@ exports.addCoHost = async (req, res) => {
   try {
     const { id } = req.params; // org id
     const { userId } = req.body;
-    const org = await prisma.organization.findUnique({ where: { id }, include: { coHosts: true } });
+    const org = await prisma.organization.findUnique({ where: { id }, include: { coHosts: true, users: true } });
     if (!org) return res.status(404).json({ error: 'Org not found' });
     if (org.ownerId !== req.user.userId) return res.status(403).json({ error: 'Only owner can manage co-hosts' });
-    
-    await prisma.organization.update({
-      where: { id },
-      data: { coHosts: { connect: { id: userId } } }
-    });
+
+    const targetUser = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+    if (!targetUser) return res.status(404).json({ error: 'User not found' });
+
+    // Co-hosts must also be organization members, otherwise org-scoped
+    // queries (org meetings, access checks) treat them as outsiders.
+    const data = { coHosts: { connect: { id: userId } } };
+    if (!org.users.some((u) => u.id === userId)) {
+      data.users = { connect: { id: userId } };
+    }
+
+    await prisma.organization.update({ where: { id }, data });
     if (global.sseEmit) global.sseEmit('dashboard:refresh');
     if (global.io) global.io.emit('dashboard:refresh');
     res.json({ message: 'Co-Host added successfully' });
@@ -443,7 +465,8 @@ exports.joinByCode = async (req, res) => {
       where: {
         organizationId: org.id,
         email: user.email,
-        status: 'PENDING'
+        status: 'PENDING',
+        expiresAt: { gt: new Date() }
       }
     });
 

@@ -3,21 +3,21 @@ const ITranslationProvider = require('./base.adapter');
 /**
  * IndicTrans2Adapter
  * Implements AI4Bharat IndicTrans2 Neural Translation engine (IIT Madras).
- * Supports sovereign self-hosted CTranslate2 / ONNX inference server running locally or via Docker.
- * Eliminates per-character cloud fees and prevents foreign cloud vendor lock-in.
+ * Sends requests directly to the dedicated sovereign inference domain (https://ai.aditya-kumar.in).
+ * Zero Hugging Face cloud dependencies.
  */
 class IndicTrans2Adapter extends ITranslationProvider {
-  constructor(endpoint = process.env.INDICTRANS2_ENDPOINT) {
+  constructor(endpoint = process.env.INDICTRANS2_ENDPOINT || process.env.AI_ENGINE_DOMAIN || 'https://ai.aditya-kumar.in') {
     super('IndicTrans2');
-    this.endpoint = endpoint;
-    this.hfToken = process.env.HF_TOKEN || '';
+    this.endpoint = endpoint.replace(/\/+$/, '');
+    this.fallbackEndpoint = (process.env.LOCAL_AI_ENGINE_ENDPOINT || 'http://localhost:8000').replace(/\/+$/, '');
     this.supportedLanguages = new Set([
       'en', 'hi', 'ta', 'te', 'bn', 'mr', 'gu', 'kn', 'pa', 'ur', 'ml', 'or', 'as'
     ]);
   }
 
   isAvailable() {
-    return Boolean(this.endpoint || this.hfToken);
+    return Boolean(this.endpoint || this.fallbackEndpoint);
   }
 
   isLanguageSupported(lang) {
@@ -29,59 +29,61 @@ class IndicTrans2Adapter extends ITranslationProvider {
       return text;
     }
 
-    // 1. If Hugging Face Token is configured, use Hugging Face Cloud Inference API (Zero Storage)
-    if (this.hfToken) {
+    const src = (sourceLang || '').toLowerCase().split(/[-_]/)[0];
+    const tgt = (targetLang || '').toLowerCase().split(/[-_]/)[0];
+
+    // This deployment hosts the English→Indic checkpoint only. Sending a
+    // non-English source produces transliterated garbage, so let the composite
+    // adapter use its real fallback instead.
+    if (src !== 'en') {
+      throw new Error(`IndicTrans2 en→indic engine cannot translate source "${sourceLang}"`);
+    }
+
+    // Prefer the local GPU engine; the public tunnel is only a backup.
+    const endpointsToTry = [this.fallbackEndpoint, this.endpoint]
+      .filter(Boolean)
+      .filter((ep, i, arr) => arr.indexOf(ep) === i);
+
+    for (const ep of endpointsToTry) {
       try {
-        const hfUrl = 'https://router.huggingface.co/hf-inference/models/facebook/nllb-200-distilled-600M';
-        const response = await fetch(hfUrl, {
+        const url = `${ep}/translate`;
+        const response = await fetch(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.hfToken}`
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) BhashaBridge-AI/2.0'
           },
-          body: JSON.stringify({ inputs: text }),
-          signal: AbortSignal.timeout(4000)
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (Array.isArray(data) && data[0]?.translation_text) {
-            return data[0].translation_text;
-          }
-        }
-      } catch (err) {
-        // Fallback to endpoint or composite chain
-      }
-    }
-
-    // 2. If a dedicated remote endpoint is configured, call it
-    if (this.endpoint) {
-      try {
-        const url = `${this.endpoint}/translate`;
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             text,
-            source_language: sourceLang,
-            target_language: targetLang
+            source_language: src,
+            target_language: tgt
           }),
-          signal: AbortSignal.timeout(3000)
+          signal: AbortSignal.timeout(12000)
         });
 
-        if (response.ok) {
-          const data = await response.json();
-          return data.translated_text || data.translation || text;
+        if (!response.ok) {
+          console.warn(`[IndicTrans2] Endpoint ${ep} responded with HTTP ${response.status}`);
+          continue;
         }
-        throw new Error(`IndicTrans2 server responded with HTTP ${response.status}`);
+
+        const data = await response.json();
+        if (data && data.error) {
+          console.warn(`[IndicTrans2] Endpoint ${ep} returned an error: ${String(data.error).slice(0, 120)}`);
+          continue;
+        }
+
+        const translated = data?.translated_text ?? data?.translation;
+        if (typeof translated === 'string' && translated.trim()) {
+          return translated;
+        }
+        console.warn(`[IndicTrans2] Endpoint ${ep} returned an empty translation`);
       } catch (err) {
-        throw new Error(`IndicTrans2 inference unavailable: ${err.message}`);
+        console.warn(`[IndicTrans2] Request to ${ep} failed: ${err.message}`);
       }
     }
 
-    throw new Error('No IndicTrans2 endpoint or HF_TOKEN available');
+    throw new Error(`IndicTrans2 inference failed across all configured endpoints (${endpointsToTry.join(', ')})`);
   }
 }
 
 module.exports = IndicTrans2Adapter;
-

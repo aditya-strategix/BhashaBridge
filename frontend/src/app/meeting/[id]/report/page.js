@@ -9,6 +9,7 @@ import api from '../../../../services/api';
 export default function MeetingReport() {
   const params = useParams();
   const { id: meetingId } = params;
+  const router = useRouter();
   const { user, initialize } = useAuthStore();
   const [report, setReport] = useState(null);
   const [summaryModal, setSummaryModal] = useState(null);
@@ -18,7 +19,12 @@ export default function MeetingReport() {
   const [error, setError] = useState(null);
   const [alertData, setAlertData] = useState(null);
 
-  useEffect(() => { initialize(); }, [initialize]);
+  useEffect(() => {
+    initialize();
+    if (typeof window !== 'undefined' && !localStorage.getItem('token')) {
+      router.replace(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
+    }
+  }, [initialize, router]);
 
   useEffect(() => {
     if (!user) return;

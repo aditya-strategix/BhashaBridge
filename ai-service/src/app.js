@@ -27,9 +27,9 @@ app.get('/health', (req, res) => {
     },
     adapters: {
       geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
-      indicTrans2Configured: Boolean(process.env.INDICTRANS2_ENDPOINT || process.env.HF_TOKEN),
-      whisperConfigured: Boolean(process.env.WHISPER_ENDPOINT || process.env.OPENAI_WHISPER_API_KEY),
-      bhashiniConfigured: Boolean(process.env.BHASHINI_ENDPOINT || process.env.BHASHINI_API_KEY || true)
+      indicTrans2Configured: Boolean(process.env.INDICTRANS2_ENDPOINT || process.env.AI_ENGINE_DOMAIN),
+      whisperConfigured: Boolean(process.env.WHISPER_ENDPOINT || process.env.AI_ENGINE_DOMAIN),
+      bhashiniConfigured: Boolean(process.env.BHASHINI_ENDPOINT || process.env.BHASHINI_API_KEY)
     }
   });
 });

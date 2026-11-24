@@ -1,10 +1,24 @@
 const { Resend } = require('resend');
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// The Resend constructor throws when the key is missing, which used to crash
+// the whole backend at import time. Defer the failure to the send call.
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+
+const sendEmail = async (payload) => {
+  if (!resend) {
+    throw new Error('RESEND_API_KEY is not configured; email delivery is disabled');
+  }
+  const result = await resend.emails.send(payload);
+  // Resend reports delivery failures via `error` instead of throwing.
+  if (result?.error) {
+    throw new Error(result.error.message || 'Resend rejected the email');
+  }
+  return result;
+};
 
 const sendOrganizationInvitation = async (email, orgName, hostName, orgCode, inviteLink) => {
   try {
-    const data = await resend.emails.send({
+    const data = await sendEmail({
       from: 'BhashaBridge <bhashabridge@aditya-kumar.in>',
       to: email,
       subject: `You have been invited to join ${orgName} on BhashaBridge`,
@@ -46,7 +60,7 @@ const sendOrganizationInvitation = async (email, orgName, hostName, orgCode, inv
 
 const sendPasswordResetOtp = async (email, otp, userName) => {
   try {
-    const data = await resend.emails.send({
+    const data = await sendEmail({
       from: 'BhashaBridge <bhashabridge@aditya-kumar.in>',
       to: email,
       subject: `${otp} is your BhashaBridge Verification Code`,
@@ -103,7 +117,7 @@ const sendMeetingInvitation = async ({ recipientEmail, meetingTitle, hostName, m
         })
       : 'Happening Now / Flexible';
 
-    const data = await resend.emails.send({
+    const data = await sendEmail({
       from: 'BhashaBridge <bhashabridge@aditya-kumar.in>',
       to: recipientEmail,
       subject: `Invitation: ${meetingTitle || 'Meeting'} on BhashaBridge`,

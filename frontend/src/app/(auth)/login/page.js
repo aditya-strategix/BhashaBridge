@@ -27,7 +27,11 @@ export default function Login() {
     if (success) {
       const urlParams = new URLSearchParams(window.location.search);
       const redirect = urlParams.get('redirect');
-      router.push(redirect || '/dashboard');
+      // Only allow same-origin paths, preventing open redirects.
+      const safeRedirect = redirect && redirect.startsWith('/') && !redirect.startsWith('//')
+        ? redirect
+        : '/dashboard';
+      router.push(safeRedirect);
     }
   };
 

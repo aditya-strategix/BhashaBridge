@@ -4,17 +4,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { Bell, X, Check, Building2, Clock } from 'lucide-react';
 import api from '../services/api';
+import { getSocketBaseUrl } from '../services/urls';
 import useAuthStore from '../stores/authStore';
 
-const getSocketUrl = () => {
-  if (process.env.NEXT_PUBLIC_SOCKET_URL && !process.env.NEXT_PUBLIC_SOCKET_URL.includes('localhost')) {
-    return process.env.NEXT_PUBLIC_SOCKET_URL;
-  }
-  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    return window.location.origin;
-  }
-  return process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
-};
+const getSocketUrl = () => getSocketBaseUrl();
 
 // ---- tiny helper ----
 function timeAgo(dateStr) {
@@ -34,6 +27,7 @@ export default function NotificationBell() {
   const [isMobile, setIsMobile] = useState(false);
   const dropdownRef = useRef(null);
   const socketRef = useRef(null);
+  const toastTimerRef = useRef(null);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(typeof window !== 'undefined' && window.innerWidth < 640);
@@ -44,8 +38,13 @@ export default function NotificationBell() {
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3500);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3500);
   };
+
+  useEffect(() => () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+  }, []);
 
   const fetchInvites = useCallback(async () => {
     try {
@@ -68,7 +67,10 @@ export default function NotificationBell() {
   useEffect(() => {
     if (!user) return;
 
-    const sock = io(getSocketUrl(), { transports: ['websocket'] });
+    const sock = io(getSocketUrl(), {
+      transports: ['websocket'],
+      auth: { token: typeof window !== 'undefined' ? localStorage.getItem('token') : null }
+    });
     socketRef.current = sock;
 
     sock.on('connect', () => {

@@ -394,7 +394,7 @@ export default function Home() {
               <li><a href="#languages">Supported Languages</a></li>
               <li><a href="#workflow">Workflow Guide</a></li>
               <li><Link href="/dashboard">Host Dashboard</Link></li>
-              <li><Link href="/login">Admin Panel</Link></li>
+              <li><Link href="/admin">Admin Panel</Link></li>
             </ul>
           </div>
 

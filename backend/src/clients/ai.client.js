@@ -67,7 +67,7 @@ class AIServiceClient {
       }
     } else {
       // Standard JSON fallback over HTTP
-      const response = await fetch(`${this.baseUrl}/api/v1/ai/summary`, {
+      const response = await fetch(`${this.getBaseUrl()}/api/v1/ai/summary`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -97,7 +97,8 @@ class AIServiceClient {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, sourceLanguage, targetLanguages }),
-      signal: AbortSignal.timeout(6000)
+      // Cold-start model loading + multi-language fan-out can exceed 6s.
+      signal: AbortSignal.timeout(20000)
     });
 
     if (!response.ok) {
@@ -123,7 +124,9 @@ class AIServiceClient {
           language: lang,
           gender: options.gender || 'female'
         }),
-        signal: AbortSignal.timeout(6000)
+        // Neural synthesis on the GPU can take longer than simple REST calls;
+        // don't abort while the engine is still generating real speech.
+        signal: AbortSignal.timeout(45000)
       });
 
       if (!response.ok) {
@@ -151,7 +154,9 @@ class AIServiceClient {
         'X-Target-Languages': targetLanguages.join(',')
       },
       body: avroPayload,
-      signal: AbortSignal.timeout(4000)
+      // Non-English sources use the fallback translator, which can take a few
+      // seconds; 4s was consistently aborting live captions.
+      signal: AbortSignal.timeout(10000)
     });
 
     if (response.ok) {

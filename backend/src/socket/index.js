@@ -1,5 +1,7 @@
 const { Server } = require('socket.io');
+const jwt = require('jsonwebtoken');
 const aiClient = require('../clients/ai.client');
+const sfuClient = require('../clients/sfu.client');
 const prisma = require('../prisma');
 const { withDbRetry } = require('../prisma');
 const avro = require('../avro');
@@ -14,6 +16,41 @@ function setupSocket(server) {
     pingInterval: 10000, // Ping every 10 seconds
     pingTimeout: 5000,   // Disconnect if no pong within 5 seconds
   });
+
+  // Optional-but-authoritative identity: real clients send their JWT in the
+  // handshake. Once verified, privileged actions and joins use this identity
+  // instead of client-supplied userId/role fields.
+  io.use((socket, next) => {
+    const raw = socket.handshake.auth?.token
+      || socket.handshake.query?.token
+      || (socket.handshake.headers?.authorization || '').replace(/^Bearer\s+/i, '');
+    if (raw) {
+      try {
+        socket.authUser = jwt.verify(raw, process.env.JWT_SECRET || 'fallback_secret_for_dev');
+      } catch (_) {
+        socket.authUser = null;
+      }
+    }
+    next();
+  });
+
+  async function getAuthorizedRole(socket, meeting) {
+    const uid = socket?.authUser?.userId;
+    if (!uid || !meeting) return null;
+    if (meeting.hostId === uid) return 'HOST';
+    const org = meeting.organization;
+    if (org && (org.ownerId === uid || (org.coHosts || []).some((c) => c.id === uid))) {
+      return 'COHOST';
+    }
+    const participant = await withDbRetry(p => p.participant.findUnique({
+      where: { userId_meetingId: { userId: uid, meetingId: meeting.id } },
+      select: { role: true, status: true }
+    })).catch(() => null);
+    if (participant && participant.status === 'ADMITTED' && (participant.role === 'HOST' || participant.role === 'COHOST')) {
+      return participant.role;
+    }
+    return null;
+  }
 
   async function resolveMeeting(identifier) {
     if (!identifier) return null;
@@ -53,18 +90,22 @@ function setupSocket(server) {
     console.log(`User connected: ${socket.id}`);
 
     // Allow users to join their personal notification room
-    socket.on('user:register', ({ userId }) => {
-      if (userId) {
-        socket.join(`user:${userId}`);
-        socket.join(`user_${userId}`);
-        socket.userId = userId;
-        console.log(`User ${userId} registered for notifications`);
+    socket.on('user:register', ({ userId } = {}) => {
+      const effectiveUserId = socket.authUser?.userId || userId;
+      if (effectiveUserId) {
+        socket.join(`user:${effectiveUserId}`);
+        socket.join(`user_${effectiveUserId}`);
+        socket.userId = effectiveUserId;
+        console.log(`User ${effectiveUserId} registered for notifications`);
       }
     });
 
     // Join meeting room
-    socket.on('meeting:join', async ({ meetingId, userId, peerId, language, isAudioOn, isVideoOn }) => {
+    socket.on('meeting:join', async (payload = {}) => {
       try {
+        const { meetingId, peerId, language, isAudioOn, isVideoOn } = payload;
+        // A verified token always wins over a client-supplied userId.
+        const userId = socket.authUser?.userId || payload.userId;
         const meeting = await resolveMeeting(meetingId);
         if (!meeting) return;
         if (meeting.state === 'COMPLETED' || meeting.state === 'CANCELLED') {
@@ -114,11 +155,6 @@ function setupSocket(server) {
 
         socket.join(`user_${userId}`);
         socket.join(`user:${userId}`);
-        socket.join(meeting.meetingLink);
-        socket.join(meeting.id);
-        if (cleanLink && cleanLink !== meeting.meetingLink && cleanLink !== meeting.id) {
-          socket.join(cleanLink);
-        }
 
         if (participant.status === 'WAITING') {
           socket.isWaiting = true;
@@ -127,6 +163,13 @@ function setupSocket(server) {
           io.to(meeting.id).emit('waiting:request', waitPayload);
         } else if (participant.status === 'ADMITTED') {
           socket.isWaiting = false;
+          // Admitted participants are the only ones allowed in the live room;
+          // waiting/rejected users stay in their personal notification room.
+          socket.join(meeting.meetingLink);
+          socket.join(meeting.id);
+          if (cleanLink && cleanLink !== meeting.meetingLink && cleanLink !== meeting.id) {
+            socket.join(cleanLink);
+          }
           const effectiveRole = participant.userId === meeting.hostId ? 'HOST' : (participant.role === 'HOST' ? 'COHOST' : participant.role);
           const joinedPayload = { 
             userId, 
@@ -175,8 +218,9 @@ function setupSocket(server) {
       }
     });
 
-    socket.on('meeting:admit', async ({ meetingId, targetUserId }) => {
+    socket.on('meeting:admit', async ({ meetingId, targetUserId } = {}) => {
       try {
+        if (!socket.authUser?.userId) return;
         const meeting = await resolveMeeting(meetingId);
         if (!meeting) return;
         const caller = await prisma.participant.findUnique({ where: { userId_meetingId: { userId: socket.userId, meetingId: meeting.id } } });
@@ -198,8 +242,9 @@ function setupSocket(server) {
       }
     });
 
-    socket.on('meeting:reject', async ({ meetingId, targetUserId }) => {
+    socket.on('meeting:reject', async ({ meetingId, targetUserId } = {}) => {
       try {
+        if (!socket.authUser?.userId) return;
         const meeting = await resolveMeeting(meetingId);
         if (!meeting) return;
         const caller = await prisma.participant.findUnique({ where: { userId_meetingId: { userId: socket.userId, meetingId: meeting.id } } });
@@ -221,29 +266,21 @@ function setupSocket(server) {
       }
     });
 
-    socket.on('meeting:remove_participant', async ({ meetingId, targetUserId }) => {
+    socket.on('meeting:remove_participant', async ({ meetingId, targetUserId } = {}) => {
       try {
-        const meeting = await prisma.meeting.findUnique({ 
-          where: { meetingLink: meetingId },
-          include: { organization: { include: { coHosts: true } } }
-        });
+        if (!socket.authUser?.userId) return;
+        const meeting = await resolveMeeting(meetingId);
         if (!meeting) return;
+        if (meeting.state === 'COMPLETED' || meeting.state === 'CANCELLED') return;
 
-        let isOrgAdmin = false;
-        if (meeting.organization) {
-          if (meeting.organization.ownerId === socket.userId || meeting.organization.coHosts.some(c => c.id === socket.userId)) {
-            isOrgAdmin = true;
-          }
-        }
+        const callerRole = await getAuthorizedRole(socket, meeting);
+        if (!callerRole) return;
 
         const caller = await prisma.participant.findUnique({
-          where: { userId_meetingId: { userId: socket.userId, meetingId: meeting.id } }
+          where: { userId_meetingId: { userId: socket.authUser.userId, meetingId: meeting.id } }
         });
-
-        const isHost = meeting.hostId === socket.userId || isOrgAdmin || (caller && caller.role === 'HOST');
+        const isHost = callerRole === 'HOST' || (caller && caller.role === 'HOST');
         const isCoHost = caller && caller.role === 'COHOST';
-
-        if (!isHost && !isCoHost) return;
 
         const target = await prisma.participant.findUnique({
           where: { userId_meetingId: { userId: targetUserId, meetingId: meeting.id } }
@@ -258,8 +295,25 @@ function setupSocket(server) {
           data: { status: 'REJECTED' }
         });
 
-        io.to(meetingId).emit('participant:removed', { userId: targetUserId });
-        io.to(meetingId).emit('meeting:refresh');
+        // Make the removed participant actually leave the live rooms so they
+        // stop receiving chat/captions/media-consumer updates.
+        const targetSockets = await io.in(meeting.id).fetchSockets();
+        for (const s of targetSockets) {
+          if (s.userId !== targetUserId) continue;
+          try {
+            s.leave(meeting.id);
+            s.leave(meeting.meetingLink);
+            if (s.cleanLink) s.leave(s.cleanLink);
+          } catch (_) {}
+          s.emit('participant:removed', { userId: targetUserId });
+          s.disconnect(true);
+        }
+
+        // Broadcast to every alias so no room keeps a stale tile.
+        for (const roomId of new Set([meetingId, meeting.id, meeting.meetingLink].filter(Boolean))) {
+          io.to(roomId).emit('participant:removed', { userId: targetUserId });
+          io.to(roomId).emit('meeting:refresh');
+        }
         io.emit('dashboard:refresh');
         if (global.sseEmit) global.sseEmit('dashboard:refresh');
       } catch (err) {
@@ -267,22 +321,49 @@ function setupSocket(server) {
       }
     });
 
-    socket.on('meeting:end', async ({ meetingId, endedBy }) => {
+    socket.on('meeting:end', async ({ meetingId } = {}) => {
       try {
-        const meeting = await resolveMeeting(meetingId);
-        let finalEndedBy = endedBy;
-        if (!finalEndedBy && socket.userId) {
-          const u = await withDbRetry(p => p.user.findUnique({
-            where: { id: socket.userId },
-            select: { name: true }
-          }));
-          const isHost = meeting && meeting.hostId === socket.userId;
-          finalEndedBy = {
-            name: u?.name || socket.userName || (isHost ? 'Host' : 'Co-host'),
-            role: isHost ? 'HOST' : 'COHOST',
-            userId: socket.userId
-          };
+        // Only a verified host / org admin / co-host may end a meeting.
+        if (!socket.authUser?.userId) return;
+        const meeting = await resolveMeeting(meetingId || socket.dbMeetingId || socket.meetingId);
+        if (!meeting) return;
+
+        const role = await getAuthorizedRole(socket, meeting);
+        if (!role) {
+          console.warn(`[Socket] Unauthorized meeting:end attempt by ${socket.authUser.userId}`);
+          return;
         }
+
+        const caller = await withDbRetry(p => p.user.findUnique({
+          where: { id: socket.authUser.userId },
+          select: { name: true }
+        }));
+        const finalEndedBy = {
+          name: caller?.name || socket.userName || (role === 'HOST' ? 'Host' : 'Co-host'),
+          role,
+          userId: socket.authUser.userId
+        };
+
+        let currentCache = {};
+        if (meeting.summaryCache) {
+          try {
+            currentCache = typeof meeting.summaryCache === 'string'
+              ? JSON.parse(meeting.summaryCache)
+              : meeting.summaryCache;
+          } catch (_) {}
+        }
+        currentCache._endedBy = finalEndedBy;
+
+        await withDbRetry(p => p.meeting.update({
+          where: { id: meeting.id },
+          data: {
+            state: 'COMPLETED',
+            endTime: new Date(),
+            startTime: meeting.startTime || meeting.createdAt,
+            summaryCache: currentCache
+          }
+        }));
+
         const payload = { endedBy: finalEndedBy };
         io.to(meetingId).emit('meeting:ended', payload);
         if (meeting?.meetingLink && meeting.meetingLink !== meetingId) {
@@ -294,6 +375,15 @@ function setupSocket(server) {
         io.to(meetingId).emit('meeting:refresh');
         io.emit('dashboard:refresh');
         if (global.sseEmit) global.sseEmit('dashboard:refresh');
+
+        // Release SFU room routers and media resources (best-effort; the SFU
+        // may not be deployed in every environment).
+        const sfuRoomIds = new Set(
+          [meetingId, meeting?.meetingLink, meeting?.id].filter(Boolean).map(String)
+        );
+        for (const roomId of sfuRoomIds) {
+          sfuClient.closeRoom(roomId).catch(() => {});
+        }
       } catch (err) {
         console.error('Socket meeting:end error', err);
       }
@@ -330,11 +420,18 @@ function setupSocket(server) {
     });
 
     // Handle chat messages
-    socket.on('chat:message', async (data) => {
-      const { meetingId, senderId, text, language } = data;
-      
+    socket.on('chat:message', async (data = {}) => {
+      if (socket.isWaiting || !data.text || !String(data.text).trim()) return;
+      // Verified identity / canonical room win over client-supplied fields.
+      const senderId = socket.authUser?.userId || data.senderId;
+      const meetingId = socket.dbMeetingId || socket.meetingId || data.meetingId;
+      const text = String(data.text).trim();
+      const language = data.language;
+      if (!senderId || !meetingId) return;
+      const payload = { ...data, meetingId, senderId, text };
+
       // Emit original message to everyone immediately
-      io.to(meetingId).emit('chat:message', data);
+      io.to(meetingId).emit('chat:message', payload);
         if (socket.dbMeetingId) {
           prisma.chatMessage.create({
             data: { meetingId: socket.dbMeetingId, senderId, originalText: text, originalLanguage: language }
@@ -379,21 +476,29 @@ function setupSocket(server) {
       }
     });
 
-    socket.on('meeting:force_mute_all', async ({ role }) => {
-      if (socket.meetingId && (role === 'HOST' || role === 'COHOST')) {
+    socket.on('meeting:force_mute_all', async () => {
+      if (!socket.meetingId || !socket.authUser?.userId) return;
+      const meeting = await resolveMeeting(socket.dbMeetingId || socket.meetingId);
+      const role = await getAuthorizedRole(socket, meeting);
+      if (role) {
         socket.to(socket.meetingId).emit('participant:force_mute_received', { muterRole: role });
       }
     });
 
-    socket.on('meeting:force_video_off_all', async ({ role }) => {
-      if (socket.meetingId && (role === 'HOST' || role === 'COHOST')) {
+    socket.on('meeting:force_video_off_all', async () => {
+      if (!socket.meetingId || !socket.authUser?.userId) return;
+      const meeting = await resolveMeeting(socket.dbMeetingId || socket.meetingId);
+      const role = await getAuthorizedRole(socket, meeting);
+      if (role) {
         socket.to(socket.meetingId).emit('participant:force_video_off_received', { muterRole: role });
       }
     });
 
-    socket.on('meeting:lock_hardware', async ({ role, type, locked }) => {
-      console.log('BACKEND RECEIVED lock_hardware', { role, type, locked, meetingId: socket.meetingId });
-      if (socket.meetingId && (role === 'HOST' || role === 'COHOST')) {
+    socket.on('meeting:lock_hardware', async ({ type, locked } = {}) => {
+      if (!socket.meetingId || !socket.authUser?.userId) return;
+      const meeting = await resolveMeeting(socket.dbMeetingId || socket.meetingId);
+      const role = await getAuthorizedRole(socket, meeting);
+      if (role) {
         socket.to(socket.meetingId).emit('participant:hardware_locked', { muterRole: role, type, locked });
         console.log('BACKEND EMITTED hardware_locked to', socket.meetingId);
       }
@@ -414,22 +519,32 @@ function setupSocket(server) {
     });
 
     // Handle captions
-    socket.on('caption:text', async (data) => {
-      const { meetingId, speakerId, text, language } = data;
-      if (!text || !text.trim()) return;
+    socket.on('caption:text', async (data = {}) => {
+      if (socket.isWaiting || !data.text || !String(data.text).trim()) return;
+      // Verified identity / canonical room win over client-supplied fields.
+      const speakerId = socket.authUser?.userId || data.speakerId;
+      const meetingId = socket.dbMeetingId || socket.meetingId || data.meetingId;
+      const text = String(data.text);
+      const language = data.language;
+      if (!speakerId || !meetingId) return;
       const cleanText = text.trim();
-
-      const now = Date.now();
-      if (socket.lastCaption && socket.lastCaption.text.toLowerCase() === cleanText.toLowerCase() && (now - socket.lastCaption.time < 3000)) {
+      const lower = cleanText.toLowerCase();
+      if (cleanText.startsWith('[') || lower.includes('audio stream') || lower.includes('stream chunk') || lower.includes('875 bytes') || lower.includes('ऑडियो स्ट्रीम')) {
         return;
       }
-      socket.lastCaption = { text: cleanText, time: now };
+
+      const now = Date.now();
+      const normCaption = cleanText.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
+      if (socket.lastCaption && socket.lastCaption.norm === normCaption && (now - socket.lastCaption.time < 8000)) {
+        return;
+      }
+      socket.lastCaption = { text: cleanText, norm: normCaption, time: now };
 
       const targetRoom = socket.dbMeetingId || meetingId;
 
       // Broadcast live caption once to canonical room
       console.log(`[CAPTION:TEXT] targetRoom: ${targetRoom}, speakerId: ${speakerId}, text: "${cleanText}"`);
-      io.to(targetRoom).emit('caption:text', { ...data, text: cleanText });
+      io.to(targetRoom).emit('caption:text', { ...data, speakerId, meetingId: targetRoom, text: cleanText });
         if (socket.dbMeetingId) {
           prisma.caption.create({
             data: { meetingId: socket.dbMeetingId, speakerId, originalText: cleanText, originalLanguage: language }
@@ -464,7 +579,7 @@ function setupSocket(server) {
             }
           }
           const captionId = `cap_${speakerId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-          const captionPayload = { id: captionId, text, sourceLanguage: language, speakerId, senderSocketId: socket.id, translations };
+          const captionPayload = { id: captionId, text, sourceLanguage: language, speakerId, speakerName: socket.userName || data.speakerName || 'Speaker', senderSocketId: socket.id, translations };
           console.log(`[CAPTION:EMITTING] Emitting caption:translated to ${targetRoom}:`, captionPayload.id);
           io.to(targetRoom).emit('caption:translated', captionPayload);
 

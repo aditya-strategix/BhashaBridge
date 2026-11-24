@@ -20,9 +20,12 @@ const server = http.createServer(app);
 let io = null;
 try {
   const { Server } = require('socket.io');
+  const socketCorsOrigin = config.service.corsOrigins.includes('*')
+    ? true
+    : config.service.corsOrigins;
   io = new Server(server, {
     cors: {
-      origin: config.service.corsOrigins,
+      origin: socketCorsOrigin,
       methods: ['GET', 'POST'],
       credentials: true
     },
@@ -63,12 +66,32 @@ async function startServer() {
 // Graceful Shutdown
 function gracefulShutdown(signal) {
   console.log(`\n[SFU Server] Received ${signal}. Gracefully stopping SFU media routers...`);
-  roomManager.closeAll();
-  workerPool.close();
+
+  // Do not let upgraded WebSocket connections keep the process alive forever.
+  const forceExit = setTimeout(() => {
+    console.warn('[SFU Server] Graceful shutdown timed out; forcing exit.');
+    process.exit(1);
+  }, 10000);
+  if (typeof forceExit.unref === 'function') forceExit.unref();
+
+  try { roomManager.closeAll(); } catch (_) {}
+  try { workerPool.close(); } catch (_) {}
+  if (io) {
+    try { io.close(); } catch (_) {}
+  }
+
   server.close(() => {
+    clearTimeout(forceExit);
     console.log('[SFU Server] HTTP server terminated. Exit complete.');
     process.exit(0);
   });
+
+  if (typeof server.closeAllConnections === 'function') {
+    const t = setTimeout(() => {
+      try { server.closeAllConnections(); } catch (_) {}
+    }, 5000);
+    if (typeof t.unref === 'function') t.unref();
+  }
 }
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

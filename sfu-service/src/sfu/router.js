@@ -19,8 +19,9 @@ class SFURoomRouter extends EventEmitter {
     this.transports = new Map(); // transportId -> transport
     this.producers = new Map();  // producerId -> producer
     this.consumers = new Map();  // consumerId -> consumer
-    this.peers = new Map();      // peerId -> { transports, producers, consumers }
+    this.peers = new Map();      // peerId -> { transports, producers, consumers, metadata }
     this.audioTaps = new Map();  // producerId -> AudioTap
+    this.consumersByProducer = new Map(); // producerId -> Set<consumerId>
 
     console.log(`[SFURoomRouter] Provisioned router for meeting: ${meetingId} on worker: ${worker.pid || worker.id}`);
   }
@@ -50,7 +51,12 @@ class SFURoomRouter extends EventEmitter {
 
     // Track peer associations
     if (!this.peers.has(peerId)) {
-      this.peers.set(peerId, { transports: new Set(), producers: new Set(), consumers: new Set() });
+      this.peers.set(peerId, {
+        transports: new Set(),
+        producers: new Set(),
+        consumers: new Set(),
+        metadata: options.metadata || {}
+      });
     }
     this.peers.get(peerId).transports.add(transport.id);
 
@@ -117,12 +123,24 @@ class SFURoomRouter extends EventEmitter {
         this.audioTaps.delete(producer.id);
       }
 
+      // Close any downstream consumers of this producer.
+      const consumers = this.consumersByProducer.get(producer.id);
+      if (consumers) {
+        for (const consumerId of consumers) {
+          const consumer = this.consumers.get(consumerId);
+          if (consumer) {
+            try { consumer.close(); } catch (_) {}
+          }
+        }
+        this.consumersByProducer.delete(producer.id);
+      }
+
       this.emit('producer-closed', { producerId: producer.id, peerId, kind });
     });
 
     // Auto-create Server-Side Audio Tap for audio tracks if enabled
     if (kind === 'audio' && config.audioTap.enabled) {
-      this.createAudioTap(producer.id, peerId);
+      this.createAudioTap(producer.id, enrichedAppData.userId || peerId);
     }
 
     this.emit('new-producer', {
@@ -132,7 +150,12 @@ class SFURoomRouter extends EventEmitter {
       appData: enrichedAppData
     });
 
-    return { id: producer.id, kind: producer.kind };
+    return {
+      id: producer.id,
+      kind: producer.kind,
+      paused: Boolean(producer.paused),
+      appData: enrichedAppData
+    };
   }
 
   /**
@@ -151,20 +174,44 @@ class SFURoomRouter extends EventEmitter {
     }
 
     const peerId = transport.appData.peerId;
+    // Consumer appData describes the *producer* so downstream clients can
+    // attribute the track to the right participant. Consumer-supplied extras
+    // must not overwrite the producer's identity (userId/name/role/...).
+    const producerAppData = producer.appData || {};
+    const consumerAppData = {
+      ...appData,
+      ...producerAppData,
+      producerPeerId: producerAppData.peerId || null,
+      peerId: producerAppData.peerId || null,
+      consumerPeerId: peerId,
+      meetingId: this.meetingId,
+      kind: producer.kind
+    };
+
     const consumer = await transport.consume({
       producerId,
       rtpCapabilities,
       paused: false,
-      appData: { ...appData, peerId, meetingId: this.meetingId, kind: producer.kind }
+      appData: consumerAppData
     });
 
     this.consumers.set(consumer.id, consumer);
     const peer = this.peers.get(peerId);
     if (peer) peer.consumers.add(consumer.id);
 
+    if (!this.consumersByProducer.has(producerId)) {
+      this.consumersByProducer.set(producerId, new Set());
+    }
+    this.consumersByProducer.get(producerId).add(consumer.id);
+
     consumer.on('close', () => {
       this.consumers.delete(consumer.id);
       if (peer) peer.consumers.delete(consumer.id);
+      const consumers = this.consumersByProducer.get(producerId);
+      if (consumers) {
+        consumers.delete(consumer.id);
+        if (consumers.size === 0) this.consumersByProducer.delete(producerId);
+      }
     });
 
     consumer.on('producerclose', () => {
@@ -178,7 +225,8 @@ class SFURoomRouter extends EventEmitter {
       kind: consumer.kind,
       rtpParameters: consumer.rtpParameters,
       type: consumer.type,
-      producerPaused: producer.paused
+      producerPaused: producer.paused,
+      appData: consumer.appData
     };
   }
 
@@ -194,7 +242,7 @@ class SFURoomRouter extends EventEmitter {
       return this.audioTaps.get(producerId);
     }
 
-    const audioTap = new AudioTap(producer, this.meetingId, participantId, options);
+    const audioTap = new AudioTap(producer, this.meetingId, participantId, options, this.router);
     this.audioTaps.set(producerId, audioTap);
     audioTap.start();
 
@@ -235,6 +283,81 @@ class SFURoomRouter extends EventEmitter {
   }
 
   /**
+   * Producer lookup / lifecycle helpers
+   */
+  getProducer(producerId) {
+    return this.producers.get(producerId) || null;
+  }
+
+  getProducers() {
+    return Array.from(this.producers.values()).map((producer) => ({
+      producerId: producer.id,
+      id: producer.id,
+      kind: producer.kind,
+      peerId: producer.appData?.peerId,
+      paused: Boolean(producer.paused),
+      appData: producer.appData || {}
+    }));
+  }
+
+  async pauseProducer(producerId) {
+    const producer = this.producers.get(producerId);
+    if (!producer) throw new Error(`Producer ${producerId} not found`);
+    await producer.pause();
+    return { producerId, paused: true };
+  }
+
+  async resumeProducer(producerId) {
+    const producer = this.producers.get(producerId);
+    if (!producer) throw new Error(`Producer ${producerId} not found`);
+    await producer.resume();
+    return { producerId, paused: false };
+  }
+
+  closeProducer(producerId) {
+    const producer = this.producers.get(producerId);
+    if (!producer) return false;
+    producer.close();
+    return true;
+  }
+
+  getPeer(peerId) {
+    const peer = this.peers.get(peerId);
+    if (!peer) return null;
+    return {
+      peerId,
+      metadata: peer.metadata || {},
+      transports: Array.from(peer.transports),
+      producers: Array.from(peer.producers),
+      consumers: Array.from(peer.consumers)
+    };
+  }
+
+  ensurePeer(peerId, metadata = {}) {
+    let peer = this.peers.get(peerId);
+    if (!peer) {
+      peer = {
+        transports: new Set(),
+        producers: new Set(),
+        consumers: new Set(),
+        metadata: {}
+      };
+      this.peers.set(peerId, peer);
+    }
+    peer.metadata = { ...(peer.metadata || {}), ...metadata };
+    return this.getPeer(peerId);
+  }
+
+  listPeers() {
+    return Array.from(this.peers.entries()).map(([peerId, peer]) => ({
+      peerId,
+      metadata: peer.metadata || {},
+      producers: Array.from(peer.producers),
+      consumers: Array.from(peer.consumers)
+    }));
+  }
+
+  /**
    * Remove a peer from the room and clean all associated resources
    */
   removePeer(peerId) {
@@ -242,6 +365,11 @@ class SFURoomRouter extends EventEmitter {
     if (!peer) return;
 
     for (const producerId of peer.producers) {
+      const audioTap = this.audioTaps.get(producerId);
+      if (audioTap) {
+        audioTap.stop();
+        this.audioTaps.delete(producerId);
+      }
       const producer = this.producers.get(producerId);
       if (producer) producer.close();
     }
@@ -278,8 +406,10 @@ class SFURoomRouter extends EventEmitter {
         id: p.id,
         kind: p.kind,
         peerId: p.appData.peerId,
+        userId: p.appData.userId,
         paused: p.paused
-      }))
+      })),
+      audioTaps: Array.from(this.audioTaps.values()).map(tap => tap.getStats())
     };
   }
 
@@ -301,6 +431,7 @@ class SFURoomRouter extends EventEmitter {
     this.transports.clear();
     this.producers.clear();
     this.consumers.clear();
+    this.consumersByProducer.clear();
     this.peers.clear();
 
     this.router.close();

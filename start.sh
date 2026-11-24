@@ -27,13 +27,13 @@ sleep 2
 # 2. Start AI Microservice (Port 5001)
 echo "[2/5] Starting AI Microservice (Avro) on :5001..."
 cd "$ROOT_DIR/ai-service"
-PORT=5001 nohup node src/server.js > "$LOG_DIR/ai-service.log" 2>&1 &
+AI_SERVICE_PORT=5001 nohup node src/server.js > "$LOG_DIR/ai-service.log" 2>&1 &
 echo $! > "$LOG_DIR/ai-service.pid"
 
 # 3. Start Mediasoup SFU Service (Port 5002)
 echo "[3/5] Starting Mediasoup SFU Router on :5002..."
 cd "$ROOT_DIR/sfu-service"
-PORT=5002 nohup node src/server.js > "$LOG_DIR/sfu-service.log" 2>&1 &
+SFU_PORT=5002 nohup node src/server.js > "$LOG_DIR/sfu-service.log" 2>&1 &
 echo $! > "$LOG_DIR/sfu-service.pid"
 
 # 4. Start Main Backend (Port 5000)

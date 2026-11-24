@@ -9,6 +9,33 @@ const SFURoomRouter = require('./router');
 class RoomManager {
   constructor() {
     this.rooms = new Map(); // meetingId -> SFURoomRouter
+    this.pending = new Map(); // meetingId -> Promise<SFURoomRouter>
+    this.emptyTimers = new Map(); // meetingId -> Timeout
+  }
+
+  _cancelEmptyCleanup(meetingId) {
+    const timer = this.emptyTimers.get(meetingId);
+    if (timer) {
+      clearTimeout(timer);
+      this.emptyTimers.delete(meetingId);
+    }
+  }
+
+  /**
+   * Close a room after a grace period once it has no peers. Prevents every
+   * meeting ever created from leaking a mediasoup router forever.
+   */
+  scheduleEmptyCleanup(meetingId, delayMs = 60000) {
+    this._cancelEmptyCleanup(meetingId);
+    const timer = setTimeout(() => {
+      this.emptyTimers.delete(meetingId);
+      const room = this.rooms.get(meetingId);
+      if (room && room.getStats().totalPeers === 0) {
+        this.closeRoom(meetingId);
+      }
+    }, delayMs);
+    if (typeof timer.unref === 'function') timer.unref();
+    this.emptyTimers.set(meetingId, timer);
   }
 
   /**
@@ -17,31 +44,53 @@ class RoomManager {
   async getOrCreateRoom(meetingId) {
     if (!meetingId) throw new Error('meetingId is required');
 
-    if (this.rooms.has(meetingId)) {
-      return this.rooms.get(meetingId);
+    this._cancelEmptyCleanup(meetingId);
+
+    const existing = this.rooms.get(meetingId);
+    if (existing && !existing.closed) {
+      return existing;
     }
-
-    // Ensure worker pool is initialized
-    if (!workerPool.isInitialized) {
-      await workerPool.init();
-    }
-
-    // Select worker in round-robin / load-balanced fashion
-    const worker = workerPool.getWorker();
-
-    // Create mediasoup router with configured media codecs
-    const router = await worker.createRouter({
-      mediaCodecs: config.mediasoup.router.mediaCodecs
-    });
-
-    const roomRouter = new SFURoomRouter(meetingId, router, worker);
-    this.rooms.set(meetingId, roomRouter);
-
-    roomRouter.on('close', () => {
+    if (existing) {
       this.rooms.delete(meetingId);
-    });
+    }
 
-    return roomRouter;
+    // Cache the in-flight creation so two simultaneous joins cannot provision
+    // two routers for the same meeting (which would split participants).
+    if (this.pending.has(meetingId)) {
+      return this.pending.get(meetingId);
+    }
+
+    const creation = (async () => {
+      // Ensure worker pool is initialized
+      if (!workerPool.isInitialized) {
+        await workerPool.init();
+      }
+
+      // Select worker in round-robin / load-balanced fashion
+      const worker = workerPool.getWorker();
+
+      // Create mediasoup router with configured media codecs
+      const router = await worker.createRouter({
+        mediaCodecs: config.mediasoup.router.mediaCodecs
+      });
+
+      const roomRouter = new SFURoomRouter(meetingId, router, worker);
+      this.rooms.set(meetingId, roomRouter);
+
+      roomRouter.on('close', () => {
+        this._cancelEmptyCleanup(meetingId);
+        this.rooms.delete(meetingId);
+      });
+
+      return roomRouter;
+    })();
+
+    this.pending.set(meetingId, creation);
+    try {
+      return await creation;
+    } finally {
+      this.pending.delete(meetingId);
+    }
   }
 
   /**
@@ -55,6 +104,7 @@ class RoomManager {
    * Close and delete a room router
    */
   closeRoom(meetingId) {
+    this._cancelEmptyCleanup(meetingId);
     const room = this.rooms.get(meetingId);
     if (room) {
       room.close();

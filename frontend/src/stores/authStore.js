@@ -12,7 +12,13 @@ const useAuthStore = create((set) => ({
       const token = localStorage.getItem('token');
       const user = localStorage.getItem('user');
       if (token && user) {
-        set({ token, user: JSON.parse(user) });
+        try {
+          set({ token, user: JSON.parse(user) });
+        } catch (_) {
+          // Corrupted storage must not break the whole app boot.
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+        }
       }
     }
   },

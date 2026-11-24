@@ -17,7 +17,24 @@ class CaptionProcessorService {
   static async processCaption(captionEvent, targetLanguages = []) {
     const t0 = Date.now();
     const sourceLang = captionEvent.sourceLanguage || 'en';
-    const text = captionEvent.transcriptText || '';
+    const text = (captionEvent.transcriptText || '').trim();
+
+    if (!text || text.startsWith('[') || text.toLowerCase().includes('audio stream') || text.toLowerCase().includes('stream chunk')) {
+      const dummyEvent = {
+        eventId: `trans_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        originalEventId: captionEvent.eventId || '',
+        meetingId: captionEvent.meetingId || '',
+        speakerId: captionEvent.speakerId || '',
+        translations: {},
+        processingLatencyMs: 0,
+        timestamp: Date.now()
+      };
+      return {
+        event: dummyEvent,
+        avroBuffer: registry.serialize('TranslatedCaptionEvent', dummyEvent),
+        latencyMs: 0
+      };
+    }
 
     // Parallel translation across all target languages
     const translations = await defaultTranslator.translateBatch(text, sourceLang, targetLanguages);

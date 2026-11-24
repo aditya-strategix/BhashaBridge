@@ -12,28 +12,13 @@ import {
   Monitor, MonitorOff, Subtitles, Sparkles, Radio, Activity, Volume2
 } from 'lucide-react';
 import useAuthStore from '../../../stores/authStore';
+import SFUClient from '../../../services/sfuClient';
+import { getApiBaseUrl, getSocketBaseUrl } from '../../../services/urls';
 import styles from './meeting.module.css';
 import './theme.css';
 
-const getSocketUrl = () => {
-  if (process.env.NEXT_PUBLIC_SOCKET_URL && !process.env.NEXT_PUBLIC_SOCKET_URL.includes('localhost')) {
-    return process.env.NEXT_PUBLIC_SOCKET_URL;
-  }
-  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    return window.location.origin;
-  }
-  return process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
-};
-
-const getApiUrl = () => {
-  if (process.env.NEXT_PUBLIC_API_URL && !process.env.NEXT_PUBLIC_API_URL.includes('localhost')) {
-    return process.env.NEXT_PUBLIC_API_URL;
-  }
-  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    return `${window.location.origin}/api`;
-  }
-  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-};
+const getSocketUrl = () => getSocketBaseUrl();
+const getApiUrl = () => getApiBaseUrl();
 
 const SOCKET_URL = getSocketUrl();
 const API_URL = getApiUrl();
@@ -82,25 +67,28 @@ function Avatar({ name, size = 36, color = '#0022FF', avatarUrl }) {
 }
 
 // -------- Video peer tile --------
-const VideoPeer = ({ peer, name, role, isAudioOn = true, isVideoOn = true, isScreenSharing = false, avatarUrl }) => {
+const VideoPeer = ({ peer, stream, name, role, isAudioOn = true, isVideoOn = true, isScreenSharing = false, avatarUrl }) => {
   const ref = useRef();
   const showVideo = isVideoOn || isScreenSharing;
 
   useEffect(() => {
-    const handleStream = stream => {
-      if (!stream) return;
+    const handleStream = nextStream => {
+      if (!nextStream) return;
       if (ref.current) {
-        if (ref.current.srcObject !== stream) {
-          ref.current.srcObject = stream;
+        if (ref.current.srcObject !== nextStream) {
+          ref.current.srcObject = nextStream;
         }
         ref.current.play().catch(() => {});
       }
     };
-    const handleTrack = (_track, stream) => {
-      handleStream(stream);
+    const handleTrack = (_track, nextStream) => {
+      handleStream(nextStream);
     };
-    if (peer && peer._remoteStreams && peer._remoteStreams[0]) {
-      handleStream(peer._remoteStreams[0]);
+
+    // SFU consumers supply a MediaStream directly; P2P mesh uses simple-peer.
+    const directStream = stream || (peer && peer._remoteStreams && peer._remoteStreams[0]);
+    if (directStream) {
+      handleStream(directStream);
     }
     if (peer) {
       peer.on('stream', handleStream);
@@ -112,7 +100,7 @@ const VideoPeer = ({ peer, name, role, isAudioOn = true, isVideoOn = true, isScr
         try { peer.off('track', handleTrack); } catch (_) {}
       }
     };
-  }, [peer]);
+  }, [peer, stream]);
 
   useEffect(() => {
     if (showVideo && ref.current && ref.current.srcObject) {
@@ -182,6 +170,12 @@ export default function MeetingRoom() {
 
   const [socket, setSocket] = useState(null);
   useEffect(() => { initialize(); }, [initialize]);
+  // initialize() runs after the first render, so the store is empty when
+  // spokenLanguage is created. Sync it once the user loads, otherwise speech
+  // recognition always listens in English.
+  useEffect(() => {
+    if (user?.language) setSpokenLanguage(user.language);
+  }, [user?.language]);
   const [peers, setPeers] = useState([]);
   const [stream, setStream] = useState(null);
   const [isVideoOn, setIsVideoOn] = useState(true);
@@ -286,6 +280,10 @@ export default function MeetingRoom() {
 
   const isTtsPlayingRef = useRef(false);
   const recentTtsMapRef = useRef(new Map());
+  const captionTimerRef = useRef(null);
+  const lastTtsPlaybackRef = useRef({ text: '', timestamp: 0 });
+  const lastTtsAtRef = useRef(0);
+  const demoTimerRef = useRef(null);
   const lastSpeechEmitRef = useRef({ text: '', timestamp: 0 });
   const myLastSpokenTextRef = useRef('');
   const myLastSpokenTimeRef = useRef(0);
@@ -345,23 +343,151 @@ export default function MeetingRoom() {
     };
   }, []);
 
-  const playTtsAudio = useCallback((cleanText, targetLangCode, bcpLang) => {
-    if (!cleanText || !cleanText.trim()) return;
-    isTtsPlayingRef.current = true;
-    let playedViaBackend = false;
+  const isDummyAudioText = (t) => {
+    if (!t || !t.trim()) return true;
+    const s = t.trim().toLowerCase();
+    return s.startsWith('[') || s.includes('audio stream') || s.includes('stream chunk') || s.includes('875 bytes') || s.includes('ऑडियो स्ट्रीम');
+  };
+
+  const playTtsAudio = useCallback((cleanText, targetLangCode, bcpLang, options = {}) => {
+    if (isDummyAudioText(cleanText)) return;
+
+    // Global guard: never chain TTS clips faster than this. Prevents echo
+    // feedback from turning into a rapid "you you you" loop.
+    const startedAt = Date.now();
+    if (!options.force && startedAt - lastTtsAtRef.current < 1500) return;
+    lastTtsAtRef.current = startedAt;
+
+    // Remember what we are about to say so the microphone recognizer can
+    // discard its own echo, and stop any in-flight recognition immediately.
+    lastTtsPlaybackRef.current = { text: cleanText.toLowerCase(), timestamp: startedAt };
+    if (activeSpeechRecRef.current) {
+      try { activeSpeechRecRef.current.abort(); } catch (_) {}
+    }
 
     const shortLang = (targetLangCode || 'en').toLowerCase().split('-')[0];
+    let backendAttempted = false;
+    let nativeAttempted = false;
 
-    const playViaBackend = () => {
-      if (playedViaBackend) return;
-      playedViaBackend = true;
+    const stopActive = () => {
+      if (typeof window === 'undefined') return;
+      if (window._activeTtsAudio) {
+        const active = window._activeTtsAudio;
+        active.__bbStopped = true;
+        try {
+          active.pause();
+          active.src = '';
+        } catch (_) {}
+        window._activeTtsAudio = null;
+      }
+    };
+
+    const getVoices = () => {
+      if (typeof window === 'undefined' || !('speechSynthesis' in window)) return [];
+      return (availableVoicesRef.current && availableVoicesRef.current.length > 0)
+        ? availableVoicesRef.current
+        : (window.speechSynthesis.getVoices() || []);
+    };
+
+    const findMatchingVoice = () => {
+      const target = (targetLangCode || '').toLowerCase();
+      const bcp = (bcpLang || '').toLowerCase();
+      return getVoices().find(v => {
+        const vLang = (v.lang || '').replace('_', '-').toLowerCase();
+        return vLang === bcp
+          || vLang === target
+          || vLang.startsWith(target + '-')
+          || vLang.startsWith(shortLang + '-');
+      }) || null;
+    };
+
+    // Real on-device voice. `allowAnyVoice` is only used as a last resort after
+    // the neural backend fails, so the user still hears actual speech instead
+    // of a beep or silence (even if the accent is imperfect).
+    // ---- Native SpeechSynthesis path ----
+    const speakNative = (allowAnyVoice) => {
+      if (nativeAttempted) return false;
+      if (typeof window === 'undefined' || !('speechSynthesis' in window)) return false;
+
+      const matchingVoice = findMatchingVoice();
+      if (!matchingVoice && !allowAnyVoice) return false;
+
+      const voices = getVoices();
+      const voice = matchingVoice || voices[0] || null;
+      nativeAttempted = true;
+      isTtsPlayingRef.current = true;
+
       try {
-        if (window._activeTtsAudio) {
-          try {
-            window._activeTtsAudio.pause();
-            window._activeTtsAudio.src = '';
-          } catch (_) {}
-          window._activeTtsAudio = null;
+        stopActive();
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(cleanText);
+        utterance.lang = matchingVoice ? (bcpLang || matchingVoice.lang) : (voice?.lang || bcpLang || 'en-US');
+        if (voice) utterance.voice = voice;
+        window._activeUtterance = utterance;
+
+        let endedOrErrored = false;
+        const speechStartTime = Date.now();
+
+        utterance.onend = () => {
+          endedOrErrored = true;
+          window._activeUtterance = null;
+          // A native voice that returns instantly without speaking means the
+          // language is not really installed → use the neural engine instead.
+          if (!allowAnyVoice && cleanText.length > 3 && (Date.now() - speechStartTime < 120) && !backendAttempted) {
+            console.warn(`[Meeting TTS] Native synthesis skipped "${targetLangCode}" instantly. Falling back to backend.`);
+            playViaBackend();
+            return;
+          }
+          setTimeout(() => { isTtsPlayingRef.current = false; }, 1500);
+        };
+
+        utterance.onerror = (e) => {
+          endedOrErrored = true;
+          window._activeUtterance = null;
+          const errType = e?.error;
+          // cancel()/new utterance intentionally interrupts the previous one.
+          if (errType === 'interrupted' || errType === 'canceled') {
+            isTtsPlayingRef.current = false;
+            return;
+          }
+          console.warn('[Meeting TTS] SpeechSynthesis error:', e);
+          if (!allowAnyVoice && !backendAttempted) {
+            playViaBackend();
+          } else {
+            isTtsPlayingRef.current = false;
+          }
+        };
+
+        // Watchdog: if synthesis stalls without speaking, try the neural engine.
+        setTimeout(() => {
+          if (!endedOrErrored && !window.speechSynthesis.speaking && !backendAttempted) {
+            console.warn('[Meeting TTS] SpeechSynthesis watchdog fired, falling back to backend');
+            try { window.speechSynthesis.cancel(); } catch (_) {}
+            playViaBackend();
+          }
+        }, 1800);
+
+        window.speechSynthesis.speak(utterance);
+        return true;
+      } catch (e) {
+        console.warn('[Meeting TTS] Native TTS exception:', e);
+        nativeAttempted = false;
+        isTtsPlayingRef.current = false;
+        return false;
+      }
+    };
+
+    // ---- Neural backend path (Bhashini Indic-TTS) ----
+    const playViaBackend = () => {
+      if (backendAttempted) return;
+      backendAttempted = true;
+      isTtsPlayingRef.current = true;
+
+      try {
+        stopActive();
+        if (window._activeUtterance) {
+          try { window.speechSynthesis.cancel(); } catch (_) {}
+          window._activeUtterance = null;
         }
 
         const backendUrl = getApiUrl();
@@ -375,109 +501,52 @@ export default function MeetingRoom() {
           if (window._activeTtsAudio === audio) {
             window._activeTtsAudio = null;
           }
-          setTimeout(() => { isTtsPlayingRef.current = false; }, 400);
+          setTimeout(() => { isTtsPlayingRef.current = false; }, 1000);
         };
-        audio.onerror = (e) => {
-          console.warn('[Meeting TTS] Backend audio element error:', e);
+        audio.onerror = () => {
+          if (audio.__bbStopped) return;
+          console.warn('[Meeting TTS] Neural TTS unavailable. Using an available real browser voice.');
           if (window._activeTtsAudio === audio) {
             window._activeTtsAudio = null;
           }
-          setTimeout(() => { isTtsPlayingRef.current = false; }, 200);
+          if (!speakNative(true)) {
+            setTimeout(() => { isTtsPlayingRef.current = false; }, 200);
+          }
         };
 
         const playPromise = audio.play();
         if (playPromise !== undefined) {
           playPromise.catch(e => {
-            isTtsPlayingRef.current = false;
             if (window._activeTtsAudio === audio) {
               window._activeTtsAudio = null;
             }
+            // Replacing/stopping a clip aborts play(); that's not a failure.
+            if (audio.__bbStopped || e?.name === 'AbortError') {
+              return;
+            }
             console.warn('[Meeting TTS] Backend audio play failed (autoplay or network):', e);
+            if (!speakNative(true)) {
+              isTtsPlayingRef.current = false;
+            }
           });
         }
       } catch (err) {
         console.warn('[Meeting TTS] playViaBackend exception:', err);
-        isTtsPlayingRef.current = false;
+        if (!speakNative(true)) {
+          isTtsPlayingRef.current = false;
+        }
       }
     };
 
-    // Browsers on desktop (Chrome, Edge, Firefox, Safari) only have native voices for:
-    // en, hi, es, fr, de, zh.
-    // Regional languages like Tamil ('ta'), Telugu ('te'), Bengali ('bn'), Marathi ('mr'), etc.
-    // have NO native speech synthesis voices installed in OS / browser by default.
-    // For these, IMMEDIATELY route directly to backend Bhashini Indic-TTS proxy for authentic pronunciation!
+    // Browsers on desktop (Chrome, Edge, Firefox, Safari) only reliably ship
+    // native voices for en, hi, es, fr, de, zh. Regional languages such as
+    // Tamil, Telugu, Bengali, Marathi, etc. have no OS voice by default, so
+    // route them straight to the neural Indic-TTS backend for authentic speech.
     const NATIVE_VOICE_LANGS = new Set(['en', 'hi', 'es', 'fr', 'de', 'zh']);
-    if (!NATIVE_VOICE_LANGS.has(shortLang)) {
-      console.log(`[Meeting TTS] Routing "${targetLangCode}" (${shortLang}) directly to backend Bhashini TTS proxy.`);
-      playViaBackend();
+    if (NATIVE_VOICE_LANGS.has(shortLang) && speakNative(false)) {
       return;
     }
-
-    // For languages that DO have native browser voice support (en, hi, es, fr, de, zh):
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      try {
-        const voices = (availableVoicesRef.current && availableVoicesRef.current.length > 0)
-          ? availableVoicesRef.current
-          : (window.speechSynthesis.getVoices() || []);
-
-        const matchingVoice = voices.find(v => {
-          const vLang = (v.lang || '').replace('_', '-').toLowerCase();
-          const target = (targetLangCode || '').toLowerCase();
-          const bcp = (bcpLang || '').toLowerCase();
-          return vLang === bcp || vLang === target || vLang.startsWith(target + '-');
-        });
-
-        // If no matching native voice exists in the browser, fallback to backend proxy immediately!
-        if (!matchingVoice) {
-          console.log(`[Meeting TTS] No matching native voice found for "${targetLangCode}". Falling back to backend.`);
-          playViaBackend();
-          return;
-        }
-
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(cleanText);
-        utterance.lang = bcpLang;
-        utterance.voice = matchingVoice;
-        window._activeUtterance = utterance;
-
-        let endedOrErrored = false;
-        const speechStartTime = Date.now();
-
-        utterance.onend = () => {
-          endedOrErrored = true;
-          window._activeUtterance = null;
-          if (cleanText.length > 3 && (Date.now() - speechStartTime < 120) && !playedViaBackend) {
-            console.warn(`[Meeting TTS] Native synthesis skipped "${targetLangCode}" instantly. Falling back to backend.`);
-            playViaBackend();
-            return;
-          }
-          setTimeout(() => { isTtsPlayingRef.current = false; }, 600);
-        };
-
-        utterance.onerror = (e) => {
-          endedOrErrored = true;
-          window._activeUtterance = null;
-          console.warn('[Meeting TTS] SpeechSynthesis error, falling back to backend audio:', e);
-          playViaBackend();
-        };
-
-        // Watchdog fallback if synthesis stalls without speaking
-        setTimeout(() => {
-          if (!endedOrErrored && !window.speechSynthesis.speaking && !playedViaBackend) {
-            console.warn('[Meeting TTS] SpeechSynthesis watchdog fired, falling back to backend');
-            try { window.speechSynthesis.cancel(); } catch (_) {}
-            playViaBackend();
-          }
-        }, 1800);
-
-        window.speechSynthesis.speak(utterance);
-      } catch (e) {
-        console.warn('[Meeting TTS] Native TTS exception:', e);
-        playViaBackend();
-      }
-    } else {
-      playViaBackend();
-    }
+    playViaBackend();
   }, []);
 
   const handleCopyInviteLink = () => {
@@ -491,6 +560,9 @@ export default function MeetingRoom() {
   const userVideo = useRef();
   const peersRef = useRef([]);
   const peerStatusMapRef = useRef(new Map());
+  const sfuClientRef = useRef(null);
+  const sfuActiveRef = useRef(false);
+  const sfuStartingRef = useRef(false);
 
   const setPeerCachedStatus = (key, status) => {
     if (!key) return;
@@ -525,17 +597,26 @@ export default function MeetingRoom() {
       const videoTrack = mediaStream.getVideoTracks()[0];
       if (videoTrack) {
         videoTrack.enabled = videoRef.current;
-        peersRef.current.forEach(({ peer }) => {
-          try {
-            const senders = peer._pc?.getSenders() || [];
-            const sender = senders.find(s => s.track && s.track.kind === 'video') || senders.find(s => s.track?.kind === 'video');
-            if (sender) {
-              sender.replaceTrack(videoTrack);
+        if (sfuActiveRef.current && sfuClientRef.current) {
+          const client = sfuClientRef.current;
+          client.replaceVideoTrack(videoTrack)
+            .then(() => client.setProducerPaused('video', !videoRef.current))
+            .catch((err) => {
+              console.warn('[SFU] Failed to restore camera track:', err.message);
+            });
+        } else {
+          peersRef.current.forEach(({ peer }) => {
+            try {
+              const senders = peer._pc?.getSenders() || [];
+              const sender = senders.find(s => s.track && s.track.kind === 'video') || senders.find(s => s.track?.kind === 'video');
+              if (sender) {
+                sender.replaceTrack(videoTrack);
+              }
+            } catch (e) {
+              console.error('Error restoring video track:', e);
             }
-          } catch (e) {
-            console.error('Error restoring video track:', e);
-          }
-        });
+          });
+        }
       }
       if (userVideo.current) {
         userVideo.current.srcObject = mediaStream;
@@ -584,17 +665,26 @@ export default function MeetingRoom() {
         userVideo.current.play().catch(() => {});
       }
 
-      peersRef.current.forEach(({ peer }) => {
-        try {
-          const senders = peer._pc?.getSenders() || [];
-          const sender = senders.find(s => s.track && s.track.kind === 'video') || senders.find(s => s.track?.kind === 'video');
-          if (sender) {
-            sender.replaceTrack(screenTrack);
+      if (sfuActiveRef.current && sfuClientRef.current) {
+        const client = sfuClientRef.current;
+        client.replaceVideoTrack(screenTrack)
+          .then(() => client.setProducerPaused('video', false))
+          .catch((err) => {
+            console.warn('[SFU] Failed to replace video with screen track:', err.message);
+          });
+      } else {
+        peersRef.current.forEach(({ peer }) => {
+          try {
+            const senders = peer._pc?.getSenders() || [];
+            const sender = senders.find(s => s.track && s.track.kind === 'video') || senders.find(s => s.track?.kind === 'video');
+            if (sender) {
+              sender.replaceTrack(screenTrack);
+            }
+          } catch (e) {
+            console.error('Error replacing track for screen share:', e);
           }
-        } catch (e) {
-          console.error('Error replacing track for screen share:', e);
-        }
-      });
+        });
+      }
 
       screenTrack.onended = () => {
         stopScreenShare();
@@ -835,6 +925,163 @@ export default function MeetingRoom() {
     return peer;
   };
 
+  // ---------------------------------------------------------------------------
+  // SFU media plane (primary transport). Falls back to the P2P mesh below when
+  // the SFU microservice is unavailable or running the Virtual engine.
+  // ---------------------------------------------------------------------------
+  const upsertSfuPeer = useCallback((info) => {
+    if (!info) return;
+    const currentUserId = useAuthStore.getState().user?.id;
+    if (info.userId && currentUserId && String(info.userId) === String(currentUserId)) return;
+
+    const idx = peersRef.current.findIndex(
+      (p) => (info.userId && p.userId === info.userId) ||
+             (info.peerId && (p.peerID === info.peerId || p.sfuPeerId === info.peerId))
+    );
+    const hId = hostIdRef.current;
+    const cleanRole = info.role
+      ? ((hId && info.userId !== hId && info.role === 'HOST') ? 'COHOST' : info.role)
+      : undefined;
+    const cachedStatus = getPeerCachedStatus(info.socketId || info.peerId, info.userId);
+
+    if (idx !== -1) {
+      const existing = peersRef.current[idx];
+      peersRef.current[idx] = {
+        ...existing,
+        peerID: info.peerId || existing.peerID,
+        sfuPeerId: info.peerId || existing.sfuPeerId,
+        socketId: info.socketId || existing.socketId,
+        userId: info.userId || existing.userId,
+        name: info.name || existing.name,
+        role: cleanRole || existing.role,
+        avatar: info.avatar || existing.avatar,
+        stream: info.stream || existing.stream,
+        isAudioOn: info.isAudioOn !== undefined ? info.isAudioOn : existing.isAudioOn,
+        isVideoOn: info.isVideoOn !== undefined ? info.isVideoOn : existing.isVideoOn,
+        isScreenSharing: info.isScreenSharing !== undefined ? info.isScreenSharing : existing.isScreenSharing,
+        sfu: true
+      };
+    } else {
+      peersRef.current.push({
+        peerID: info.peerId || info.userId,
+        sfuPeerId: info.peerId || null,
+        socketId: info.socketId || null,
+        userId: info.userId || null,
+        name: info.name || 'Participant',
+        role: cleanRole || 'PARTICIPANT',
+        avatar: info.avatar || null,
+        stream: info.stream || null,
+        isAudioOn: info.isAudioOn !== undefined ? info.isAudioOn : (cachedStatus?.isAudioOn ?? true),
+        isVideoOn: info.isVideoOn !== undefined ? info.isVideoOn : (cachedStatus?.isVideoOn ?? true),
+        isScreenSharing: info.isScreenSharing !== undefined ? info.isScreenSharing : (cachedStatus?.isScreenSharing ?? false),
+        sfu: true
+      });
+    }
+    setPeers([...peersRef.current]);
+  }, []);
+
+  const removeSfuPeer = useCallback(({ peerId, userId } = {}) => {
+    if (!peerId && !userId) return;
+    peersRef.current = peersRef.current.filter(
+      (p) => !((userId && p.userId === userId) ||
+               (peerId && (p.peerID === peerId || p.sfuPeerId === peerId || p.socketId === peerId)))
+    );
+    setPeers([...peersRef.current]);
+  }, []);
+
+  const startSfu = useCallback(async (mediaStream) => {
+    if (sfuActiveRef.current || sfuStartingRef.current || sfuClientRef.current) {
+      return sfuActiveRef.current;
+    }
+
+    const currentUser = useAuthStore.getState().user;
+    if (!currentUser || !mediaStream) return false;
+
+    sfuStartingRef.current = true;
+    const client = new SFUClient({
+      meetingId,
+      user: {
+        userId: currentUser.id,
+        name: currentUser.name,
+        avatar: currentUser.avatar,
+        language: currentUser.language
+      },
+      role: roleRef.current,
+      onPeer: upsertSfuPeer,
+      onPeerLeft: removeSfuPeer,
+      onCaption: (payload) => {
+        if (payload?.captionEvent && typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('bhashabridge:sfu-caption', { detail: payload.captionEvent }));
+        }
+      },
+      onError: (err) => console.warn('[Meeting] SFU warning:', err.message)
+    });
+
+    try {
+      await client.init();
+      await client.produce(mediaStream);
+      sfuClientRef.current = client;
+      sfuActiveRef.current = true;
+
+      // Retire any P2P mesh peers created before the SFU became active. The
+      // participant metadata entries are kept so muted participants still show.
+      peersRef.current.forEach((p) => {
+        if (p.peer) {
+          try { p.peer.destroy(); } catch (_) {}
+          p.peer = null;
+        }
+      });
+      setPeers([...peersRef.current]);
+
+      console.log('[Meeting] SFU media plane active (O(1) uplink)');
+      return true;
+    } catch (err) {
+      console.warn('[Meeting] SFU unavailable, continuing with P2P mesh:', err.message);
+      try { await client.close(); } catch (_) {}
+      sfuClientRef.current = null;
+      sfuActiveRef.current = false;
+      return false;
+    } finally {
+      sfuStartingRef.current = false;
+    }
+  }, [meetingId, upsertSfuPeer, removeSfuPeer]);
+
+  useEffect(() => {
+    const handleSfuCaption = (event) => {
+      const caption = event.detail;
+      if (!caption) return;
+      const rawText = (caption.transcriptText || '').trim();
+      if (isDummyAudioText(rawText)) {
+        return;
+      }
+      const u = useAuthStore.getState().user || {};
+      const captionEnabled = u.captionEnabled ?? true;
+      const captionLang = u.captionLang || 'original';
+      if (captionEnabled && rawText) {
+        setCurrentCaption({
+          text: rawText,
+          speaker: caption.speakerId || 'Speaker',
+          sourceLang: caption.sourceLanguage || 'auto',
+          targetLang: captionLang === 'original' ? (caption.sourceLanguage || 'en') : captionLang,
+        });
+        if (captionTimerRef.current) clearTimeout(captionTimerRef.current);
+        captionTimerRef.current = setTimeout(() => setCurrentCaption(null), 5000);
+      }
+      if (socketRef.current && caption.speakerId && String(caption.speakerId) === String(u.id) && rawText) {
+        socketRef.current.emit('caption:text', {
+          meetingId,
+          speakerId: u.id,
+          text: rawText,
+          language: caption.sourceLanguage || u.language || 'en'
+        });
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('bhashabridge:sfu-caption', handleSfuCaption);
+      return () => window.removeEventListener('bhashabridge:sfu-caption', handleSfuCaption);
+    }
+  }, []);
+
   useEffect(() => {
     if (!user) return;
     if (socketInitialized.current || isJoiningInProgressRef.current) return;
@@ -959,11 +1206,12 @@ export default function MeetingRoom() {
         }
 
         let currentStream;
+        const audioConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
         try {
-          currentStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          currentStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: audioConstraints });
         } catch {
           try {
-            currentStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+            currentStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: audioConstraints });
             setIsVideoOn(false);
             videoRef.current = false;
           } catch {
@@ -986,6 +1234,14 @@ export default function MeetingRoom() {
           return;
         }
 
+        // Attempt the SFU media plane before joining the signaling room. If it
+        // is unavailable we keep the existing P2P mesh path below untouched.
+        const isAdmittedNow = data.participantStatus === 'ADMITTED' ||
+          (data.meeting?.hostId && user.id === data.meeting.hostId);
+        if (isAdmittedNow) {
+          await startSfu(currentStream);
+        }
+
         // Evict any existing socket before creating a new one to prevent duplicate listeners
         if (socketRef.current) {
           try {
@@ -997,7 +1253,27 @@ export default function MeetingRoom() {
 
         newSocket = io(SOCKET_URL, {
           forceNew: true,
-          transports: ['websocket', 'polling']
+          transports: ['websocket', 'polling'],
+          auth: { token: localStorage.getItem('token') }
+        });
+        let hasConnectedOnce = false;
+        newSocket.on('connect', () => {
+          if (!hasConnectedOnce) {
+            hasConnectedOnce = true;
+            return;
+          }
+          // Rejoin the meeting room after a network blip / backend restart;
+          // Socket.IO reconnects the transport but not the server-side rooms.
+          newSocket.emit('meeting:join', {
+            meetingId,
+            userId: user.id,
+            peerId: newSocket.id,
+            language: user.language,
+            isAudioOn: audioRef.current,
+            isVideoOn: videoRef.current
+          });
+          newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current });
+          newSocket.emit('user:update_settings', useAuthStore.getState().user || {});
         });
         socketRef.current = newSocket;
         setSocket(newSocket);
@@ -1030,6 +1306,10 @@ export default function MeetingRoom() {
             if (userId === currentUserId) {
               setAlertMessage('You have been removed from the meeting.');
               if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+              if (screenStreamRef.current) {
+                try { screenStreamRef.current.getTracks().forEach(t => t.stop()); } catch (_) {}
+                screenStreamRef.current = null;
+              }
               peersRef.current.forEach(p => { if (p.peer) { try { p.peer.destroy(); } catch (e) {} } });
               peersRef.current = [];
               setPeers([]);
@@ -1040,6 +1320,9 @@ export default function MeetingRoom() {
               const peerToRemove = peersRef.current.find(p => p.userId === userId);
               if (peerToRemove && peerToRemove.peer) {
                 try { peerToRemove.peer.destroy(); } catch (e) {}
+              }
+              if (sfuClientRef.current) {
+                try { sfuClientRef.current.removePeer({ userId }); } catch (_) {}
               }
               peersRef.current = peersRef.current.filter(p => p.userId !== userId);
               setPeers([...peersRef.current]);
@@ -1058,9 +1341,11 @@ export default function MeetingRoom() {
                 const currentUserId = useAuthStore.getState().user?.id;
                 const admittedUserIds = new Set(data.map(p => p.userId));
 
-                // If current user is no longer admitted, redirect to dashboard
+                // If current user is no longer admitted, redirect to dashboard.
+                // Never do this while we are still in the WAITING lobby: waiting
+                // users are intentionally absent from the admitted roster.
                 const myData = data.find(p => p.userId === currentUserId);
-                if (currentUserId && !myData && roleRef.current !== 'HOST') {
+                if (currentUserId && !myData && roleRef.current !== 'HOST' && statusRef.current === 'ADMITTED') {
                   if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
                   peersRef.current.forEach(p => { if (p.peer) { try { p.peer.destroy(); } catch (e) {} } });
                   peersRef.current = [];
@@ -1118,6 +1403,7 @@ export default function MeetingRoom() {
                 isVideoOn: videoRef.current
               });
               newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current });
+              startSfu(streamRef.current || currentStream).catch(() => {});
             }
           } else {
             setWaitingUsers(prev => {
@@ -1147,8 +1433,17 @@ export default function MeetingRoom() {
             setEndedByInfo(payload.endedBy);
           }
           setMeetingEnded(true);
+          if (sfuClientRef.current) {
+            try { sfuClientRef.current.close(); } catch (_) {}
+            sfuClientRef.current = null;
+            sfuActiveRef.current = false;
+          }
           if (streamRef.current) {
             try { streamRef.current.getTracks().forEach(t => t.stop()); } catch (_) {}
+          }
+          if (screenStreamRef.current) {
+            try { screenStreamRef.current.getTracks().forEach(t => t.stop()); } catch (_) {}
+            screenStreamRef.current = null;
           }
         });
         newSocket.on('participant:joined', ({ userId, socketId, name, role, avatar, isAudioOn, isVideoOn }) => {
@@ -1158,6 +1453,20 @@ export default function MeetingRoom() {
           if (isAudioOn !== undefined || isVideoOn !== undefined) {
             if (socketId) setPeerCachedStatus(socketId, { isAudioOn, isVideoOn });
             if (userId) setPeerCachedStatus(userId, { isAudioOn, isVideoOn });
+          }
+
+          if (sfuActiveRef.current) {
+            upsertSfuPeer({
+              userId,
+              peerId: socketId,
+              socketId,
+              name,
+              role,
+              avatar,
+              isAudioOn,
+              isVideoOn
+            });
+            return;
           }
 
           // Destroy any existing peer instance for this user or socket
@@ -1189,6 +1498,12 @@ export default function MeetingRoom() {
         newSocket.on('participant:left', ({ socketId, userId }) => {
           if (socketId) peerStatusMapRef.current.delete(socketId);
           if (userId) peerStatusMapRef.current.delete(userId);
+
+          if (sfuActiveRef.current) {
+            removeSfuPeer({ peerId: socketId, userId });
+            return;
+          }
+
           const toRemove = peersRef.current.filter(p => (socketId && p.peerID === socketId) || (userId && p.userId === userId));
           toRemove.forEach(p => {
             if (p.peer) {
@@ -1200,6 +1515,11 @@ export default function MeetingRoom() {
         });
         newSocket.on('audio:signal', payload => {
           if (!payload.userId || payload.userId === user.id) return;
+
+          // SFU mode does not use P2P signaling; status is carried by
+          // participant:status_update and media by the SFU consumers.
+          if (sfuActiveRef.current) return;
+
           if (payload.isAudioOn !== undefined || payload.isVideoOn !== undefined || payload.isScreenSharing !== undefined) {
             if (payload.callerId) setPeerCachedStatus(payload.callerId, { isAudioOn: payload.isAudioOn, isVideoOn: payload.isVideoOn, isScreenSharing: payload.isScreenSharing });
             if (payload.userId) setPeerCachedStatus(payload.userId, { isAudioOn: payload.isAudioOn, isVideoOn: payload.isVideoOn, isScreenSharing: payload.isScreenSharing });
@@ -1270,7 +1590,7 @@ export default function MeetingRoom() {
           if (socketId) setPeerCachedStatus(socketId, { isAudioOn, isVideoOn, isScreenSharing });
           if (userId) setPeerCachedStatus(userId, { isAudioOn, isVideoOn, isScreenSharing });
 
-          const idx = peersRef.current.findIndex(p => (socketId && p.peerID === socketId) || (userId && p.userId === userId));
+          const idx = peersRef.current.findIndex(p => (socketId && (p.peerID === socketId || p.socketId === socketId)) || (userId && p.userId === userId));
           if (idx !== -1) {
             peersRef.current[idx] = {
               ...peersRef.current[idx],
@@ -1290,6 +1610,9 @@ export default function MeetingRoom() {
             if (streamRef.current) {
               streamRef.current.getAudioTracks().forEach(t => { t.enabled = false; });
             }
+            if (sfuClientRef.current) {
+              sfuClientRef.current.setProducerPaused('audio', true).catch(() => {});
+            }
             newSocket.emit('meeting:status_update', { isAudioOn: false, isVideoOn: videoRef.current });
           }
         });
@@ -1301,6 +1624,9 @@ export default function MeetingRoom() {
             videoRef.current = false;
             if (streamRef.current) {
               streamRef.current.getVideoTracks().forEach(t => { t.enabled = false; });
+            }
+            if (sfuClientRef.current) {
+              sfuClientRef.current.setProducerPaused('video', true).catch(() => {});
             }
             newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: false });
           }
@@ -1315,6 +1641,7 @@ export default function MeetingRoom() {
                 setIsAudioOn(false);
                 if (streamRef.current) streamRef.current.getAudioTracks().forEach(t => { t.enabled = false; });
                 if (audioRef.current) audioRef.current = false;
+                if (sfuClientRef.current) sfuClientRef.current.setProducerPaused('audio', true).catch(() => {});
                 newSocket.emit('meeting:status_update', { isAudioOn: false, isVideoOn: videoRef.current });
               }
             } else if (type === 'video') {
@@ -1324,6 +1651,7 @@ export default function MeetingRoom() {
                 setIsVideoOn(false);
                 if (streamRef.current) streamRef.current.getVideoTracks().forEach(t => { t.enabled = false; });
                 if (videoRef.current) videoRef.current = false;
+                if (sfuClientRef.current) sfuClientRef.current.setProducerPaused('video', true).catch(() => {});
                 newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: false });
               }
             }
@@ -1373,7 +1701,8 @@ export default function MeetingRoom() {
                   sourceLang: data.sourceLanguage || 'auto',
                   targetLang: captionLang === 'original' ? (data.sourceLanguage || 'en') : captionLang,
                 });
-                setTimeout(() => setCurrentCaption(null), 5000);
+                if (captionTimerRef.current) clearTimeout(captionTimerRef.current);
+        captionTimerRef.current = setTimeout(() => setCurrentCaption(null), 5000);
               }
             }
 
@@ -1392,17 +1721,40 @@ export default function MeetingRoom() {
 
               if (textToSpeak && textToSpeak.trim()) {
                 const cleanText = textToSpeak.trim();
+                if (isDummyAudioText(cleanText)) {
+                  return;
+                }
+
+                // One-word pronoun/article/filler captions are the classic
+                // signature of the mic re-hearing TTS. Keep them as captions
+                // but do not speak them back (which is what loops "you you").
+                const echoWords = new Set(['you', 'the', 'a', 'an', 'and', 'uh', 'um', 'hmm']);
+                const spokenWords = cleanText
+                  .toLowerCase()
+                  .replace(/[^\p{L}\p{N}\s]/gu, '')
+                  .trim()
+                  .split(/\s+/)
+                  .filter(Boolean);
+                if (spokenWords.length === 1 && echoWords.has(spokenWords[0])) {
+                  return;
+                }
+
                 const actualLangCode = targetLangCode === 'original' ? (data.sourceLanguage || 'en') : targetLangCode;
                 const bcpLang = BCP47_LANG_MAP[actualLangCode] || actualLangCode || 'en-US';
-                const normKey = `${actualLangCode}:${cleanText.toLowerCase()}`;
+                const normKey = `${actualLangCode}:${cleanText.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim()}`;
                 const now = Date.now();
 
                 // 1. Deduplication: Don't repeat identical audio within 5 seconds
                 const lastPlayed = recentTtsMapRef.current.get(normKey) || 0;
-                if (now - lastPlayed < 5000) {
+                if (now - lastPlayed < 10000) {
                   return;
                 }
                 recentTtsMapRef.current.set(normKey, now);
+                if (recentTtsMapRef.current.size > 200) {
+                  for (const [key, seenAt] of recentTtsMapRef.current) {
+                    if (now - seenAt > 30000) recentTtsMapRef.current.delete(key);
+                  }
+                }
 
                 // 2. Self-echo suppression: If this sentence matches what I just spoke, skip
                 if (myLastSpokenTextRef.current && cleanText.toLowerCase().includes(myLastSpokenTextRef.current) && (now - myLastSpokenTimeRef.current < 6000)) {
@@ -1460,12 +1812,22 @@ export default function MeetingRoom() {
           } catch (_) {}
           socketRef.current = null;
         }
+        if (sfuClientRef.current) {
+          try { sfuClientRef.current.close(); } catch (_) {}
+          sfuClientRef.current = null;
+        }
+        sfuActiveRef.current = false;
+        sfuStartingRef.current = false;
         peersRef.current.forEach(p => { if (p.peer) { try { p.peer.destroy(); } catch (_) {} } }); 
         peersRef.current = []; 
         setPeers([]);
         if (streamRef.current) {
           try { streamRef.current.getTracks().forEach(t => t.stop()); } catch (_) {}
           streamRef.current = null;
+        }
+        if (screenStreamRef.current) {
+          try { screenStreamRef.current.getTracks().forEach(t => t.stop()); } catch (_) {}
+          screenStreamRef.current = null;
         }
         if (activeSpeechRecRef.current) {
           try { activeSpeechRecRef.current.abort(); } catch (_) {}
@@ -1497,19 +1859,36 @@ export default function MeetingRoom() {
     let restartTimer = null;
 
     rec.onresult = (ev) => {
-      // Acoustic echo suppression: If TTS is speaking, suppress local mic recognition!
+      // Acoustic echo suppression: never transcribe our own TTS output.
       if (isTtsPlayingRef.current || (typeof window !== 'undefined' && window.speechSynthesis?.speaking)) {
         return;
       }
+      const lastTts = lastTtsPlaybackRef.current;
+      const ttsRecentlyPlayed = Boolean(lastTts.text) && (Date.now() - lastTts.timestamp < 6000);
 
       for (let i = ev.resultIndex; i < ev.results.length; ++i) {
         if (ev.results[i].isFinal || isMobile) {
           const txt = ev.results[i][0].transcript.trim();
           if (txt) {
-            const norm = txt.toLowerCase();
+            const norm = txt.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
+            if (!norm) continue;
+
+            // Delayed echo from speakers often arrives after playback ended.
+            // Short fragments ("you", "the") and substrings of the phrase we
+            // just spoke are almost always our own TTS, not real speech.
+            if (ttsRecentlyPlayed) {
+              const isEcho = norm.length <= 4
+                || lastTts.text.includes(norm)
+                || norm.includes(lastTts.text)
+                || lastTts.text.startsWith(norm);
+              if (isEcho) {
+                continue;
+              }
+            }
+
             const now = Date.now();
             // Outgoing deduplication: Do not re-emit duplicate sentence within 3.5 seconds
-            if (lastSpeechEmitRef.current.text === norm && (now - lastSpeechEmitRef.current.timestamp < 3500)) {
+            if (lastSpeechEmitRef.current.text === norm && (now - lastSpeechEmitRef.current.timestamp < 8000)) {
               continue;
             }
             lastSpeechEmitRef.current = { text: norm, timestamp: now };
@@ -1533,11 +1912,16 @@ export default function MeetingRoom() {
     };
     rec.onend = () => {
       if (!stopped && audioRef.current) {
+        // If TTS just started, wait for it to finish before listening again.
+        const lastTts = lastTtsPlaybackRef.current;
+        const ttsActive = isTtsPlayingRef.current
+          || (Boolean(lastTts.text) && Date.now() - lastTts.timestamp < 2000);
+        const restartDelay = ttsActive ? 2500 : (isMobile ? 150 : 350);
         restartTimer = setTimeout(() => {
           if (!stopped && audioRef.current) {
             try { rec.start(); } catch (_) {}
           }
-        }, isMobile ? 150 : 350);
+        }, restartDelay);
       }
     };
     try { rec.start(); } catch (_) {}
@@ -1560,6 +1944,9 @@ export default function MeetingRoom() {
     setIsVideoOn(nextVideo);
     const mediaStream = streamRef.current || stream;
     mediaStream?.getVideoTracks().forEach(t => { t.enabled = nextVideo; });
+    if (sfuClientRef.current) {
+      sfuClientRef.current.setProducerPaused('video', !nextVideo).catch(() => {});
+    }
     if (socket) socket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: nextVideo });
   };
   const toggleAudio = () => {
@@ -1574,6 +1961,9 @@ export default function MeetingRoom() {
     mediaStream?.getAudioTracks().forEach(t => { t.enabled = nextAudio; });
     if (!nextAudio && activeSpeechRecRef.current) {
       try { activeSpeechRecRef.current.abort(); } catch (_) {}
+    }
+    if (sfuClientRef.current) {
+      sfuClientRef.current.setProducerPaused('audio', !nextAudio).catch(() => {});
     }
     if (socket) socket.emit('meeting:status_update', { isAudioOn: nextAudio, isVideoOn: videoRef.current });
   };
@@ -1762,6 +2152,55 @@ export default function MeetingRoom() {
     }
   };
 
+  const handleTestAudio = () => {
+    if (isDemoActive) {
+      setIsDemoActive(false);
+      if (demoTimerRef.current) {
+        clearTimeout(demoTimerRef.current);
+        demoTimerRef.current = null;
+      }
+      // Stop the test playback immediately when toggled off.
+      try { window.speechSynthesis?.cancel(); } catch (_) {}
+      if (typeof window !== 'undefined' && window._activeTtsAudio) {
+        try {
+          window._activeTtsAudio.pause();
+          window._activeTtsAudio.src = '';
+        } catch (_) {}
+        window._activeTtsAudio = null;
+      }
+      isTtsPlayingRef.current = false;
+      return;
+    }
+
+    const phrase = 'Hello, this is a live test of the BhashaBridge translation system.';
+
+    setIsDemoActive(true);
+    setAlertMessage('Playing audio test phrase...');
+
+    // Play locally as well: caption TTS intentionally skips the speaker's own
+    // captions, so without this the person clicking Test Audio hears nothing.
+    playTtsAudio(phrase, 'en', 'en-US', { force: true });
+
+    if (socket && user?.id) {
+      socket.emit('caption:text', {
+        meetingId,
+        speakerId: user.id,
+        text: phrase,
+        language: 'en'
+      });
+    }
+
+    if (demoTimerRef.current) clearTimeout(demoTimerRef.current);
+    demoTimerRef.current = setTimeout(() => {
+      setIsDemoActive(false);
+      demoTimerRef.current = null;
+    }, 4000);
+  };
+
+  useEffect(() => () => {
+    if (demoTimerRef.current) clearTimeout(demoTimerRef.current);
+  }, []);
+
   const sendMessage = (e) => {
     e.preventDefault();
     if (!chatInput.trim() || !socket) return;
@@ -1770,18 +2209,8 @@ export default function MeetingRoom() {
     setChatInput('');
   };
 
-  useEffect(() => {
-    if (!isDemoActive || !socket || !user) return;
-    const phrase = "Hello, this is a live test of the BhashaBridge translation system.";
-    socket.emit('caption:text', { meetingId, speakerId: user.id, text: phrase, language: spokenLanguage });
-    
-    // Automatically reset Demo so it doesn't loop infinitely in the background
-    const stopTimer = setTimeout(() => {
-      setIsDemoActive(false);
-    }, 2500);
-
-    return () => clearTimeout(stopTimer);
-  }, [isDemoActive, socket, meetingId, user, spokenLanguage]);
+  // Test Audio is driven by handleTestAudio (button click) so it plays exactly
+  // once per click instead of re-firing whenever an effect dependency changes.
 
   // ======= MEETING JOIN ERROR POPUP (Ended, Cancelled, Restricted, Not Found) =======
   if (joinError) {
@@ -2388,14 +2817,7 @@ export default function MeetingRoom() {
 
             {/* Test Audio Demo */}
             <button
-              onClick={() => {
-                if (!isDemoActive) {
-                  setIsDemoActive(true);
-                  setAlertMessage('Broadcasting audio test phrase...');
-                } else {
-                  setIsDemoActive(false);
-                }
-              }}
+              onClick={handleTestAudio}
               className={`${styles.headerBtn} ${isDemoActive ? styles.headerBtnLive : ''}`}
             >
               <Radio size={14} />
@@ -2474,6 +2896,7 @@ export default function MeetingRoom() {
                     <VideoPeer
                       key={peer.userId || peer.peerID || i}
                       peer={peer.peer}
+                      stream={peer.stream}
                       name={peer.name || `Participant ${i + 1}`}
                       role={peer.role}
                       isAudioOn={peer.isAudioOn}

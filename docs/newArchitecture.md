@@ -213,7 +213,8 @@ flowchart TB
 
 ##### 3. Server-Side Audio Tap Ingress Pipeline (Pillars 3 & 5)
 * When participants produce an audio track, the SFU attaches an in-memory **Digital Audio Tap**.
-* Audio frames are sliced into 500ms chunks and serialized into **`AudioTapEvent.avsc`** Apache Avro binary (with RFC `0xC3 0x01` single-object framing).
+* Audio frames are sliced into 500ms chunks and serialized into **`AudioTapEvent.avsc`** Apache Avro binary (raw datum for the AI HTTP ingress; RFC `0xC3 0x01` single-object framing is retained for internal diagnostics).
+* Native deployments tap real RTP through a Mediasoup `PlainTransport` + local UDP socket; the Virtual engine emits synthetic frames so the Avro/AI pipeline stays testable.
 * Piped directly over HTTP/Avro network to `ai-service` at `/api/v1/ai/audio/tap` for server-side Whisper transcription, eliminating mobile browser microphone lockouts.
 
 ##### 4. SFU Microservice Signaling API
@@ -229,9 +230,24 @@ flowchart TB
 | `POST /api/v1/sfu/transports/:id/consume` | HTTP REST | `{ meetingId, producerId, rtpCaps }` | Consume remote peer track |
 | `POST /api/v1/sfu/consumers/:id/layers` | HTTP REST | `{ meetingId, spatialLayer }` | Adaptive Simulcast layer switch |
 | `POST /api/v1/sfu/audio-tap` | HTTP REST | `{ meetingId, producerId, participantId }` | Attach Avro digital audio tap |
-| `sfu:join-room` | Socket.IO (`/sfu`) | `{ meetingId, peerId }` | Join room and retrieve capabilities |
-| `sfu:create-transport` | Socket.IO (`/sfu`) | `{ meetingId, direction }` | Sub-millisecond transport allocation |
+| `GET /api/v1/sfu/rooms/:id/producers` | HTTP REST | — | List room producers and peers |
+| `DELETE /api/v1/sfu/rooms/:id` | HTTP REST | — | Close room and recycle media resources |
+| `GET /api/v1/sfu/ice-servers` | HTTP REST | — | ICE server config for browser negotiation |
+| `sfu:join-room` | Socket.IO (`/sfu`) | `{ meetingId, peerId, user }` | Join room and retrieve capabilities + existing producers |
+| `sfu:leave-room` | Socket.IO (`/sfu`) | `{}` | Gracefully leave and release peer resources |
+| `sfu:create-transport` | Socket.IO (`/sfu`) | `{ direction }` | Sub-millisecond transport allocation |
+| `sfu:connect-transport` | Socket.IO (`/sfu`) | `{ transportId, dtlsParameters }` | Connect transport with DTLS |
+| `sfu:produce` / `sfu:consume` | Socket.IO (`/sfu`) | `{ transportId, ... }` | Publish / consume tracks |
+| `sfu:pause-producer` / `sfu:resume-producer` | Socket.IO (`/sfu`) | `{ producerId }` | Mute/unmute without renegotiation |
+| `sfu:set-layers` | Socket.IO (`/sfu`) | `{ consumerId, spatialLayer }` | Switch simulcast layer |
+| `sfu:get-producers` / `sfu:get-stats` | Socket.IO (`/sfu`) | `{}` | Room snapshot and telemetry |
 | `sfu:new-producer` | Socket.IO (`/sfu`) | Broadcast to room | Informs peers to consume new stream |
+| `sfu:producer-closed` / `sfu:peer-left` | Socket.IO (`/sfu`) | Broadcast to room | Track/peer teardown notifications |
+
+##### 5. Browser Media Client & Fallback
+* `frontend/src/services/sfuClient.js` wraps `mediasoup-client`: it joins `/sfu`, creates send/recv transports, publishes mic/camera with 3-layer simulcast, and merges every remote producer into per-participant `MediaStream`s.
+* SFU activation is gated on `/health → mediasoup.isNative`. If the service is unreachable or running the Virtual engine, the meeting room automatically keeps the legacy `simple-peer` mesh, so no deployment breaks.
+* Screen sharing swaps the outgoing video track via `producer.replaceTrack()`; mute/camera state is paused/resumed without renegotiation.
 
 ---
 

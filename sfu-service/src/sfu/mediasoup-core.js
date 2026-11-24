@@ -8,11 +8,17 @@ const EventEmitter = require('events');
  */
 
 let nativeMediasoup = null;
-try {
-  nativeMediasoup = require('mediasoup');
-  console.log('[SFU Core] Successfully loaded native C++ Mediasoup engine.');
-} catch (e) {
-  console.log('[SFU Core] Native mediasoup binary not found. Initializing Virtual Mediasoup SFU Engine.');
+const forceVirtual = process.env.SFU_FORCE_VIRTUAL === '1' || process.env.SFU_FORCE_VIRTUAL === 'true';
+
+if (forceVirtual) {
+  console.log('[SFU Core] SFU_FORCE_VIRTUAL is enabled. Initializing Virtual Mediasoup SFU Engine.');
+} else {
+  try {
+    nativeMediasoup = require('mediasoup');
+    console.log('[SFU Core] Successfully loaded native C++ Mediasoup engine.');
+  } catch (e) {
+    console.log('[SFU Core] Native mediasoup binary not found. Initializing Virtual Mediasoup SFU Engine.');
+  }
 }
 
 /**

@@ -17,8 +17,12 @@ echo " 3. TTS: Bhashini Indic-TTS (AI4Bharat / IIT Madras Official Sovereign Voi
 echo " 4. TTS Text-Encoder Tokenizer: FLAN-T5 Large (voice description tokens)"
 echo "=================================================================="
 
-# Load token from backend/.env if available
-HF_TOKEN="${HF_TOKEN:-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}"
+# Load token from environment or backend/.env if available.
+# Never commit a real token: gated models (IndicTrans2) need HF_TOKEN to be set.
+HF_TOKEN="${HF_TOKEN:-}"
+if [ -z "$HF_TOKEN" ]; then
+  echo "WARNING: HF_TOKEN is not set. Public models will download, but gated models (IndicTrans2) will fail."
+fi
 
 # Use Docker to run the download so zero Python setup is needed on your host!
 docker run --rm \

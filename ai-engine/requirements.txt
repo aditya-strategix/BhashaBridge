@@ -1,7 +1,10 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 python-multipart>=0.0.9
-transformers>=4.40.0
+transformers>=4.40.0,<5.0.0
+# IndicTransToolkit provides the official IndicProcessor pre/post-processing.
+# Without it IndicTrans2 output stays in Devanagari for every target script.
+IndicTransToolkit>=1.1.0
 # sentencepiece>=0.2.3 ships protobuf gencode that requires the protobuf 7.x
 # runtime (google.protobuf.runtime_version), which conflicts with the
 # protobuf<5 pin below. 0.2.2 is the newest release compatible with protobuf 4.x.

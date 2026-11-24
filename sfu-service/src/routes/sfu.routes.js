@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const roomManager = require('../sfu/room-manager');
+const config = require('../config');
 
 // 1. Get Room RTP Capabilities
 router.get('/capabilities/:meetingId', async (req, res) => {
@@ -158,14 +159,18 @@ router.post('/consumers/:id/layers', async (req, res) => {
 router.post('/audio-tap', async (req, res) => {
   try {
     const { meetingId, producerId, participantId, options } = req.body || {};
-    if (!meetingId || !producerId || !participantId) {
-      return res.status(400).json({ error: 'meetingId, producerId, and participantId are required' });
+    if (!meetingId || !producerId) {
+      return res.status(400).json({ error: 'meetingId and producerId are required' });
     }
 
     const room = roomManager.getRoom(meetingId);
     if (!room) return res.status(404).json({ error: `Room ${meetingId} not found` });
 
-    const audioTap = room.createAudioTap(producerId, participantId, options);
+    const producer = room.getProducer(producerId);
+    if (!producer) return res.status(404).json({ error: `Producer ${producerId} not found` });
+
+    const tapParticipantId = participantId || producer.appData?.userId || producer.appData?.peerId || 'unknown';
+    const audioTap = room.createAudioTap(producerId, tapParticipantId, options || {});
     res.status(200).json(audioTap.getStats());
   } catch (err) {
     console.error('[SFU Route] /audio-tap error:', err);
@@ -173,14 +178,94 @@ router.post('/audio-tap', async (req, res) => {
   }
 });
 
-// 10. Close Room
+// 10. List / inspect audio taps
+router.get('/audio-taps', (req, res) => {
+  const rooms = roomManager.listRooms();
+  const taps = [];
+  for (const meetingId of rooms) {
+    const room = roomManager.getRoom(meetingId);
+    if (!room) continue;
+    taps.push(...room.getStats().audioTaps);
+  }
+  res.status(200).json({ totalTaps: taps.length, taps });
+});
+
+router.get('/audio-taps/:meetingId', (req, res) => {
+  const room = roomManager.getRoom(req.params.meetingId);
+  if (!room) return res.status(404).json({ error: `Room ${req.params.meetingId} not found` });
+  const taps = room.getStats().audioTaps;
+  res.status(200).json({ meetingId: req.params.meetingId, totalTaps: taps.length, taps });
+});
+
+// 11. Producer lifecycle
+router.get('/rooms/:meetingId/producers', (req, res) => {
+  const room = roomManager.getRoom(req.params.meetingId);
+  if (!room) return res.status(404).json({ error: `Room ${req.params.meetingId} not found` });
+  res.status(200).json({
+    meetingId: req.params.meetingId,
+    producers: room.getProducers(),
+    peers: room.listPeers()
+  });
+});
+
+router.post('/producers/:id/pause', async (req, res) => {
+  try {
+    const { meetingId } = req.body || {};
+    const room = roomManager.getRoom(meetingId);
+    if (!room) return res.status(404).json({ error: `Room ${meetingId} not found` });
+    res.status(200).json(await room.pauseProducer(req.params.id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/producers/:id/resume', async (req, res) => {
+  try {
+    const { meetingId } = req.body || {};
+    const room = roomManager.getRoom(meetingId);
+    if (!room) return res.status(404).json({ error: `Room ${meetingId} not found` });
+    res.status(200).json(await room.resumeProducer(req.params.id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/producers/:id', (req, res) => {
+  const meetingId = req.body?.meetingId || req.query?.meetingId;
+  const room = roomManager.getRoom(meetingId);
+  if (!room) return res.status(404).json({ error: `Room ${meetingId} not found` });
+  res.status(200).json({ producerId: req.params.id, closed: room.closeProducer(req.params.id) });
+});
+
+// 12. Peer management
+router.get('/rooms/:meetingId/peers', (req, res) => {
+  const room = roomManager.getRoom(req.params.meetingId);
+  if (!room) return res.status(404).json({ error: `Room ${req.params.meetingId} not found` });
+  res.status(200).json({ meetingId: req.params.meetingId, peers: room.listPeers() });
+});
+
+router.delete('/rooms/:meetingId/peers/:peerId', (req, res) => {
+  const room = roomManager.getRoom(req.params.meetingId);
+  if (!room) return res.status(404).json({ error: `Room ${req.params.meetingId} not found` });
+  const peer = room.getPeer(req.params.peerId);
+  if (!peer) return res.status(404).json({ error: `Peer ${req.params.peerId} not found` });
+  room.removePeer(req.params.peerId);
+  res.status(200).json({ meetingId: req.params.meetingId, peerId: req.params.peerId, removed: true });
+});
+
+// 13. ICE server configuration for browser negotiation
+router.get('/ice-servers', (req, res) => {
+  res.status(200).json({ iceServers: config.iceServers || [] });
+});
+
+// 14. Close Room
 router.delete('/rooms/:meetingId', (req, res) => {
   const { meetingId } = req.params;
   const closed = roomManager.closeRoom(meetingId);
   res.status(200).json({ meetingId, closed });
 });
 
-// 11. SFU Telemetry & Stats
+// 15. SFU Telemetry & Stats
 router.get('/stats', async (req, res) => {
   try {
     const stats = await roomManager.getGlobalStats();

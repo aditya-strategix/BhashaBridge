@@ -1,5 +1,10 @@
 const assert = require('assert');
 const path = require('path');
+
+// Keep the specification suite deterministic: exercise the Virtual engine even
+// when native mediasoup is installed in the environment.
+process.env.SFU_FORCE_VIRTUAL = '1';
+
 const workerPool = require('../src/sfu/worker-pool');
 const roomManager = require('../src/sfu/room-manager');
 const { registry } = require('../src/avro');
@@ -148,19 +153,25 @@ async function runTestSuite() {
 
     // Manually trigger audio chunk processing
     const sampleAudio = Buffer.alloc(960, 0x11);
-    const { audioTapEvent, avroBuffer } = await audioTap.handleAudioChunk(sampleAudio);
+    const { audioTapEvent, avroBuffer, singleObjectBuffer } = await audioTap.handleAudioChunk(sampleAudio);
 
     assert.strictEqual(audioTapEvent.meetingId, testMeetingId);
     assert.strictEqual(audioTapEvent.participantId, peerAlice);
     assert.strictEqual(audioTapEvent.sequenceNumber, 1);
     assert.strictEqual(audioTapEvent.audioData.length, 960);
 
-    // Verify Avro binary payload starts with RFC 0xC3 0x01 magic bytes
-    assert.strictEqual(avroBuffer[0], 0xC3, 'Magic byte 0 must be 0xC3');
-    assert.strictEqual(avroBuffer[1], 0x01, 'Magic byte 1 must be 0x01');
+    // Raw Avro payload must round-trip (ai-service /audio/tap contract).
+    const decodedRaw = registry.deserialize('AudioTapEvent', avroBuffer);
+    assert.strictEqual(decodedRaw.meetingId, testMeetingId);
+    assert.strictEqual(decodedRaw.sequenceNumber, 1);
+    assert.strictEqual(decodedRaw.audioData.length, 960);
 
-    // Deserialize and check round-trip integrity
-    const { data: decoded, schemaName } = registry.deserializeSingleObject(avroBuffer);
+    // Single Object Encoding keeps the RFC 0xC3 0x01 magic header.
+    assert.strictEqual(singleObjectBuffer[0], 0xC3, 'Magic byte 0 must be 0xC3');
+    assert.strictEqual(singleObjectBuffer[1], 0x01, 'Magic byte 1 must be 0x01');
+
+    // Deserialize single-object and check round-trip integrity
+    const { data: decoded, schemaName } = registry.deserializeSingleObject(singleObjectBuffer);
     assert.strictEqual(schemaName, 'AudioTapEvent');
     assert.strictEqual(decoded.meetingId, testMeetingId);
     assert.strictEqual(decoded.participantId, peerAlice);
@@ -238,14 +249,101 @@ async function runTestSuite() {
     console.error('  ✗ [FAIL] Client SDK test failed:', e);
   }
 
+  // 10. Socket.IO Signaling Lifecycle (/sfu namespace)
+  let signalServer = null;
+  let signalSocket = null;
+  try {
+    const http = require('http');
+    const { Server } = require('socket.io');
+    const { io: createClient } = require('socket.io-client');
+    const setupSfuSocket = require('../src/signaling/socket.handler');
+    const app = require('../src/app');
+
+    const signalingMeetingId = `signal_meet_${Date.now()}`;
+    signalServer = http.createServer(app);
+    const signalIo = new Server(signalServer, { transports: ['websocket', 'polling'] });
+    setupSfuSocket(signalIo);
+
+    await new Promise((resolve) => signalServer.listen(0, '127.0.0.1', resolve));
+    const signalPort = signalServer.address().port;
+
+    const ack = (socket, event, payload, timeoutMs = 8000) =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`${event} timed out`)), timeoutMs);
+        socket.emit(event, payload, (response) => {
+          clearTimeout(timer);
+          resolve(response || {});
+        });
+      });
+
+    signalSocket = createClient(`http://127.0.0.1:${signalPort}/sfu`, {
+      transports: ['websocket'],
+      forceNew: true
+    });
+
+    await new Promise((resolve, reject) => {
+      signalSocket.once('connect', resolve);
+      signalSocket.once('connect_error', reject);
+    });
+
+    const joined = await ack(signalSocket, 'sfu:join-room', {
+      meetingId: signalingMeetingId,
+      peerId: 'signal-peer-1',
+      user: { userId: 'signal-user-1', name: 'Signal Tester', role: 'PARTICIPANT' }
+    });
+    assert.ok(!joined.error, joined.error);
+    assert.strictEqual(joined.peerId, 'signal-peer-1');
+    assert.ok(joined.rtpCapabilities.codecs.length >= 2, 'Join must return RTP capabilities');
+    assert.ok(Array.isArray(joined.existingProducers), 'Join must return existing producers');
+    assert.ok(Array.isArray(joined.iceServers), 'Join must return ICE servers');
+
+    const transport = await ack(signalSocket, 'sfu:create-transport', { direction: 'send' });
+    assert.ok(!transport.error, transport.error);
+    assert.ok(transport.id && transport.iceParameters && transport.dtlsParameters);
+
+    const snapshot = await ack(signalSocket, 'sfu:get-producers', {});
+    assert.ok(Array.isArray(snapshot.producers));
+    assert.strictEqual(snapshot.peers.length, 1);
+    assert.strictEqual(snapshot.peers[0].peerId, 'signal-peer-1');
+    assert.strictEqual(snapshot.peers[0].metadata.userId, 'signal-user-1');
+
+    const stats = await ack(signalSocket, 'sfu:get-stats', {});
+    assert.strictEqual(stats.totalPeers, 1);
+    assert.strictEqual(stats.totalTransports, 1);
+
+    const pong = await ack(signalSocket, 'sfu:ping', {});
+    assert.strictEqual(pong.pong, true);
+
+    const left = await ack(signalSocket, 'sfu:leave-room', {});
+    assert.strictEqual(left.left, true);
+
+    signalSocket.disconnect();
+    signalSocket = null;
+    signalIo.close();
+    await new Promise((resolve) => signalServer.close(resolve));
+    signalServer = null;
+    roomManager.closeRoom(signalingMeetingId);
+
+    console.log('  ✓ [PASS] Socket.IO /sfu signaling lifecycle (join, transport, snapshot, stats, leave)');
+    passed++;
+  } catch (e) {
+    if (signalSocket) {
+      try { signalSocket.disconnect(); } catch (_) {}
+    }
+    if (signalServer) {
+      try { signalServer.close(); } catch (_) {}
+    }
+    console.error('  ✗ [FAIL] Socket.IO signaling lifecycle test failed:', e);
+  }
+
   // Teardown worker pool
   workerPool.close();
 
   console.log('='.repeat(80));
-  console.log(` RESULTS: ${passed}/9 test cases passed successfully!`);
+  console.log(` RESULTS: ${passed}/10 test cases passed successfully!`);
   console.log('='.repeat(80));
 
-  if (passed !== 9) process.exit(1);
+  if (passed !== 10) process.exit(1);
 }
 
 runTestSuite().catch(err => {

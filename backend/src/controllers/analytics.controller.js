@@ -1,10 +1,45 @@
 const prisma = require('../prisma');
 const { withDbRetry } = require('../prisma');
 
+// Resolve a meeting by canonical link, DB id, or organization access code
+// (case-insensitively), mirroring the join flow. Without this, report links
+// built from an org code or uppercase code returned 404.
+const resolveMeeting = async (identifier) => {
+  const clean = String(identifier || '').trim();
+  if (!clean) return null;
+
+  let meeting = await prisma.meeting.findFirst({
+    where: {
+      OR: [
+        { meetingLink: clean },
+        { meetingLink: { equals: clean, mode: 'insensitive' } },
+        { id: clean }
+      ]
+    }
+  });
+  if (meeting) return meeting;
+
+  const org = await prisma.organization.findFirst({
+    where: {
+      OR: [
+        { accessCode: clean },
+        { accessCode: { equals: clean, mode: 'insensitive' } }
+      ]
+    }
+  });
+  if (!org) return null;
+
+  meeting = await prisma.meeting.findFirst({
+    where: { organizationId: org.id },
+    orderBy: { createdAt: 'desc' }
+  });
+  return meeting;
+};
+
 exports.getAnalytics = async (req, res) => {
   try {
     const { meetingId } = req.params;
-    const meeting = await prisma.meeting.findUnique({ where: { meetingLink: meetingId } });
+    const meeting = await resolveMeeting(meetingId);
     if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
 
     let analytics = await prisma.meetingAnalytics.findUnique({ where: { meetingId: meeting.id } });
@@ -38,7 +73,7 @@ exports.getAnalytics = async (req, res) => {
     
     if (!analytics) {
       // Calculate simple analytics on the fly if not exists
-      const participants = await prisma.participant.count({ where: { meetingId: meeting.id } });
+      const participants = await prisma.participant.count({ where: { meetingId: meeting.id, status: 'ADMITTED' } });
       const messages = await prisma.chatMessage.findMany({ where: { meetingId: meeting.id } });
       const captions = await prisma.caption.findMany({ where: { meetingId: meeting.id } });
       const languagesUsed = [...new Set([
@@ -99,18 +134,19 @@ exports.getAnalytics = async (req, res) => {
 exports.generateReport = async (req, res) => {
   try {
     const { meetingId } = req.params;
-    const meeting = await prisma.meeting.findUnique({ where: { meetingLink: meetingId }, include: { analytics: true } });
+    const meeting = await resolveMeeting(meetingId);
     if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
 
-    if (!meeting.analytics) {
+    const analytics = await prisma.meetingAnalytics.findUnique({ where: { meetingId: meeting.id } });
+    if (!analytics) {
         return res.status(400).json({ error: 'Analytics not generated yet' });
     }
 
     const report = await prisma.meetingReport.create({
       data: {
         meetingId: meeting.id,
-        analyticsId: meeting.analytics.id,
-        reportData: { summary: "Meeting Report generated.", details: meeting.analytics },
+        analyticsId: analytics.id,
+        reportData: { summary: "Meeting Report generated.", details: analytics },
         format: "json"
       }
     });
@@ -125,7 +161,7 @@ exports.generateReport = async (req, res) => {
 exports.getReport = async (req, res) => {
   try {
     const { meetingId } = req.params;
-    const meeting = await prisma.meeting.findUnique({ where: { meetingLink: meetingId } });
+    const meeting = await resolveMeeting(meetingId);
     if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
 
     let report = await prisma.meetingReport.findFirst({
@@ -136,7 +172,7 @@ exports.getReport = async (req, res) => {
     if (!report) {
       let analytics = await prisma.meetingAnalytics.findUnique({ where: { meetingId: meeting.id } });
       if (!analytics) {
-        const participants = await prisma.participant.count({ where: { meetingId: meeting.id } });
+        const participants = await prisma.participant.count({ where: { meetingId: meeting.id, status: 'ADMITTED' } });
         const messages = await prisma.chatMessage.findMany({ where: { meetingId: meeting.id } });
         const captions = await prisma.caption.findMany({ where: { meetingId: meeting.id } });
         const languagesUsed = [...new Set([...messages.map(m => m.originalLanguage), ...captions.map(c => c.originalLanguage)])];

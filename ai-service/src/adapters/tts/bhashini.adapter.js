@@ -39,8 +39,62 @@ class BhashiniTTSAdapter extends ITTSProvider {
       throw new Error('Text parameter is empty for Bhashini TTS');
     }
 
-    // 1. If live Bhashini API keys are configured, call Dhruva pipeline
-    if (this.apiKey && this.inferenceKey) {
+    // 1. Primary: Dedicated inference domain (https://ai.aditya-kumar.in/tts) or local loopback.
+    //    Loopback is tried first so a local GPU engine is never bypassed by a
+    //    slow/unhealthy tunnel, then the configured endpoint, then the domain.
+    const ttsEndpoints = [
+      process.env.LOCAL_AI_ENGINE_ENDPOINT ? `${process.env.LOCAL_AI_ENGINE_ENDPOINT.replace(/\/+$/, '')}/tts` : null,
+      'http://localhost:8000/tts',
+      process.env.LOCAL_TTS_ENDPOINT || process.env.TTS_ENDPOINT || null,
+      process.env.AI_ENGINE_DOMAIN ? `${process.env.AI_ENGINE_DOMAIN.replace(/\/+$/, '')}/tts` : null
+    ];
+    const uniqueTtsEndpoints = [...new Set(ttsEndpoints.filter(Boolean))];
+
+    for (const ep of uniqueTtsEndpoints) {
+      try {
+        const localRes = await fetch(ep, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) BhashaBridge-AI/2.0'
+          },
+          body: JSON.stringify({ text: text.trim(), language: lang, gender }),
+          signal: AbortSignal.timeout(45000)
+        });
+        if (!localRes.ok) {
+          console.warn(`[BhashiniTTS] ${ep} returned HTTP ${localRes.status}`);
+          continue;
+        }
+
+        const contentType = (localRes.headers.get('content-type') || '').toLowerCase();
+        const arrayBuf = await localRes.arrayBuffer();
+        const audioBuffer = Buffer.from(arrayBuf);
+
+        // Reject error payloads masquerading as audio (e.g. JSON 503 bodies).
+        const isRiff = audioBuffer.length > 44 &&
+          audioBuffer.slice(0, 4).toString('ascii') === 'RIFF' &&
+          audioBuffer.slice(8, 12).toString('ascii') === 'WAVE';
+        if (!isRiff) {
+          console.warn(
+            `[BhashiniTTS] ${ep} returned non-WAV audio (${contentType || 'unknown'}, ${audioBuffer.length} bytes)`
+          );
+          continue;
+        }
+
+        return {
+          audioBuffer,
+          format: 'audio/wav',
+          durationMs: Math.max(1000, Math.floor(text.length * 75)),
+          provider: 'Docker-Neural-IndicTTS'
+        };
+      } catch (err) {
+        console.warn(`[BhashiniTTS] ${ep} unreachable: ${err.message}`);
+      }
+    }
+
+    // 2. Secondary: If live Bhashini API keys are configured (not dummy placeholders), call Dhruva pipeline
+    const hasLiveBhashiniKey = this.apiKey && this.apiKey !== 'your_bhashini_api_key_here';
+    if (hasLiveBhashiniKey && this.inferenceKey) {
       try {
         const payload = {
           pipelineTasks: [
@@ -90,71 +144,13 @@ class BhashiniTTSAdapter extends ITTSProvider {
       }
     }
 
-    // 2. If local Docker AI container is running (port 8000), synthesize neural TTS
-    const localTtsUrl = process.env.LOCAL_TTS_ENDPOINT || 'http://localhost:8000/tts';
-    try {
-      const localRes = await fetch(localTtsUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: text.trim(), language: lang, gender }),
-        signal: AbortSignal.timeout(4000)
-      });
-      if (localRes.ok) {
-        const arrayBuf = await localRes.arrayBuffer();
-        return {
-          audioBuffer: Buffer.from(arrayBuf),
-          format: 'audio/wav',
-          durationMs: Math.max(1000, Math.floor(text.length * 75)),
-          provider: 'Docker-Neural-IndicTTS'
-        };
-      }
-    } catch (_) {
-      // Docker offline or starting up, fall through to sovereign synthesizer
-    }
-
-    // 3. Sovereign Local Audio Synthesizer (Zero external dependencies, pure WAV generator)
-    // Generates a valid, playable PCM audio waveform so clients never freeze or fail
-    const sampleRate = 22050;
-    const durationSeconds = Math.max(1, Math.min(6, text.length * 0.08));
-    const numSamples = Math.floor(sampleRate * durationSeconds);
-    const dataSize = numSamples * 2; // 16-bit mono = 2 bytes per sample
-    const buffer = Buffer.alloc(44 + dataSize);
-
-    // RIFF Header
-    buffer.write('RIFF', 0);
-    buffer.writeUInt32LE(36 + dataSize, 4);
-    buffer.write('WAVE', 8);
-
-    // fmt chunk
-    buffer.write('fmt ', 12);
-    buffer.writeUInt32LE(16, 16); // Chunk size
-    buffer.writeUInt16LE(1, 20);  // Audio format 1 = PCM
-    buffer.writeUInt16LE(1, 22);  // Channels = 1 (Mono)
-    buffer.writeUInt32LE(sampleRate, 24);
-    buffer.writeUInt32LE(sampleRate * 2, 28); // Byte rate
-    buffer.writeUInt16LE(2, 32);  // Block align
-    buffer.writeUInt16LE(16, 34); // Bits per sample
-
-    // data chunk
-    buffer.write('data', 36);
-    buffer.writeUInt32LE(dataSize, 40);
-
-    // Generate gentle harmonic chime/speech carrier wave (440Hz base harmonic)
-    for (let i = 0; i < numSamples; i++) {
-      const t = i / sampleRate;
-      const decay = Math.exp(-t / (durationSeconds * 0.8));
-      const sample = Math.sin(2 * Math.PI * 440 * t) * 0.3 * decay +
-                     Math.sin(2 * Math.PI * 880 * t) * 0.15 * decay;
-      const intSample = Math.max(-32768, Math.min(32767, Math.floor(sample * 32767)));
-      buffer.writeInt16LE(intSample, 44 + i * 2);
-    }
-
-    return {
-      audioBuffer: buffer,
-      format: 'audio/wav',
-      durationMs: Math.floor(durationSeconds * 1000),
-      provider: 'Bhashini-Sovereign-Synthesizer'
-    };
+    // 3. No synthetic tone fallback. A beep is not speech: if every neural
+    //    engine is unavailable, fail so the client can use a real voice
+    //    (browser SpeechSynthesis) instead of playing a meaningless sound.
+    throw new Error(
+      'No neural TTS engine produced audio (tried ' +
+      `${uniqueTtsEndpoints.join(', ')}${hasLiveBhashiniKey && this.inferenceKey ? ', Bhashini Dhruva' : ''})`
+    );
   }
 }
 

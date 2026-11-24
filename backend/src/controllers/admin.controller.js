@@ -44,7 +44,10 @@ exports.addOrgUser = async (req, res) => {
       return res.status(400).json({ error: 'Email is required' });
     }
 
-    const targetUser = await prisma.user.findUnique({ where: { email } });
+    const cleanEmail = String(email).trim().toLowerCase();
+    const targetUser = await prisma.user.findFirst({
+      where: { email: { equals: cleanEmail, mode: 'insensitive' } }
+    });
     if (!targetUser) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -91,10 +94,34 @@ exports.changeUserRole = async (req, res) => {
   try {
     const { id } = req.params;
     const { role } = req.body;
-    
+
     const validRoles = ['HOST', 'PARTICIPANT', 'ORG_ADMIN', 'PLATFORM_ADMIN'];
     if (!role || !validRoles.includes(role)) {
       return res.status(400).json({ error: 'Invalid user role specified' });
+    }
+
+    const caller = await prisma.user.findUnique({
+      where: { id: req.user.userId },
+      include: {
+        ownedOrganizations: {
+          include: { users: { select: { id: true } } }
+        }
+      }
+    });
+    if (!caller) return res.status(404).json({ error: 'User not found' });
+
+    // An organization admin must never be able to grant platform-wide roles,
+    // and may only change users inside organizations they own.
+    if (req.user.role !== 'PLATFORM_ADMIN') {
+      if (!['HOST', 'PARTICIPANT'].includes(role)) {
+        return res.status(403).json({ error: 'Only platform admins can grant admin roles' });
+      }
+      const targetIsOwnedMember = (caller.ownedOrganizations || []).some((org) =>
+        (org.users || []).some((member) => member.id === id)
+      );
+      if (!targetIsOwnedMember) {
+        return res.status(403).json({ error: 'You can only change roles for members of your organizations' });
+      }
     }
 
     await prisma.user.update({

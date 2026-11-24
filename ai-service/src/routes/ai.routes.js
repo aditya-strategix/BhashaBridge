@@ -7,11 +7,17 @@ const AudioTapService = require('../services/audio-tap.service');
 const { defaultTTS } = require('../adapters/tts');
 const { registry } = require('../avro');
 
+// Content-Type may carry parameters (e.g. "application/avro; charset=utf-8")
+const isAvroRequest = (req) => {
+  const contentType = String(req.headers['content-type'] || '').toLowerCase();
+  return contentType.startsWith('application/avro')
+    || contentType.startsWith('application/octet-stream');
+};
+
 // 1. Meeting Summarization (Dual-Protocol: JSON or Apache Avro Binary)
 router.post('/summary', async (req, res) => {
   try {
-    const isAvro = req.headers['content-type'] === 'application/avro' || 
-                   req.headers['content-type'] === 'application/octet-stream';
+    const isAvro = isAvroRequest(req);
 
     if (isAvro && Buffer.isBuffer(req.body)) {
       const { payload, buffer } = await SummarizationService.processAvroRequest(req.body);
@@ -72,8 +78,7 @@ router.post('/translate', async (req, res) => {
 // 3. High-Throughput Live Caption Stream (Avro Binary Pipeline)
 router.post('/caption/stream', async (req, res) => {
   try {
-    const isAvro = req.headers['content-type'] === 'application/avro' || 
-                   req.headers['content-type'] === 'application/octet-stream';
+    const isAvro = isAvroRequest(req);
     const targetLangsHeader = req.headers['x-target-languages'] || '';
     const targetLangs = targetLangsHeader.split(',').map(s => s.trim()).filter(Boolean);
 
@@ -102,8 +107,7 @@ router.post('/caption/stream', async (req, res) => {
 // 4. Mediasoup SFU Audio Tap Ingress (Opus/PCM -> STT)
 router.post('/audio/tap', async (req, res) => {
   try {
-    const isAvro = req.headers['content-type'] === 'application/avro' || 
-                   req.headers['content-type'] === 'application/octet-stream';
+    const isAvro = isAvroRequest(req);
 
     if (isAvro && Buffer.isBuffer(req.body)) {
       const { captionEvent, avroBuffer } = await AudioTapService.processAvroAudioTap(req.body);

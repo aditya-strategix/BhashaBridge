@@ -1,17 +1,8 @@
 import axios from 'axios';
-
-const getBaseURL = () => {
-  if (process.env.NEXT_PUBLIC_API_URL && !process.env.NEXT_PUBLIC_API_URL.includes('localhost')) {
-    return process.env.NEXT_PUBLIC_API_URL;
-  }
-  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    return `${window.location.origin}/api`;
-  }
-  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
-};
+import { getApiBaseUrl } from './urls';
 
 const api = axios.create({
-  baseURL: getBaseURL(),
+  baseURL: getApiBaseUrl(),
   headers: {
     'Content-Type': 'application/json',
   },
@@ -19,9 +10,7 @@ const api = axios.create({
 
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
-    if (!config.baseURL || config.baseURL.includes('localhost')) {
-      config.baseURL = getBaseURL();
-    }
+    config.baseURL = getApiBaseUrl();
     const token = localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -29,5 +18,21 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
+
+// Recover from expired/invalid sessions instead of leaving a blank page.
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (typeof window !== 'undefined' && error?.response?.status === 401) {
+      const path = window.location.pathname;
+      if (path !== '/login' && path !== '/register' && path !== '/') {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = `/login?redirect=${encodeURIComponent(path)}`;
+      }
+    }
+    return Promise.reject(error);
+  }
+);
 
 export default api;

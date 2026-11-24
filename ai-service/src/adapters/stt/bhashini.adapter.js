@@ -71,10 +71,10 @@ class BhashiniSTTAdapter extends ISTTProvider {
       }
     }
 
-    // Sovereign fallback format
+    // Return empty string for silence or unconfigured fallback
     return {
-      text: `[Audio Stream Chunk ${audioBuffer.length} bytes]`,
-      confidence: 0.90,
+      text: '',
+      confidence: 0.0,
       language: lang,
       provider: 'Bhashini-Sovereign-STT'
     };
