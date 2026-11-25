@@ -19,6 +19,207 @@
   box-sizing: border-box;
 }
 
+/* ===== FULL-PAGE EDITORIAL INTRO ANIMATION ===== */
+.introOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background-color: #0A0A0A;
+  background-image:
+    radial-gradient(circle at 20% 25%, rgba(0, 34, 255, 0.22) 0%, transparent 45%),
+    radial-gradient(circle at 80% 75%, rgba(255, 51, 17, 0.18) 0%, transparent 45%),
+    radial-gradient(rgba(253, 251, 247, 0.08) 1px, transparent 0);
+  background-size: 100% 100%, 100% 100%, 26px 26px;
+  color: #FDFBF7;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 2rem 3rem;
+  box-sizing: border-box;
+  border-bottom: 4px solid var(--cobalt);
+  transform: translateY(0);
+  transition: transform 0.65s cubic-bezier(0.77, 0, 0.175, 1), opacity 0.45s ease;
+}
+
+.introOverlayExiting {
+  transform: translateY(-102%);
+  pointer-events: none;
+}
+
+.introTopBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.introBrandMini {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: rgba(253, 251, 247, 0.85);
+}
+
+.introSquare {
+  width: 11px;
+  height: 11px;
+  background: var(--vermilion);
+  box-shadow: 2px 2px 0 var(--cobalt);
+  display: inline-block;
+}
+
+.introSkipBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: rgba(253, 251, 247, 0.08);
+  color: #FDFBF7;
+  border: 1.5px solid rgba(253, 251, 247, 0.35);
+  padding: 0.4rem 0.85rem;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.introSkipBtn:hover {
+  background: var(--cobalt);
+  border-color: #FDFBF7;
+}
+
+.introCenter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 1.4rem;
+  padding: 1rem;
+}
+
+.introWaveCluster {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+}
+
+.introWaveCluster span {
+  width: 5px;
+  height: 10px;
+  display: inline-block;
+  animation: introEqualizer 0.7s ease-in-out infinite;
+}
+
+@keyframes introEqualizer {
+  0%, 100% { height: 8px; opacity: 0.6; }
+  50% { height: 28px; opacity: 1; }
+}
+
+.introWord {
+  font-family: Georgia, serif;
+  font-style: italic;
+  font-size: clamp(3.2rem, 10vw, 7.2rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  color: #FDFBF7;
+  text-shadow: 4px 4px 0 rgba(0, 34, 255, 0.65);
+  animation: introWordPop 0.26s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.introWordBrand {
+  font-style: normal;
+  font-family: var(--font-geist-sans), sans-serif;
+  text-transform: uppercase;
+  letter-spacing: -0.04em;
+  text-shadow: 6px 6px 0 var(--vermilion);
+}
+
+@keyframes introWordPop {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.introLangPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.4rem 0.95rem;
+  background: rgba(253, 251, 247, 0.06);
+  border: 1.5px solid var(--cobalt);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #FDFBF7;
+}
+
+.introLangDot {
+  width: 8px;
+  height: 8px;
+  display: inline-block;
+}
+
+.introBottomBar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.introTrack {
+  width: 100%;
+  height: 4px;
+  background: rgba(253, 251, 247, 0.15);
+  overflow: hidden;
+}
+
+.introProgressFill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--vermilion), var(--cobalt), var(--emerald));
+  animation: introProgressSweep 1.85s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes introProgressSweep {
+  from { width: 0%; }
+  to { width: 100%; }
+}
+
+.introMetaRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  color: rgba(253, 251, 247, 0.55);
+}
+
+@media screen and (max-width: 768px) {
+  .introOverlay {
+    padding: 1.25rem;
+  }
+  .introMetaRow {
+    font-size: 0.62rem;
+  }
+}
+
 /* ===== NAVIGATION BAR ===== */
 .nav {
   display: flex;

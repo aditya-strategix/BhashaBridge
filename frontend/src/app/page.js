@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -100,11 +100,58 @@ const DEMO_TARGET_SAMPLES = [
   }
 ];
 
+const INTRO_GREETINGS = [
+  { word: 'नमस्ते', lang: 'HINDI · HI', accent: '#FF3311' },
+  { word: 'வணக்கம்', lang: 'TAMIL · TA', accent: '#10B981' },
+  { word: 'নমস্কার', lang: 'BENGALI · BN', accent: '#F59E0B' },
+  { word: 'నమస్కారం', lang: 'TELUGU · TE', accent: '#0022FF' },
+  { word: 'Hola', lang: 'ESPAÑOL · ES', accent: '#FF3311' },
+  { word: 'BhashaBridge', lang: 'SPEAK FREELY · BE UNDERSTOOD', accent: '#0022FF', isBrand: true }
+];
+
 export default function Home() {
   const [meetingCode, setMeetingCode] = useState('');
   const [demoTargetCode, setDemoTargetCode] = useState('EN');
+  const [introStage, setIntroStage] = useState('playing'); // 'playing' | 'exiting' | 'done'
+  const [greetingIdx, setGreetingIdx] = useState(0);
   const router = useRouter();
   const activeDemoTarget = DEMO_TARGET_SAMPLES.find(d => d.code === demoTargetCode) || DEMO_TARGET_SAMPLES[0];
+  const activeGreeting = INTRO_GREETINGS[greetingIdx] || INTRO_GREETINGS[INTRO_GREETINGS.length - 1];
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (reduced) {
+      const quick = setTimeout(() => setIntroStage('done'), 0);
+      return () => clearTimeout(quick);
+    }
+
+    const stepInterval = setInterval(() => {
+      setGreetingIdx((prev) => {
+        if (prev < INTRO_GREETINGS.length - 1) return prev + 1;
+        return prev;
+      });
+    }, 290);
+
+    const exitTimer = setTimeout(() => {
+      setIntroStage('exiting');
+    }, 1850);
+
+    const doneTimer = setTimeout(() => {
+      setIntroStage('done');
+    }, 2500);
+
+    return () => {
+      clearInterval(stepInterval);
+      clearTimeout(exitTimer);
+      clearTimeout(doneTimer);
+    };
+  }, []);
+
+  const handleSkipIntro = () => {
+    setIntroStage('exiting');
+    setTimeout(() => setIntroStage('done'), 500);
+  };
 
   const handleJoinByCode = (e) => {
     e.preventDefault();
@@ -115,6 +162,57 @@ export default function Home() {
 
   return (
     <div className={styles.pageContainer}>
+
+      {/* ===== FULL-PAGE MULTILINGUAL EDITORIAL INTRO CURTAIN ===== */}
+      {introStage !== 'done' && (
+        <div
+          className={`${styles.introOverlay} ${introStage === 'exiting' ? styles.introOverlayExiting : ''}`}
+          role="presentation"
+        >
+          <div className={styles.introTopBar}>
+            <div className={styles.introBrandMini}>
+              <span className={styles.introSquare} />
+              <span>BHASHABRIDGE // LIVE STUDIO</span>
+            </div>
+            <button type="button" onClick={handleSkipIntro} className={styles.introSkipBtn}>
+              <span>Skip Intro</span>
+              <ArrowRight size={13} />
+            </button>
+          </div>
+
+          <div className={styles.introCenter}>
+            <div className={styles.introWaveCluster} aria-hidden="true">
+              <span style={{ animationDelay: '0s', background: activeGreeting.accent }} />
+              <span style={{ animationDelay: '0.12s', background: activeGreeting.accent }} />
+              <span style={{ animationDelay: '0.24s', background: activeGreeting.accent }} />
+              <span style={{ animationDelay: '0.08s', background: activeGreeting.accent }} />
+              <span style={{ animationDelay: '0.2s', background: activeGreeting.accent }} />
+            </div>
+
+            <div
+              key={greetingIdx}
+              className={`${styles.introWord} ${activeGreeting.isBrand ? styles.introWordBrand : ''}`}
+            >
+              {activeGreeting.word}
+            </div>
+
+            <div className={styles.introLangPill} style={{ borderColor: activeGreeting.accent }}>
+              <span className={styles.introLangDot} style={{ background: activeGreeting.accent }} />
+              <span>{activeGreeting.lang}</span>
+            </div>
+          </div>
+
+          <div className={styles.introBottomBar}>
+            <div className={styles.introTrack}>
+              <div className={styles.introProgressFill} />
+            </div>
+            <div className={styles.introMetaRow}>
+              <span>FASTER-WHISPER STT · INDICTRANS2 · BHASHINI TTS</span>
+              <span>REAL-TIME MULTILINGUAL ENGINE</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ===== NAVIGATION BAR ===== */}
       <nav className={styles.nav}>

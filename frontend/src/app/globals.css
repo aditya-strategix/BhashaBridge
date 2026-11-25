@@ -54,6 +54,21 @@ a {
   text-decoration: none;
 }
 
+/* ==========================================================================
+   EDITORIAL SELECTION & CARET THEME (EYE-FRIENDLY IVORY + COBALT)
+   ========================================================================== */
+
+::selection {
+  background: rgba(0, 34, 255, 0.14);
+  color: #0A0A0A;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  caret-color: #0022FF;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;
