@@ -8,6 +8,8 @@
   --border-dark: #0A0A0A;
   
   background-color: var(--bg-ivory);
+  background-image: radial-gradient(rgba(10, 10, 10, 0.055) 1px, transparent 0);
+  background-size: 24px 24px;
   color: var(--text-dark);
   min-height: 100vh;
   width: 100%;
@@ -222,6 +224,15 @@
   background-color: var(--text-dark);
   transform: translate(-2px, -2px);
   box-shadow: 6px 6px 0 var(--border-dark);
+}
+
+.btnPrimary:active,
+.btnSecondary:active,
+.btnNavLogin:active,
+.btnNavRegister:active,
+.btnGuestJoin:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--border-dark);
 }
 
 .btnSecondary {
@@ -450,6 +461,45 @@
   border: 1px solid var(--border-dark);
 }
 
+.demoLangSwitcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.demoSwitchLabel {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #555;
+  margin-right: 0.25rem;
+}
+
+.demoLangBtn {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.28rem 0.65rem;
+  background: #fff;
+  color: var(--text-dark);
+  border: 2px solid var(--border-dark);
+  box-shadow: 2px 2px 0 var(--border-dark);
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.1s ease, background 0.15s ease;
+}
+
+.demoLangBtn:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0 var(--border-dark);
+}
+
+.demoLangBtnActive {
+  background: var(--cobalt);
+  color: #fff;
+}
+
 .liveDot {
   width: 8px;
   height: 8px;
@@ -668,6 +718,13 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+.langChip:hover {
+  transform: translate(-2px, -2px);
+  border-color: var(--cobalt);
+  box-shadow: 5px 5px 0 var(--cobalt);
 }
 
 .langName {
@@ -714,6 +771,12 @@
   box-shadow: 5px 5px 0 var(--border-dark);
   padding: 2.25rem;
   position: relative;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.workflowCard:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 7px 7px 0 var(--border-dark);
 }
 
 .stepNumber {

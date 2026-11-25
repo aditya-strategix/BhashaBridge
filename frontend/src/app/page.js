@@ -61,9 +61,50 @@ const FEATURES = [
   }
 ];
 
+const DEMO_TARGET_SAMPLES = [
+  {
+    code: 'EN',
+    label: 'English (US)',
+    speaker: 'Elena (New York)',
+    initial: 'E',
+    color: '#0022FF',
+    latency: '312ms',
+    text: 'Hello! In today’s meeting, we will discuss the new product roadmap in detail.'
+  },
+  {
+    code: 'TA',
+    label: 'தமிழ் (Tamil)',
+    speaker: 'Karthik (Chennai)',
+    initial: 'K',
+    color: '#0F766E',
+    latency: '328ms',
+    text: 'வணக்கம்! இன்றைய கூட்டத்தில் புதிய தயாரிப்பு திட்டத்தைப் பற்றி விரிவாக விவாதிப்போம்.'
+  },
+  {
+    code: 'BN',
+    label: 'বাংলা (Bengali)',
+    speaker: 'Ananya (Kolkata)',
+    initial: 'A',
+    color: '#7C3AED',
+    latency: '319ms',
+    text: 'নমস্কার! আজকের মিটিংয়ে আমরা নতুন প্রোডাক্ট রোডম্যাপ নিয়ে বিস্তারিত আলোচনা করব।'
+  },
+  {
+    code: 'ES',
+    label: 'Español (Spanish)',
+    speaker: 'Mateo (Madrid)',
+    initial: 'M',
+    color: '#B45309',
+    latency: '305ms',
+    text: '¡Hola! En la reunión de hoy analizaremos en detalle la nueva hoja de ruta del producto.'
+  }
+];
+
 export default function Home() {
   const [meetingCode, setMeetingCode] = useState('');
+  const [demoTargetCode, setDemoTargetCode] = useState('EN');
   const router = useRouter();
+  const activeDemoTarget = DEMO_TARGET_SAMPLES.find(d => d.code === demoTargetCode) || DEMO_TARGET_SAMPLES[0];
 
   const handleJoinByCode = (e) => {
     e.preventDefault();
@@ -196,8 +237,18 @@ export default function Home() {
               <span className={styles.liveDot} />
               <span>Live Interpretation Active</span>
             </div>
-            <div style={{ fontFamily: 'var(--font-geist-mono)', fontSize: '0.8rem', color: '#666' }}>
-              Meeting ID: <strong>BB-DEMO-01</strong>
+            <div className={styles.demoLangSwitcher}>
+              <span className={styles.demoSwitchLabel}>Listener Output:</span>
+              {DEMO_TARGET_SAMPLES.map((sample) => (
+                <button
+                  key={sample.code}
+                  type="button"
+                  onClick={() => setDemoTargetCode(sample.code)}
+                  className={`${styles.demoLangBtn} ${demoTargetCode === sample.code ? styles.demoLangBtnActive : ''}`}
+                >
+                  {sample.code}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -224,7 +275,7 @@ export default function Home() {
                 <div className={styles.waveBar} style={{ animationDelay: '0.5s' }} />
                 <div className={styles.waveBar} style={{ animationDelay: '0.3s' }} />
                 <span style={{ fontSize: '0.72rem', color: '#666', fontFamily: 'var(--font-geist-mono)', marginLeft: '0.5rem' }}>
-                  Microphone Stream Active
+                  Web Audio VAD &bull; Faster-Whisper STT
                 </span>
               </div>
             </div>
@@ -232,10 +283,10 @@ export default function Home() {
             {/* Pipeline Center */}
             <div className={styles.pipelineConnector}>
               <div className={styles.pipelineBadge}>
-                NEURAL ENGINE
+                INDICTRANS2 + TTS
               </div>
               <div className={styles.pipelineLatency}>
-                ⚡ 312ms latency
+                ⚡ {activeDemoTarget.latency} latency
               </div>
               <ArrowRight size={24} color="var(--cobalt)" />
             </div>
@@ -243,16 +294,16 @@ export default function Home() {
             {/* Right Speaker */}
             <div className={styles.speakerBox}>
               <div className={styles.speakerHeader}>
-                <div className={styles.speakerAvatar} style={{ background: '#0022FF' }}>
-                  E
+                <div className={styles.speakerAvatar} style={{ background: activeDemoTarget.color }}>
+                  {activeDemoTarget.initial}
                 </div>
                 <div className={styles.speakerInfo}>
-                  <h5>Elena (New York)</h5>
-                  <span className={styles.speakerLangTag}>Listens: English (US)</span>
+                  <h5>{activeDemoTarget.speaker}</h5>
+                  <span className={styles.speakerLangTag}>Listens: {activeDemoTarget.label}</span>
                 </div>
               </div>
               <div className={styles.quoteBox}>
-                &ldquo;Hello! In today&rsquo;s meeting, we will discuss the new product roadmap in detail.&rdquo;
+                &ldquo;{activeDemoTarget.text}&rdquo;
               </div>
               <div style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <span style={{ width: 8, height: 8, background: '#10b981', display: 'inline-block' }} />

@@ -9,7 +9,7 @@ import {
   Users, Settings, Shield, UserCheck, UserX,
   MessageSquare, Globe, ChevronRight, VolumeX, MoreVertical, Star, Trash2, X,
   Copy, Check, Clock, AlertCircle, FileText, ArrowLeft, RefreshCw,
-  Monitor, MonitorOff, Subtitles, Sparkles, Radio, Activity, Volume2
+  Monitor, MonitorOff, Subtitles, Sparkles, Radio, Activity, Volume2, Lock
 } from 'lucide-react';
 import useAuthStore from '../../../stores/authStore';
 import SFUClient from '../../../services/sfuClient';
@@ -132,13 +132,14 @@ const BCP47_LANG_MAP = {
 const LANG_OPTIONS = [
   { value: 'en', label: 'English' },
   { value: 'hi', label: 'Hindi' },
+  { value: 'bn', label: 'Bengali' },
+  { value: 'ta', label: 'Tamil' },
+  { value: 'te', label: 'Telugu' },
+  { value: 'mr', label: 'Marathi' },
+  { value: 'gu', label: 'Gujarati' },
   { value: 'es', label: 'Spanish' },
   { value: 'fr', label: 'French' },
   { value: 'de', label: 'German' },
-  { value: 'zh', label: 'Chinese' },
-  { value: 'ta', label: 'Tamil' },
-  { value: 'te', label: 'Telugu' },
-  { value: 'bn', label: 'Bengali' },
 ];
 
 // -------- Avatar initial --------
@@ -156,9 +157,15 @@ function Avatar({ name, size = 36, color = '#0022FF', avatarUrl }) {
 }
 
 // -------- Video peer tile --------
-const VideoPeer = ({ peer, stream, name, role, isAudioOn = true, isVideoOn = true, isScreenSharing = false, avatarUrl }) => {
+const VideoPeer = ({ peer, stream, name, role, isAudioOn = true, isVideoOn = true, isScreenSharing = false, avatarUrl, suppressAudio = false }) => {
   const ref = useRef();
   const showVideo = isVideoOn || isScreenSharing;
+
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.volume = suppressAudio ? 0 : 1;
+    }
+  }, [suppressAudio]);
 
   useEffect(() => {
     const handleStream = nextStream => {
@@ -259,12 +266,8 @@ export default function MeetingRoom() {
 
   const [socket, setSocket] = useState(null);
   useEffect(() => { initialize(); }, [initialize]);
-  // initialize() runs after the first render, so the store is empty when
-  // spokenLanguage is created. Sync it once the user loads, otherwise speech
-  // recognition always listens in English.
-  useEffect(() => {
-    if (user?.language) setSpokenLanguage(user.language);
-  }, [user?.language]);
+  // Spoken language during a meeting is strictly locked to the user's profile language.
+  const spokenLanguage = user?.language || user?.preferredLanguage || 'en';
   const [peers, setPeers] = useState([]);
   const [stream, setStream] = useState(null);
   const [isVideoOn, setIsVideoOn] = useState(true);
@@ -272,12 +275,7 @@ export default function MeetingRoom() {
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [currentCaption, setCurrentCaption] = useState(null);
-  const [spokenLanguage, setSpokenLanguage] = useState(useAuthStore.getState().user?.language || 'en');
   const [isDemoActive, setIsDemoActive] = useState(false);
-  const isDemoActiveRef = useRef(false);
-  const [showCustomSpeech, setShowCustomSpeech] = useState(false);
-  const [customSpeechText, setCustomSpeechText] = useState('');
-  const [customSpeechLang, setCustomSpeechLang] = useState('hi');
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const micVolumeRef = useRef(0);
   const [isSpeakingLive, setIsSpeakingLive] = useState(false);
@@ -304,9 +302,7 @@ export default function MeetingRoom() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const meetingStartTimeRef = useRef(null);
   const [micVolume, setMicVolume] = useState(0);
-  const [micTestStatus, setMicTestStatus] = useState('idle');
-  const [micTestError, setMicTestError] = useState('');
-  const [micRevision, setMicRevision] = useState(0);
+  const activeMicVolume = (stream && isAudioOn) ? micVolume : 0;
   const membersToggleBtnRef = useRef(null);
 
   useEffect(() => {
@@ -338,7 +334,6 @@ export default function MeetingRoom() {
   useEffect(() => {
     if (!stream || !isAudioOn) {
       micVolumeRef.current = 0;
-      setMicVolume(0);
       return;
     }
     let audioContext;
@@ -415,6 +410,11 @@ export default function MeetingRoom() {
   const [copiedLink, setCopiedLink] = useState(false);
 
   const isTtsPlayingRef = useRef(false);
+  const [isTtsPlaying, setIsTtsPlaying] = useState(false);
+  const setTtsPlayingState = useCallback((active) => {
+    isTtsPlayingRef.current = active;
+    setIsTtsPlaying(active);
+  }, []);
   const recentTtsMapRef = useRef(new Map());
   const captionTimerRef = useRef(null);
   const lastTtsPlaybackRef = useRef({ text: '', timestamp: 0 });
@@ -468,7 +468,7 @@ export default function MeetingRoom() {
     if (typeof window !== 'undefined') {
       if (window._ttsPlayingTimeout) clearTimeout(window._ttsPlayingTimeout);
       window._ttsPlayingTimeout = setTimeout(() => {
-        isTtsPlayingRef.current = false;
+        setTtsPlayingState(false);
       }, 5000);
     }
 
@@ -527,7 +527,7 @@ export default function MeetingRoom() {
       const voices = getVoices();
       const voice = matchingVoice || voices[0] || null;
       nativeAttempted = true;
-      isTtsPlayingRef.current = true;
+      setTtsPlayingState(true);
 
       try {
         stopActive();
@@ -550,7 +550,7 @@ export default function MeetingRoom() {
             playViaBackend();
             return;
           }
-          setTimeout(() => { isTtsPlayingRef.current = false; }, 1500);
+          setTimeout(() => { setTtsPlayingState(false); }, 1500);
         };
 
         utterance.onerror = (e) => {
@@ -559,7 +559,7 @@ export default function MeetingRoom() {
           const errType = e?.error;
           // cancel()/new utterance intentionally interrupts the previous one.
           if (errType === 'interrupted' || errType === 'canceled') {
-            isTtsPlayingRef.current = false;
+            setTtsPlayingState(false);
             return;
           }
           // Autoplay policy: no gesture yet on this tab. Ask for a tap and
@@ -567,14 +567,14 @@ export default function MeetingRoom() {
           if (errType === 'not-allowed') {
             pendingAudioPlaybackRef.current = { text: cleanText, lang: targetLangCode, bcp: bcpLang };
             setAlertMessage('Tap anywhere once to enable translated audio.');
-            isTtsPlayingRef.current = false;
+            setTtsPlayingState(false);
             return;
           }
           console.warn('[Meeting TTS] SpeechSynthesis error:', errType || e);
           if (!allowAnyVoice && !backendAttempted) {
             playViaBackend();
           } else {
-            isTtsPlayingRef.current = false;
+            setTtsPlayingState(false);
           }
         };
 
@@ -592,7 +592,7 @@ export default function MeetingRoom() {
       } catch (e) {
         console.warn('[Meeting TTS] Native TTS exception:', e);
         nativeAttempted = false;
-        isTtsPlayingRef.current = false;
+        setTtsPlayingState(false);
         return false;
       }
     };
@@ -601,7 +601,7 @@ export default function MeetingRoom() {
     const playViaBackend = () => {
       if (backendAttempted) return;
       backendAttempted = true;
-      isTtsPlayingRef.current = true;
+      setTtsPlayingState(true);
       let backendRetried = false;
 
       try {
@@ -623,7 +623,7 @@ export default function MeetingRoom() {
           if (window._activeTtsAudio === audio) {
             window._activeTtsAudio = null;
           }
-          setTimeout(() => { isTtsPlayingRef.current = false; }, 1000);
+          setTimeout(() => { setTtsPlayingState(false); }, 1000);
         };
         audio.onerror = () => {
           if (audio.__bbStopped) return;
@@ -645,7 +645,7 @@ export default function MeetingRoom() {
             window._activeTtsAudio = null;
           }
           if (!speakNative(true)) {
-            setTimeout(() => { isTtsPlayingRef.current = false; }, 200);
+            setTimeout(() => { setTtsPlayingState(false); }, 200);
           }
         };
 
@@ -663,19 +663,19 @@ export default function MeetingRoom() {
             if (e?.name === 'NotAllowedError') {
               pendingAudioPlaybackRef.current = { text: cleanText, lang: targetLangCode, bcp: bcpLang };
               setAlertMessage('Tap anywhere once to enable translated audio.');
-              isTtsPlayingRef.current = false;
+              setTtsPlayingState(false);
               return;
             }
             console.warn('[Meeting TTS] Backend audio play failed (autoplay or network):', e?.name, e?.message);
             if (!speakNative(true)) {
-              isTtsPlayingRef.current = false;
+              setTtsPlayingState(false);
             }
           });
         }
       } catch (err) {
         console.warn('[Meeting TTS] playViaBackend exception:', err);
         if (!speakNative(true)) {
-          isTtsPlayingRef.current = false;
+          setTtsPlayingState(false);
         }
       }
     };
@@ -683,7 +683,7 @@ export default function MeetingRoom() {
     // Primary path: Use high-fidelity sovereign neural GPU TTS (Bhashini Indic-TTS on :5000/api/tts).
     // If neural backend encounters an error, playViaBackend automatically falls back to speakNative(true).
     playViaBackend();
-  }, []);
+  }, [setTtsPlayingState]);
 
   useEffect(() => {
     // Browsers gate audio behind a user gesture. Keep listening (not once) and
@@ -1873,11 +1873,13 @@ export default function MeetingRoom() {
             const u = useAuthStore.getState().user || {};
             const chatEnabled = u.chatEnabled ?? true;
             const chatLang = u.chatLang || 'original';
+            const normSrc = String(sourceLanguage || 'en').trim().toLowerCase().split(/[-_]/)[0];
+            const shortChatLang = String(chatLang).trim().toLowerCase().split(/[-_]/)[0];
             
             setMessages(prev => prev.map(m => {
               if (m.id === messageId) {
-                const showTranslation = chatEnabled && chatLang !== 'original';
-                return { ...m, translatedText: showTranslation ? (translations[chatLang] || `[Rate Limited] ${m.text}`) : null };
+                const showTranslation = chatEnabled && chatLang !== 'original' && shortChatLang !== normSrc;
+                return { ...m, translatedText: showTranslation ? (translations?.[chatLang] || translations?.[shortChatLang] || null) : null };
               }
               return m;
             }));
@@ -1896,12 +1898,16 @@ export default function MeetingRoom() {
             }
 
             const u = useAuthStore.getState().user || {};
-            
+            const normSrc = String(data.sourceLanguage || 'en').trim().toLowerCase().split(/[-_]/)[0];
+
             const captionEnabled = u.captionEnabled ?? true;
             const captionLang = u.captionLang || 'original';
-            
+            const shortCaptionLang = String(captionLang).trim().toLowerCase().split(/[-_]/)[0];
+
             if (captionEnabled) {
-              const textToShow = captionLang === 'original' ? data.text : (data.translations?.[captionLang] || `[Rate Limited] ${data.text}`);
+              const textToShow = (captionLang === 'original' || shortCaptionLang === normSrc)
+                ? data.text
+                : (data.translations?.[captionLang] || data.translations?.[shortCaptionLang] || data.text);
               if (textToShow) {
                 setCurrentCaption({
                   text: textToShow,
@@ -1917,23 +1923,24 @@ export default function MeetingRoom() {
             const ttsEnabled = u.ttsEnabled ?? true;
             const ttsLang = u.ttsLang || 'original';
             
-            // Do not play TTS for own speech. If testing on two tabs under same user, senderSocketId differentiates them.
+            // Do not play TTS for own speech — spoken/test audio should only play on remote participants' side.
             const isOwnSpeech = Boolean(data.senderSocketId
               ? (newSocket && data.senderSocketId === newSocket.id)
               : (u?.id && String(data.speakerId) === String(u.id)));
 
-            // Allow playback if not own speech, OR if testing alone in 1-person room with demo active
-            const allowPlayback = !isOwnSpeech || (peersRef.current.length === 0 && (isDemoActiveRef.current || isDemoActive));
-
-            if (ttsEnabled && allowPlayback) {
-              const normSrc = String(data.sourceLanguage || 'en').trim().toLowerCase().split(/[-_]/)[0];
-              const normUser = String(u.language || 'en').trim().toLowerCase().split(/[-_]/)[0];
-              let targetLangCode = ttsLang;
-              if (targetLangCode === 'original') {
-                targetLangCode = (normUser && normUser !== normSrc) ? normUser : (normSrc === 'hi' ? 'en' : 'hi');
+            if (ttsEnabled && !isOwnSpeech) {
+              const shortTarget = String(ttsLang).trim().toLowerCase().split(/[-_]/)[0];
+              if (ttsLang === 'original') {
+                // Normal speech in 'original' uses WebRTC directly (no TTS);
+                // Test Audio has no WebRTC mic stream so remote listeners hear it via TTS.
+                if (!data.isTestAudio) return;
+              } else if (!shortTarget || (shortTarget === normSrc && !data.isTestAudio)) {
+                return;
               }
-              const shortTarget = String(targetLangCode || 'en').trim().toLowerCase().split(/[-_]/)[0];
-              const textToSpeak = (data.translations?.[targetLangCode] || data.translations?.[shortTarget] || data.text);
+              const targetLangCode = ttsLang === 'original' ? normSrc : ttsLang;
+              const textToSpeak = (ttsLang !== 'original' && (data.translations?.[targetLangCode] || data.translations?.[shortTarget]))
+                ? (data.translations[targetLangCode] || data.translations[shortTarget])
+                : data.text;
 
               if (textToSpeak && textToSpeak.trim()) {
                 const cleanText = textToSpeak.trim();
@@ -1955,7 +1962,7 @@ export default function MeetingRoom() {
                   return;
                 }
 
-                const actualLangCode = (data.translations?.[targetLangCode] || data.translations?.[shortTarget])
+                const actualLangCode = (ttsLang !== 'original' && (data.translations?.[targetLangCode] || data.translations?.[shortTarget]))
                   ? shortTarget
                   : normSrc;
                 const bcpLang = BCP47_LANG_MAP[actualLangCode] || actualLangCode || 'en-US';
@@ -2198,7 +2205,7 @@ export default function MeetingRoom() {
         try { rec.stop(); } catch (_) {}
       }
     };
-  }, [socket, user?.id, isAudioOn, spokenLanguage, meetingId, participantStatus, isHostOrCoHost, meetingEnded, micRevision]);
+ }, [socket, user?.id, isAudioOn, spokenLanguage, meetingId, participantStatus, isHostOrCoHost, meetingEnded]);
 
   // Sovereign GPU Faster-Whisper Web Audio VAD Speech Ingress
   useEffect(() => {
@@ -2366,6 +2373,8 @@ export default function MeetingRoom() {
 
     return () => {
       isCancelled = true;
+      setIsSpeakingLive(false);
+      setSpeechStatusText('');
       if (silenceTimer) clearTimeout(silenceTimer);
       if (maxSpeechTimer) clearTimeout(maxSpeechTimer);
       if (processorNode) {
@@ -2381,7 +2390,7 @@ export default function MeetingRoom() {
         try { audioCtx.close(); } catch (_) {}
       }
     };
-  }, [socket, stream, isAudioOn, meetingEnded, spokenLanguage, micRevision]);
+  }, [socket, stream, isAudioOn, meetingEnded, spokenLanguage]);
 
   const toggleVideo = () => {
     if (videoLockedRef.current) {
@@ -2415,62 +2424,6 @@ export default function MeetingRoom() {
       sfuClientRef.current.setProducerPaused('audio', !nextAudio).catch(() => {});
     }
     if (socket) socket.emit('meeting:status_update', { isAudioOn: nextAudio, isVideoOn: videoRef.current });
-  };
-
-  const testAndUseMicrophone = async () => {
-    setMicTestStatus('testing');
-    setMicTestError('');
-    try {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error('getUserMedia is not supported in this browser');
-      }
-      const fresh = await acquireNonMonitorMicrophone();
-      const track = fresh.getAudioTracks()[0];
-      if (!track) throw new Error('The browser returned no audio track');
-
-      const settings = typeof track.getSettings === 'function' ? track.getSettings() : null;
-      console.log('[Mic Test] track', {
-        label: track.label,
-        enabled: track.enabled,
-        muted: track.muted,
-        readyState: track.readyState,
-        settings
-      });
-
-      // Replace the meeting's audio track while keeping the existing video.
-      const old = streamRef.current || stream;
-      const videoTracks = old ? old.getVideoTracks() : [];
-      if (old) {
-        old.getAudioTracks().forEach((t) => {
-          try { t.stop(); } catch (_) {}
-        });
-      }
-      const merged = new MediaStream([track, ...videoTracks]);
-      setStream(merged);
-      streamRef.current = merged;
-      audioRef.current = true;
-      setIsAudioOn(true);
-      setMicRevision((rev) => rev + 1);
-      if (userVideo.current) userVideo.current.srcObject = merged;
-
-      // Publish the new track to the SFU if it is already carrying media.
-      const sfu = sfuClientRef.current;
-      if (sfu) {
-        if (sfu.audioProducer) {
-          await sfu.audioProducer.replaceTrack({ track }).catch(() => {});
-        } else if (sfu.sendTransport) {
-          sfu.audioProducer = await sfu.sendTransport
-            .produce({ track, stopTracks: false, appData: { source: 'mic' } })
-            .catch(() => null);
-        }
-      }
-
-      setMicTestStatus('ok');
-    } catch (err) {
-      console.error('[Mic Test] failed', err);
-      setMicTestStatus('error');
-      setMicTestError(`${err?.name || 'Error'}: ${err?.message || String(err)}`);
-    }
   };
 
   const updateUserSettings = (key, value) => {
@@ -2673,66 +2626,30 @@ export default function MeetingRoom() {
         } catch (_) {}
         window._activeTtsAudio = null;
       }
-      isTtsPlayingRef.current = false;
+      setTtsPlayingState(false);
       return;
     }
 
     const phrase = 'Hello, this is a live test of the BhashaBridge translation system.';
 
     setIsDemoActive(true);
-    isDemoActiveRef.current = true;
-    setAlertMessage('Playing audio test phrase...');
-
-    // Play locally as well: caption TTS intentionally skips the speaker's own
-    // captions, so without this the person clicking Test Audio hears nothing.
-    playTtsAudio(phrase, 'en', 'en-US', { force: true });
+    setAlertMessage('Sent audio test phrase to other meeting participants.');
 
     if (socket && user?.id) {
       socket.emit('caption:text', {
         meetingId,
         speakerId: user.id,
         text: phrase,
-        language: 'en'
+        language: 'en',
+        isTestAudio: true
       });
     }
 
     if (demoTimerRef.current) clearTimeout(demoTimerRef.current);
     demoTimerRef.current = setTimeout(() => {
       setIsDemoActive(false);
-      isDemoActiveRef.current = false;
       demoTimerRef.current = null;
-      isTtsPlayingRef.current = false;
-      try { window.speechSynthesis?.cancel(); } catch (_) {}
-    }, 4000);
-  };
-
-  const handleDemoSpeech = (lang, text) => {
-    if (!socket) {
-      setAlertMessage('Meeting socket is not connected yet.');
-      return;
-    }
-    const clean = (text || '').trim();
-    if (!clean) return;
-
-    setIsDemoActive(true);
-    isDemoActiveRef.current = true;
-    setAlertMessage(`🎙️ Speaking Demo (${lang.toUpperCase()}): "${clean.slice(0, 45)}..."`);
-
-    socket.emit('caption:text', {
-      meetingId,
-      speakerId: user?.id || socket.id,
-      speakerName: user?.name || 'Demo Speaker',
-      text: clean,
-      language: lang
-    });
-
-    if (demoTimerRef.current) clearTimeout(demoTimerRef.current);
-    demoTimerRef.current = setTimeout(() => {
-      setIsDemoActive(false);
-      isDemoActiveRef.current = false;
-      demoTimerRef.current = null;
-      isTtsPlayingRef.current = false;
-    }, 5000);
+    }, 3000);
   };
 
   useEffect(() => () => {
@@ -2742,7 +2659,7 @@ export default function MeetingRoom() {
   const sendMessage = (e) => {
     e.preventDefault();
     if (!chatInput.trim() || !socket) return;
-    const msg = { id: Date.now().toString(), meetingId, senderId: user.id, senderName: user.name, text: chatInput, language: user.language };
+    const msg = { id: Date.now().toString(), meetingId, senderId: user.id, senderName: user.name, text: chatInput, language: spokenLanguage };
     socket.emit('chat:message', msg);
     setChatInput('');
   };
@@ -3292,28 +3209,17 @@ export default function MeetingRoom() {
           </div>
 
           <div className={styles.headerRight}>
-            {/* Quick Spoken Language Dropdown */}
-            <div className={styles.dialectSelectorPill} title="Your Spoken Language">
+            {/* Locked Spoken Language Badge (synced to Profile) */}
+            <div
+              className={`${styles.dialectSelectorPill} ${styles.dialectSelectorPillLocked}`}
+              title="Spoken language is locked to your profile language during meetings"
+            >
               <Mic size={13} color="var(--cobalt)" />
               <select
                 className={styles.dialectSelect}
                 value={spokenLanguage}
-                onChange={e => {
-                  const val = e.target.value;
-                  setSpokenLanguage(val);
-                  if (useAuthStore.getState().user) {
-                    useAuthStore.getState().user.language = val;
-                  }
-                  if (socket) socket.emit("user:update_settings", useAuthStore.getState().user);
-                  const token = localStorage.getItem('token');
-                  if (token) {
-                    fetch(`${API_URL}/auth/profile`, {
-                      method: 'PUT',
-                      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ preferredLanguage: val })
-                    }).catch(console.error);
-                  }
-                }}
+                disabled
+                aria-label="My spoken language (locked to profile)"
               >
                 {LANG_OPTIONS.map(l => (
                   <option key={l.value} value={l.value}>
@@ -3321,6 +3227,7 @@ export default function MeetingRoom() {
                   </option>
                 ))}
               </select>
+              <Lock size={11} color="#5A5A5A" style={{ marginLeft: 2, flexShrink: 0 }} />
             </div>
 
             {/* Host Lobby Alert */}
@@ -3361,116 +3268,8 @@ export default function MeetingRoom() {
               <Radio size={14} />
               <span>{isDemoActive ? 'Demo Playing...' : '⚡ Test Audio'}</span>
             </button>
-
-            {/* Demo Speech Hindi */}
-            <button
-              onClick={() => handleDemoSpeech('hi', 'नमस्ते डॉक्टर साहब, मुझे दो दिन से तेज बुखार है और सिर में दर्द है')}
-              className={styles.headerBtn}
-              title="Speak Hindi Demo into meeting pipeline"
-            >
-              <span>🇮🇳 Speak Hindi</span>
-            </button>
-
-            {/* Demo Speech English */}
-            <button
-              onClick={() => handleDemoSpeech('en', 'Hello doctor, I have a severe headache and sore throat')}
-              className={styles.headerBtn}
-              title="Speak English Demo into meeting pipeline"
-            >
-              <span>🇬🇧 Speak English</span>
-            </button>
-
-            {/* Quick Custom Speech Toggle */}
-            <button
-              onClick={() => setShowCustomSpeech(prev => !prev)}
-              className={`${styles.headerBtn} ${showCustomSpeech ? styles.headerBtnLive : ''}`}
-              title="Type custom phrase to speak in meeting"
-            >
-              <Mic size={14} />
-              <span>Type to Speak</span>
-            </button>
           </div>
         </header>
-
-        {/* Quick Custom Speech Input Bar */}
-        {showCustomSpeech && (
-          <div style={{
-            background: '#F7F5F0',
-            borderBottom: '2px solid #0A0A0A',
-            padding: '0.6rem 1.25rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.6rem',
-            zIndex: 100
-          }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>💬 QUICK SPEECH:</span>
-            <select
-              value={customSpeechLang}
-              onChange={e => setCustomSpeechLang(e.target.value)}
-              style={{
-                padding: '0.4rem 0.6rem',
-                border: '1.5px solid #0A0A0A',
-                background: 'white',
-                fontFamily: 'var(--font-mono)',
-                fontSize: '0.82rem'
-              }}
-            >
-              <option value="hi">Hindi (हिन्दी)</option>
-              <option value="en">English</option>
-              <option value="ta">Tamil (தமிழ்)</option>
-              <option value="bn">Bengali (বাংলা)</option>
-              <option value="te">Telugu (తెలుగు)</option>
-              <option value="mr">Marathi (मराठी)</option>
-              <option value="gu">Gujarati (ગુજરાતી)</option>
-            </select>
-            <input
-              type="text"
-              placeholder={customSpeechLang === 'hi' ? 'यहाँ हिन्दी में कुछ लिखें (उदा: नमस्ते मुझे बुखार है)...' : 'Type speech phrase in English or selected language...'}
-              value={customSpeechText}
-              onChange={e => setCustomSpeechText(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && customSpeechText.trim()) {
-                  handleDemoSpeech(customSpeechLang, customSpeechText);
-                  setCustomSpeechText('');
-                }
-              }}
-              style={{
-                flex: 1,
-                padding: '0.45rem 0.8rem',
-                border: '1.5px solid #0A0A0A',
-                fontSize: '0.88rem',
-                fontFamily: 'inherit',
-                outline: 'none'
-              }}
-            />
-            <button
-              onClick={() => {
-                if (customSpeechText.trim()) {
-                  handleDemoSpeech(customSpeechLang, customSpeechText);
-                  setCustomSpeechText('');
-                }
-              }}
-              style={{
-                background: '#0022FF',
-                color: 'white',
-                border: 'none',
-                padding: '0.45rem 1rem',
-                fontWeight: 700,
-                fontSize: '0.82rem',
-                cursor: 'pointer',
-                fontFamily: 'var(--font-mono)'
-              }}
-            >
-              ⚡ Speak in Meeting
-            </button>
-            <button
-              onClick={() => setShowCustomSpeech(false)}
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#666' }}
-            >
-              <X size={16} />
-            </button>
-          </div>
-        )}
 
         {/* Audio Autoplay Unlock Banner */}
         {!audioUnlocked && (
@@ -3481,28 +3280,10 @@ export default function MeetingRoom() {
               }
               setAudioUnlocked(true);
             }}
-            style={{
-              position: 'fixed',
-              top: '60px',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              zIndex: 99999,
-              background: '#0022FF',
-              color: '#FFFFFF',
-              padding: '0.55rem 1.25rem',
-              borderRadius: '2px',
-              boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              fontWeight: 700,
-              fontSize: '0.82rem',
-              fontFamily: 'var(--font-mono)'
-            }}
+            className={styles.audioUnlockBanner}
           >
             <Volume2 size={16} />
-            <span>Click once to enable live translated audio output</span>
+            <span>Click once to enable live translated audio</span>
           </div>
         )}
 
@@ -3583,6 +3364,7 @@ export default function MeetingRoom() {
                       isVideoOn={peer.isVideoOn}
                       isScreenSharing={peer.isScreenSharing}
                       avatarUrl={peer.avatar}
+                      suppressAudio={isTtsPlaying}
                     />
                   ))}
               </div>
@@ -3608,44 +3390,25 @@ export default function MeetingRoom() {
               </div>
             )}
 
-            {/* Live Mic Speech VAD Status Pill */}
+            {/* Live Mic Speech VAD Broadcast HUD */}
             {isAudioOn && (
-              <div style={{
-                position: 'absolute',
-                bottom: '88px',
-                left: '50%',
-                transform: 'translateX(-50%)',
-                zIndex: 90,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                background: isSpeakingLive ? '#00FF66' : (speechStatusText ? '#0022FF' : 'rgba(10,10,10,0.85)'),
-                color: isSpeakingLive ? '#0A0A0A' : '#FFFFFF',
-                padding: '0.35rem 0.85rem',
-                borderRadius: '999px',
-                fontFamily: 'var(--font-mono)',
-                fontSize: '0.78rem',
-                fontWeight: 700,
-                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                transition: 'all 0.2s',
-                pointerEvents: 'none'
-              }}>
-                <span style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  background: isSpeakingLive ? '#0A0A0A' : (speechStatusText ? '#FFFFFF' : '#10B981'),
-                  display: 'inline-block'
-                }} />
+              <div
+                className={`${styles.vadHudPill} ${
+                  isSpeakingLive
+                    ? styles.vadHudSpeaking
+                    : speechStatusText
+                      ? styles.vadHudTranscribing
+                      : ''
+                }`}
+              >
+                <span className={styles.vadLiveDot} />
                 <span>
                   {isSpeakingLive
-                    ? `SPEAKING (${spokenLanguage.toUpperCase()})...`
-                    : (speechStatusText || `MIC READY: Speak in ${spokenLanguage.toUpperCase()}`)}
+                    ? `Speaking (${spokenLanguage.toUpperCase()})`
+                    : (speechStatusText || `Mic Live · ${spokenLanguage.toUpperCase()}`)}
                 </span>
-                {micVolume > 0 && (
-                  <span style={{ opacity: 0.8, fontSize: '0.7rem' }}>
-                    {micVolume}%
-                  </span>
+                {activeMicVolume > 0 && (
+                  <span className={styles.vadVolReadout}>{activeMicVolume}%</span>
                 )}
               </div>
             )}
@@ -3996,66 +3759,32 @@ export default function MeetingRoom() {
                         </span>
                       </div>
                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', fontWeight: 700, color: isAudioOn ? '#10B981' : '#FF3311' }}>
-                        {isAudioOn ? `${micVolume}%` : 'MUTED'}
+                        {isAudioOn ? `${activeMicVolume}%` : 'MUTED'}
                       </span>
                     </div>
                     <div className={styles.audioMeterTrack}>
-                      <div className={styles.audioMeterFill} style={{ width: `${isAudioOn ? micVolume : 0}%` }} />
+                      <div className={styles.audioMeterFill} style={{ width: `${activeMicVolume}%` }} />
                     </div>
-                    {isAudioOn && micVolume === 0 && (
-                      <p style={{ margin: '0.55rem 0 0', fontSize: '0.72rem', color: '#FF3311', fontFamily: 'var(--font-mono)', lineHeight: 1.4 }}>
-                        No microphone signal detected. Check the input device, then toggle the mic off and on.
-                      </p>
-                    )}
-                    {!isAudioOn && (
-                      <button
-                        onClick={toggleAudio}
-                        style={{ marginTop: '0.6rem', width: '100%', padding: '0.6rem', background: '#0022FF', color: '#FFFFFF', border: 'none', fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-mono)' }}
-                      >
-                        Unmute microphone
-                      </button>
-                    )}
-                    <button
-                      onClick={testAndUseMicrophone}
-                      disabled={micTestStatus === 'testing'}
-                      style={{ marginTop: '0.6rem', width: '100%', padding: '0.6rem', background: micTestStatus === 'testing' ? '#9CA3AF' : '#0A0A0A', color: '#FFFFFF', border: 'none', fontWeight: 700, cursor: micTestStatus === 'testing' ? 'wait' : 'pointer', fontFamily: 'var(--font-mono)' }}
-                    >
-                      {micTestStatus === 'testing' ? 'Testing microphone…' : 'Test / Reconnect Microphone'}
-                    </button>
-                    {micTestStatus === 'ok' && (
-                      <p style={{ margin: '0.55rem 0 0', fontSize: '0.72rem', color: '#10B981', fontFamily: 'var(--font-mono)', lineHeight: 1.4 }}>
-                        Microphone connected. Speak now — the level above should move.
-                      </p>
-                    )}
-                    {micTestStatus === 'error' && (
-                      <p style={{ margin: '0.55rem 0 0', fontSize: '0.72rem', color: '#FF3311', fontFamily: 'var(--font-mono)', lineHeight: 1.4 }}>
-                        {micTestError}
-                      </p>
-                    )}
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.75rem', color: '#0A0A0A', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      <Globe size={12} style={{ verticalAlign: 'middle', marginRight: 5 }} />My spoken language (mic)
+                    <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.75rem', color: '#0A0A0A', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      <span><Globe size={12} style={{ verticalAlign: 'middle', marginRight: 5 }} />My spoken language (mic)</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.68rem', color: '#5A5A5A' }}>
+                        <Lock size={11} /> Locked to Profile
+                      </span>
                     </label>
-                    <select value={spokenLanguage} onChange={e => {
-                        const val = e.target.value;
-                        setSpokenLanguage(val);
-                        if (useAuthStore.getState().user) {
-                          useAuthStore.getState().user.language = val;
-                        }
-                        if (socket) socket.emit("user:update_settings", useAuthStore.getState().user);
-                        const token = localStorage.getItem('token');
-                        if (token) {
-                          fetch(`${API_URL}/auth/profile`, {
-                            method: 'PUT',
-                            headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ preferredLanguage: val })
-                          }).catch(console.error);
-                        }
-                      }} style={{ width: '100%', padding: '0.75rem 1rem', background: 'transparent', color: '#0A0A0A', border: '2px solid #0A0A0A', borderRadius: '0', fontSize: '0.9rem', outline: 'none', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
+                    <select
+                      value={spokenLanguage}
+                      disabled
+                      title="Spoken language is locked to your profile language during a meeting"
+                      style={{ width: '100%', padding: '0.75rem 1rem', background: 'rgba(10,10,10,0.06)', color: '#5A5A5A', border: '2px solid rgba(10,10,10,0.35)', borderRadius: '0', fontSize: '0.9rem', outline: 'none', cursor: 'not-allowed' }}
+                    >
                       {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#F7F5F0', color: '#0A0A0A' }}>{l.label}</option>)}
                     </select>
+                    <p style={{ margin: '0.4rem 0 0', fontSize: '0.72rem', color: '#5A5A5A', fontFamily: 'var(--font-mono)' }}>
+                      Matches your profile language and cannot be changed mid-meeting.
+                    </p>
                   </div>
                   
                   {/* Speech to Speech */}

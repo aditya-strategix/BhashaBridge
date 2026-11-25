@@ -38,10 +38,14 @@ export default function Register() {
   const languages = [
     { code: 'en', name: 'English' },
     { code: 'hi', name: 'Hindi' },
+    { code: 'bn', name: 'Bengali' },
+    { code: 'ta', name: 'Tamil' },
+    { code: 'te', name: 'Telugu' },
+    { code: 'mr', name: 'Marathi' },
+    { code: 'gu', name: 'Gujarati' },
     { code: 'es', name: 'Spanish' },
     { code: 'fr', name: 'French' },
-    { code: 'de', name: 'German' },
-    { code: 'ja', name: 'Japanese' }
+    { code: 'de', name: 'German' }
   ];
 
   return (

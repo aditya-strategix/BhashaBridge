@@ -120,7 +120,8 @@ function setupSocket(server) {
         if (!participant) return;
 
         const cleanLink = (meetingId || '').trim();
-        socket.userLanguage = language || participant.user?.preferredLanguage || participant.user?.language || 'en';
+        // Spoken language during a meeting is always pinned to the user's DB profile language.
+        socket.userLanguage = participant.user?.preferredLanguage || participant.user?.language || language || 'en';
         socket.userId = userId;
         socket.userName = participant.user?.name;
         socket.meetingId = meeting.meetingLink;
@@ -130,8 +131,8 @@ function setupSocket(server) {
         socket.isVideoOn = isVideoOn !== undefined ? isVideoOn : true;
         socket.userSettings = {
           language: socket.userLanguage,
-          captionLang: socket.userLanguage,
-          ttsLang: socket.userLanguage,
+          captionLang: 'original',
+          ttsLang: 'original',
           captionEnabled: true,
           ttsEnabled: true
         };
@@ -440,22 +441,26 @@ function setupSocket(server) {
         }
         try {
           const clients = await io.in(meetingId).fetchSockets();
+          const normChatSrc = String(language || socket.userLanguage || 'en').trim().toLowerCase().split(/[-_]/)[0];
           const targetLanguages = new Set();
           clients.forEach(c => {
             const s = c.userSettings || {};
-            if ((s.chatEnabled ?? true) && s.chatLang && s.chatLang !== 'original') {
-              targetLanguages.add(s.chatLang);
+            const shortChatLang = (s.chatLang && s.chatLang !== 'original')
+              ? String(s.chatLang).trim().toLowerCase().split(/[-_]/)[0]
+              : null;
+            if ((s.chatEnabled ?? true) && shortChatLang && shortChatLang !== normChatSrc) {
+              targetLanguages.add(shortChatLang);
             }
           });
           let translations = {};
           if (targetLanguages.size > 0) {
             try {
-              translations = await aiClient.translate(text, language, Array.from(targetLanguages));
+              translations = await aiClient.translate(text, normChatSrc, Array.from(targetLanguages));
             } catch (err) {
               console.error("[IndicTrans2 Chat] Translation Error:", err.message);
             }
           }
-          io.to(meetingId).emit('chat:translated', { messageId: data.id, translations, sourceLanguage: language });
+          io.to(meetingId).emit('chat:translated', { messageId: data.id, translations, sourceLanguage: normChatSrc });
       } catch (error) {
         console.error('Translation error:', error);
       }
@@ -570,18 +575,10 @@ function setupSocket(server) {
         const clients = Array.from(new Map(allSockets.map(s => [s.id, s])).values());
         const targetLanguages = new Set();
 
-        // Always translate across the bridge language pair (Hindi <-> English) as a minimum
-        if (normSrcLang === 'hi') {
-          targetLanguages.add('en');
-        } else if (normSrcLang === 'en') {
-          targetLanguages.add('hi');
-        }
-
         clients.forEach(c => {
           const s = c.userSettings || {};
-          const clientLang = ((s.language || c.userLanguage || 'en')).toLowerCase().split(/[-_]/)[0];
-          const effCaptionLang = (s.captionLang && s.captionLang !== 'original') ? s.captionLang.toLowerCase().split(/[-_]/)[0] : clientLang;
-          const effTtsLang = (s.ttsLang && s.ttsLang !== 'original') ? s.ttsLang.toLowerCase().split(/[-_]/)[0] : clientLang;
+          const effCaptionLang = (s.captionLang && s.captionLang !== 'original') ? s.captionLang.toLowerCase().split(/[-_]/)[0] : null;
+          const effTtsLang = (s.ttsLang && s.ttsLang !== 'original') ? s.ttsLang.toLowerCase().split(/[-_]/)[0] : null;
 
           if ((s.captionEnabled ?? true) && effCaptionLang && effCaptionLang !== normSrcLang) {
             targetLanguages.add(effCaptionLang);
@@ -612,6 +609,7 @@ function setupSocket(server) {
           speakerId,
           speakerName: speakerName || socket.userName || rawData.speakerName || 'Speaker',
           senderSocketId: socket.id,
+          isTestAudio: Boolean(rawData.isTestAudio),
           translations
         };
 
@@ -672,7 +670,8 @@ function setupSocket(server) {
 
       try {
         const audioBuffer = Buffer.from(data.audioBase64, 'base64');
-        const sttResult = await aiClient.transcribeSTT(audioBuffer, data.language || 'auto');
+        const micLang = socket.userLanguage || data.language || 'auto';
+        const sttResult = await aiClient.transcribeSTT(audioBuffer, micLang);
         if (sttResult.text && sttResult.text.trim()) {
           console.log(`[CAPTION:AUDIO:STT] Transcribed (${sttResult.language}): "${sttResult.text.trim()}"`);
           await processAndBroadcastCaption({
@@ -681,7 +680,7 @@ function setupSocket(server) {
             speakerName: socket.userName || data.speakerName,
             meetingId,
             text: sttResult.text.trim(),
-            language: sttResult.language || data.language || 'hi',
+            language: socket.userLanguage || sttResult.language || data.language || 'en',
             rawData: data
           });
         }
@@ -690,7 +689,13 @@ function setupSocket(server) {
       }
     });
 
-    socket.on('user:update_settings', (settings) => { socket.userSettings = settings; });
+    socket.on('user:update_settings', (settings = {}) => {
+      // Spoken profile language stays frozen during a meeting; only caption/chat/TTS prefs update.
+      socket.userSettings = {
+        ...settings,
+        language: socket.userLanguage || settings.language || 'en'
+      };
+    });
 
     socket.on('disconnect', async () => {
       console.log(`User disconnected: ${socket.id} (user: ${socket.userId}, waiting: ${socket.isWaiting})`);

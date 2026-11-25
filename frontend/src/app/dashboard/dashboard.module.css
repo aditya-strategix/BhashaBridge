@@ -181,6 +181,11 @@
   box-shadow: var(--shadow-md);
 }
 
+.navActionBtn:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--ink);
+}
+
 .adminBtn {
   background: #EEF2FF;
   border-color: var(--cobalt);
@@ -296,12 +301,20 @@
 .kpiCard {
   background: var(--bg-ivory);
   border: var(--border-thick);
+  border-top: 4px solid var(--ink);
   box-shadow: var(--shadow-sm);
   padding: 1.1rem 1.25rem;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   gap: 0.5rem;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-top-color 0.15s ease;
+}
+
+.kpiCard:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: var(--shadow-md);
+  border-top-color: var(--cobalt);
 }
 
 .kpiHeader {
@@ -491,6 +504,18 @@
   box-shadow: var(--shadow-sm);
   outline: none;
   cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.brutalistSelect:focus {
+  border-color: var(--cobalt);
+  box-shadow: var(--shadow-md);
+}
+
+.btnLaunch:active:not(:disabled),
+.btnJoinCode:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--ink);
 }
 
 .btnLaunch {
@@ -665,17 +690,19 @@
 .meetingDossierCard {
   background: var(--bg-ivory);
   border: var(--border-thick);
+  border-left: 5px solid var(--ink);
   box-shadow: var(--shadow-md);
   padding: 1.5rem 1.65rem;
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
-  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-left-color 0.15s ease;
 }
 
 .meetingDossierCard:hover {
   transform: translate(-1px, -1px);
   box-shadow: var(--shadow-lg);
+  border-left-color: var(--cobalt);
 }
 
 .dossierTopRow {

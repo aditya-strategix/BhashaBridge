@@ -191,7 +191,14 @@
   background: #FFFFFF;
   border: var(--border-thick);
   box-shadow: var(--shadow-sm);
-  padding: 0.25rem 0.6rem;
+  padding: 0.28rem 0.6rem;
+}
+
+.dialectSelectorPillLocked {
+  background: #F3F0EA;
+  border-color: rgba(10, 10, 10, 0.55);
+  box-shadow: 2px 2px 0 rgba(10, 10, 10, 0.35);
+  cursor: not-allowed;
 }
 
 .dialectSelect {
@@ -203,6 +210,11 @@
   color: var(--ink);
   outline: none;
   cursor: pointer;
+}
+
+.dialectSelect:disabled {
+  cursor: not-allowed;
+  opacity: 0.9;
 }
 
 .headerBtn {
@@ -220,12 +232,17 @@
   cursor: pointer;
   text-transform: uppercase;
   letter-spacing: 0.02em;
-  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  transition: transform 0.1s ease, box-shadow 0.1s ease, background 0.15s ease;
 }
 
 .headerBtn:hover {
   transform: translate(-1px, -1px);
   box-shadow: var(--shadow-md);
+}
+
+.headerBtn:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--ink);
 }
 
 .headerBtnDark {
@@ -292,6 +309,7 @@
 .gridCount1 {
   grid-template-columns: 1fr;
   max-width: 980px;
+  max-height: calc(100vh - 190px);
   aspect-ratio: 16/9;
 }
 
@@ -314,8 +332,8 @@
 /* Video Tile Frame */
 .videoTile {
   background: var(--bg-tile);
-  border: 2px solid #232730;
-  box-shadow: 4px 4px 0 #000;
+  border: 2px solid #2A2E3A;
+  box-shadow: 5px 5px 0 #000;
   overflow: hidden;
   position: relative;
   aspect-ratio: 16/9;
@@ -328,8 +346,8 @@
 }
 
 .videoTileActiveSpeaker {
-  border-color: var(--vermilion) !important;
-  box-shadow: 0 0 0 2px var(--vermilion), 4px 4px 0 #000 !important;
+  border-color: var(--emerald) !important;
+  box-shadow: 0 0 0 1px var(--emerald), 5px 5px 0 #000 !important;
 }
 
 .videoElement {
@@ -471,9 +489,10 @@
 }
 
 .captionCard {
-  background: rgba(10, 10, 10, 0.94);
-  border: 2px solid #FFFFFF;
-  box-shadow: 4px 4px 0 var(--vermilion);
+  background: rgba(10, 10, 10, 0.92);
+  backdrop-filter: blur(10px);
+  border: 2px solid #FDFBF7;
+  box-shadow: 5px 5px 0 var(--cobalt);
   padding: 0.85rem 1.4rem;
   display: flex;
   flex-direction: column;
@@ -481,6 +500,101 @@
   max-width: 100%;
   box-sizing: border-box;
   animation: subtitleSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* ==========================================================================
+   STAGE HUD: VAD LIVE SPEECH & AUDIO UNLOCK BANNERS
+   ========================================================================== */
+
+.audioUnlockBanner {
+  position: fixed;
+  top: 4.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 99999;
+  background: var(--cobalt);
+  color: #FFFFFF;
+  border: var(--border-thick);
+  box-shadow: var(--shadow-md);
+  padding: 0.55rem 1.25rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.audioUnlockBanner:hover {
+  transform: translate(-50%, -1px);
+  box-shadow: var(--shadow-lg);
+}
+
+.vadHudPill {
+  position: absolute;
+  top: 0.95rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 115;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  background: rgba(20, 22, 28, 0.92);
+  backdrop-filter: blur(8px);
+  color: #FDFBF7;
+  border: 2px solid #2A2E3A;
+  box-shadow: 3px 3px 0 #000;
+  padding: 0.32rem 0.8rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  pointer-events: none;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+
+.vadHudSpeaking {
+  background: var(--emerald);
+  color: var(--ink);
+  border-color: var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+
+.vadHudTranscribing {
+  background: var(--cobalt);
+  color: #FFFFFF;
+  border-color: var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+
+.vadLiveDot {
+  width: 8px;
+  height: 8px;
+  background: var(--emerald);
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.vadHudSpeaking .vadLiveDot {
+  background: var(--ink);
+  animation: pulseBeacon 0.9s infinite;
+}
+
+.vadHudTranscribing .vadLiveDot {
+  background: #FFFFFF;
+  animation: pulseBeacon 0.8s infinite;
+}
+
+.vadVolReadout {
+  padding-left: 0.45rem;
+  border-left: 1px solid currentColor;
+  font-size: 0.68rem;
+  opacity: 0.9;
 }
 
 @keyframes subtitleSlideUp {
