@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Mail, KeyRound, CheckCircle2, ArrowLeft, RefreshCw, Lock } from 'lucide-react';
 import api from '../../../services/api';
+import EditorialLoader from '../../../components/EditorialLoader';
 import styles from '../auth.module.css';
 
 export default function ForgotPassword() {
@@ -128,6 +129,13 @@ export default function ForgotPassword() {
 
   return (
     <div className={styles.editorialAuthContainer}>
+      {isLoading && (
+        <EditorialLoader
+          title="Processing Recovery"
+          subtitle="Verifying identity token & securing credentials..."
+          tag="SECURITY GATEWAY"
+        />
+      )}
       <div className={styles.editorialAuthWrapper}>
         <h1 className={styles.sharpTitle}>Recovery</h1>
         <div className={styles.thickRule}></div>

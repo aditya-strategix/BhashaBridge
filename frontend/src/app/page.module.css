@@ -17,6 +17,202 @@
   overflow-x: hidden;
   font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   box-sizing: border-box;
+  transition: background-color 0.28s ease, color 0.24s ease;
+}
+
+/* ---------- Night / Obsidian Dark Theme Overrides ---------- */
+:global(html[data-theme="dark"]) .pageContainer {
+  --bg-ivory: #0B0D12;
+  --bg-paper: #13161F;
+  --text-dark: #F4F1EA;
+  --cobalt: #4F75FF;
+  --vermilion: #FF4D2E;
+  --emerald: #34D399;
+  --border-dark: #2E354A;
+  background-color: #0B0D12;
+  background-image: radial-gradient(rgba(79, 117, 255, 0.16) 1px, transparent 0);
+  color: #F4F1EA;
+}
+
+:global(html[data-theme="dark"]) .nav {
+  background-color: rgba(11, 13, 18, 0.9);
+  border-bottom-color: #2E354A;
+}
+
+:global(html[data-theme="dark"]) .brandText,
+:global(html[data-theme="dark"]) .heroTitle,
+:global(html[data-theme="dark"]) .sectionTitle,
+:global(html[data-theme="dark"]) .guestBoxTitle,
+:global(html[data-theme="dark"]) .speakerInfo h5,
+:global(html[data-theme="dark"]) .featureTitle,
+:global(html[data-theme="dark"]) .langName,
+:global(html[data-theme="dark"]) .workflowTitle,
+:global(html[data-theme="dark"]) .footerCol h6,
+:global(html[data-theme="dark"]) .statNumber {
+  color: #F4F1EA;
+}
+
+:global(html[data-theme="dark"]) .heroSubtitle,
+:global(html[data-theme="dark"]) .guestBoxSub,
+:global(html[data-theme="dark"]) .statLabel,
+:global(html[data-theme="dark"]) .statDesc,
+:global(html[data-theme="dark"]) .sectionDesc,
+:global(html[data-theme="dark"]) .demoSwitchLabel,
+:global(html[data-theme="dark"]) .featureDesc,
+:global(html[data-theme="dark"]) .workflowDesc,
+:global(html[data-theme="dark"]) .footerBrandDesc,
+:global(html[data-theme="dark"]) .footerList a,
+:global(html[data-theme="dark"]) .footerBottom,
+:global(html[data-theme="dark"]) .brandTag,
+:global(html[data-theme="dark"]) .navLinkItem {
+  color: #A3ACC2;
+}
+
+:global(html[data-theme="dark"]) .brandTag {
+  background-color: #4F75FF;
+  color: #FFFFFF;
+}
+
+:global(html[data-theme="dark"]) .navLinkItem:hover,
+:global(html[data-theme="dark"]) .footerList a:hover {
+  color: #6B8CFF;
+}
+
+:global(html[data-theme="dark"]) .guestBox,
+:global(html[data-theme="dark"]) .demoCard,
+:global(html[data-theme="dark"]) .featureCard,
+:global(html[data-theme="dark"]) .langChip,
+:global(html[data-theme="dark"]) .workflowCard {
+  background-color: #13161F;
+  border-color: #2E354A;
+  color: #F4F1EA;
+  box-shadow: 6px 6px 0 #000000;
+}
+
+:global(html[data-theme="dark"]) .statsStrip {
+  background-color: #13161F;
+  border-color: #2E354A;
+}
+
+:global(html[data-theme="dark"]) .statItem {
+  border-color: #2E354A;
+}
+
+:global(html[data-theme="dark"]) .speakerBox,
+:global(html[data-theme="dark"]) .quoteBox,
+:global(html[data-theme="dark"]) .guestInput,
+:global(html[data-theme="dark"]) .demoLangBtn,
+:global(html[data-theme="dark"]) .featureTag {
+  background-color: #0B0D12;
+  color: #F4F1EA;
+  border-color: #2E354A;
+}
+
+:global(html[data-theme="dark"]) .pipelineBadge {
+  background-color: #191D29;
+  color: #F4F1EA;
+  border-color: #4F75FF;
+}
+
+:global(html[data-theme="dark"]) .langCode {
+  background-color: #191D29;
+  color: #8BA6FF;
+  border-color: #2E354A;
+}
+
+:global(html[data-theme="dark"]) .demoLangBtn:hover {
+  background-color: #191D29;
+  color: #FFFFFF;
+  border-color: #4F75FF;
+}
+
+:global(html[data-theme="dark"]) .demoTopBar,
+:global(html[data-theme="dark"]) .guestBoxHeader,
+:global(html[data-theme="dark"]) .footer,
+:global(html[data-theme="dark"]) .footerBottom {
+  border-color: #2E354A;
+}
+
+:global(html[data-theme="dark"]) .footer {
+  background: #0B0D12;
+  color: #F4F1EA;
+}
+
+:global(html[data-theme="dark"]) .demoLangBtnActive,
+:global(html[data-theme="dark"]) .demoLangBtnActive:hover {
+  background-color: #4F75FF;
+  color: #FFFFFF;
+  border-color: #6B8CFF;
+}
+
+:global(html[data-theme="dark"]) .btnNavLogin,
+:global(html[data-theme="dark"]) .btnSecondary {
+  background-color: #191D29;
+  color: #F4F1EA;
+  border-color: #2E354A;
+  box-shadow: 3px 3px 0 #000000;
+}
+
+:global(html[data-theme="dark"]) .btnNavLogin:hover,
+:global(html[data-theme="dark"]) .btnSecondary:hover {
+  background-color: #232A3C;
+  color: #FFFFFF;
+  border-color: #4F75FF;
+  box-shadow: 5px 5px 0 #000000;
+}
+
+:global(html[data-theme="dark"]) .btnPrimary,
+:global(html[data-theme="dark"]) .btnNavRegister,
+:global(html[data-theme="dark"]) .btnGuestJoin {
+  background-color: #4F75FF;
+  color: #FFFFFF;
+  border-color: #6B8CFF;
+  box-shadow: 4px 4px 0 #000000;
+}
+
+:global(html[data-theme="dark"]) .btnPrimary:hover,
+:global(html[data-theme="dark"]) .btnNavRegister:hover,
+:global(html[data-theme="dark"]) .btnGuestJoin:hover {
+  background-color: #FF4D2E;
+  color: #FFFFFF;
+  border-color: #FF7860;
+  box-shadow: 6px 6px 0 #000000;
+}
+
+:global(html[data-theme="dark"]) .ctaBanner {
+  background: linear-gradient(135deg, #13161F 0%, #171D2E 100%);
+  color: #F4F1EA;
+  border-color: #4F75FF;
+  box-shadow: 8px 8px 0 #3B66FF;
+}
+
+:global(html[data-theme="dark"]) .ctaTitle {
+  color: #F4F1EA;
+}
+
+:global(html[data-theme="dark"]) .ctaDesc {
+  color: #A3ACC2;
+}
+
+:global(html[data-theme="dark"]) .btnCtaLaunch {
+  background-color: #FF4D2E;
+  color: #FFFFFF;
+  border-color: #FFFFFF;
+  box-shadow: 4px 4px 0 #000000;
+}
+
+:global(html[data-theme="dark"]) .btnCtaLaunch:hover {
+  background-color: #4F75FF;
+  color: #FFFFFF;
+  border-color: #FFFFFF;
+  box-shadow: 6px 6px 0 #FFFFFF;
+}
+
+:global(html[data-theme="dark"]) .featureCard:hover,
+:global(html[data-theme="dark"]) .langChip:hover,
+:global(html[data-theme="dark"]) .workflowCard:hover {
+  border-color: #4F75FF;
+  box-shadow: 6px 6px 0 #3B66FF;
 }
 
 /* ===== FULL-PAGE EDITORIAL INTRO ANIMATION ===== */

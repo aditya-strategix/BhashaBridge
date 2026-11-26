@@ -54,7 +54,7 @@ Speaker 1 (Dr. Sharma): Understood. I will prescribe paracetamol 650mg and warm 
       meetingId: 'meet_test_123',
       transcriptText: sampleTranscript,
       targetLanguage: 'en',
-      preferredModel: 'gemini-3.7-flash',
+      preferredModel: 'deepseek-flash',
       timestamp: Date.now()
     };
 

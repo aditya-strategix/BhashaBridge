@@ -26,7 +26,7 @@ app.get('/health', (req, res) => {
       schemas: registry.listSchemas().map(s => s.name)
     },
     adapters: {
-      geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+      deepseekConfigured: Boolean(process.env.DEEPSEEK_API_KEY),
       indicTrans2Configured: Boolean(process.env.INDICTRANS2_ENDPOINT || process.env.AI_ENGINE_DOMAIN),
       whisperConfigured: Boolean(process.env.WHISPER_ENDPOINT || process.env.AI_ENGINE_DOMAIN),
       bhashiniConfigured: Boolean(process.env.BHASHINI_ENDPOINT || process.env.BHASHINI_API_KEY)

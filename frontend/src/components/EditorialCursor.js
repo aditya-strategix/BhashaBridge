@@ -29,28 +29,38 @@ export default function EditorialCursor() {
     let mode = 'default'; // 'default' | 'pointer' | 'accent' | 'hidden'
     let rafId = null;
 
-    const applyModeStyles = (nextMode) => {
-      if (mode === nextMode) return;
+    const isDark = () => document.documentElement.getAttribute('data-theme') === 'dark';
+
+    const applyModeStyles = (nextMode, force = false) => {
+      if (!force && mode === nextMode) return;
       mode = nextMode;
+      const dark = isDark();
       if (nextMode === 'pointer') {
         targetScale = 1.45;
-        ring.style.borderColor = 'rgba(0, 34, 255, 0.72)';
-        ring.style.backgroundColor = 'rgba(0, 34, 255, 0.08)';
+        ring.style.borderColor = dark ? 'rgba(107, 140, 255, 0.92)' : 'rgba(0, 34, 255, 0.72)';
+        ring.style.backgroundColor = dark ? 'rgba(79, 117, 255, 0.16)' : 'rgba(0, 34, 255, 0.08)';
+        ring.style.boxShadow = dark ? '0 0 14px rgba(79, 117, 255, 0.45)' : '0 0 0 1px rgba(253, 251, 247, 0.35)';
         ring.style.opacity = '1';
       } else if (nextMode === 'accent') {
         targetScale = 1.45;
-        ring.style.borderColor = 'rgba(255, 51, 17, 0.78)';
-        ring.style.backgroundColor = 'rgba(255, 51, 17, 0.08)';
+        ring.style.borderColor = dark ? 'rgba(255, 92, 64, 0.92)' : 'rgba(255, 51, 17, 0.78)';
+        ring.style.backgroundColor = dark ? 'rgba(255, 77, 46, 0.16)' : 'rgba(255, 51, 17, 0.08)';
+        ring.style.boxShadow = dark ? '0 0 14px rgba(255, 77, 46, 0.42)' : '0 0 0 1px rgba(253, 251, 247, 0.35)';
         ring.style.opacity = '1';
       } else if (nextMode === 'hidden') {
         targetScale = 0.65;
         ring.style.opacity = '0';
       } else {
         targetScale = 1;
-        ring.style.borderColor = 'rgba(0, 34, 255, 0.42)';
-        ring.style.backgroundColor = 'rgba(253, 251, 247, 0.06)';
+        ring.style.borderColor = dark ? 'rgba(138, 168, 255, 0.65)' : 'rgba(0, 34, 255, 0.42)';
+        ring.style.backgroundColor = dark ? 'rgba(244, 241, 234, 0.06)' : 'rgba(253, 251, 247, 0.06)';
+        ring.style.boxShadow = dark ? '0 0 10px rgba(79, 117, 255, 0.25)' : '0 0 0 1px rgba(253, 251, 247, 0.35)';
         ring.style.opacity = visible ? '1' : '0';
       }
+    };
+
+    const onThemeChange = () => {
+      applyModeStyles(mode || 'default', true);
     };
 
     const detectTarget = (target) => {
@@ -111,6 +121,7 @@ export default function EditorialCursor() {
     window.addEventListener('mousemove', onMouseMove, { passive: true });
     window.addEventListener('mousedown', onMouseDown, { passive: true });
     window.addEventListener('mouseup', onMouseUp, { passive: true });
+    window.addEventListener('bb-theme-change', onThemeChange);
     document.addEventListener('mouseleave', onMouseLeave);
     rafId = requestAnimationFrame(tick);
 
@@ -119,6 +130,7 @@ export default function EditorialCursor() {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('bb-theme-change', onThemeChange);
       document.removeEventListener('mouseleave', onMouseLeave);
     };
   }, []);

@@ -18,6 +18,103 @@
   color: var(--cobalt);
   font-family: var(--font-grotesk);
   padding: 2rem;
+  transition: background-color 0.28s ease, color 0.24s ease;
+}
+
+/* ---------- Night / Obsidian Dark Theme Overrides ---------- */
+:global(html[data-theme="dark"]) .editorialAuthContainer {
+  --bg-ivory: #0B0D12;
+  --cobalt: #6B8CFF;
+  --vermilion: #FF573B;
+  background-color: #0B0D12;
+  background-image: radial-gradient(rgba(79, 117, 255, 0.16) 1px, transparent 0);
+  background-size: 24px 24px;
+  color: #F4F1EA;
+}
+
+:global(html[data-theme="dark"]) .editorialAuthWrapper {
+  background-color: #13161F;
+  border: 2px solid #2E354A;
+  padding: 2.25rem;
+  box-shadow: 8px 8px 0 #000000;
+}
+
+:global(html[data-theme="dark"]) .sharpTitle {
+  color: #FF4D2E;
+}
+
+:global(html[data-theme="dark"]) .editorialInstruction {
+  color: #A3ACC2;
+}
+
+:global(html[data-theme="dark"]) .editorialLabel {
+  color: #A3ACC2;
+}
+
+:global(html[data-theme="dark"]) .thickRule,
+:global(html[data-theme="dark"]) .thinRule {
+  background-color: #2E354A;
+  border-color: #2E354A;
+}
+
+:global(html[data-theme="dark"]) .editorialInfoBox {
+  background-color: #191D29;
+  border-color: #2E354A;
+  color: #CBD5E1;
+}
+
+:global(html[data-theme="dark"]) .editorialInput,
+:global(html[data-theme="dark"]) .editorialSelect {
+  background-color: #0B0D12;
+  border-color: #2E354A;
+  color: #F4F1EA;
+  padding: 0.65rem 0.75rem;
+}
+
+:global(html[data-theme="dark"]) .editorialInput::placeholder {
+  color: #6B7280;
+}
+
+:global(html[data-theme="dark"]) .editorialSelect option {
+  background-color: #13161F;
+  color: #F4F1EA;
+}
+
+:global(html[data-theme="dark"]) .editorialInput:focus,
+:global(html[data-theme="dark"]) .editorialSelect:focus {
+  border-color: #4F75FF;
+}
+
+:global(html[data-theme="dark"]) .editorialBtn {
+  background-color: #4F75FF;
+  color: #FFFFFF;
+  border-color: #6B8CFF;
+  box-shadow: 4px 4px 0 #000000;
+}
+
+:global(html[data-theme="dark"]) .editorialBtn:hover {
+  background-color: #FF4D2E;
+  border-color: #FF4D2E;
+}
+
+:global(html[data-theme="dark"]) .editorialLink {
+  color: #8BA6FF;
+}
+
+:global(html[data-theme="dark"]) .editorialLink:hover {
+  color: #FF573B;
+}
+
+:global(html[data-theme="dark"]) .editorialError {
+  background-color: rgba(255, 77, 46, 0.14);
+  border-color: #FF4D2E;
+  color: #FFA494;
+}
+
+:global(html[data-theme="dark"]) .editorialSuccess {
+  background-color: rgba(16, 185, 129, 0.14);
+  border-color: #34D399;
+  color: #6EE7B7;
 }
 
 .editorialAuthWrapper {

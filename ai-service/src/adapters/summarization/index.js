@@ -1,9 +1,9 @@
-const GeminiSummarizerAdapter = require('./gemini.adapter');
+const DeepSeekSummarizerAdapter = require('./deepseek.adapter');
 const StructuralSummarizerAdapter = require('./structural.adapter');
 
 class CompositeSummarizer {
   constructor() {
-    this.gemini = new GeminiSummarizerAdapter();
+    this.deepseek = new DeepSeekSummarizerAdapter();
     this.structural = new StructuralSummarizerAdapter();
   }
 
@@ -12,12 +12,12 @@ class CompositeSummarizer {
       throw new Error('Transcript is empty');
     }
 
-    // Try Gemini if available
-    if (this.gemini.isAvailable()) {
+    // Use DeepSeek V4.1 Flash when configured
+    if (this.deepseek.isAvailable()) {
       try {
-        return await this.gemini.generateSummary(transcriptText, options);
+        return await this.deepseek.generateSummary(transcriptText, options);
       } catch (err) {
-        console.warn(`[CompositeSummarizer] Gemini attempt failed (${err.message}), falling back to Structural.`);
+        console.warn(`[CompositeSummarizer] DeepSeek attempt failed (${err.message}), falling back to Structural.`);
       }
     }
 
@@ -27,7 +27,7 @@ class CompositeSummarizer {
 }
 
 module.exports = {
-  GeminiSummarizerAdapter,
+  DeepSeekSummarizerAdapter,
   StructuralSummarizerAdapter,
   CompositeSummarizer,
   defaultSummarizer: new CompositeSummarizer()

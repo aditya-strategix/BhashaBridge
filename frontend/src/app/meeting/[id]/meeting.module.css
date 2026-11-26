@@ -35,6 +35,181 @@
   box-sizing: border-box;
 }
 
+/* ---------- Night / Obsidian Dark Theme Overrides ---------- */
+:global(html[data-theme="dark"]) .container {
+  --bg-ivory: #111520;
+  --bg-dark: #06080D;
+  --bg-stage: #07090F;
+  --bg-tile: #131722;
+  --cobalt: #4F75FF;
+  --vermilion: #FF4D2E;
+  --emerald: #34D399;
+  --ink: #F4F1EA;
+  --muted: #9CA6BF;
+  --border-thick: 2px solid #2E354A;
+  --border-dark: 2px solid #2E354A;
+  --shadow-sm: 2px 2px 0 #000000;
+  --shadow-md: 4px 4px 0 #000000;
+  --shadow-lg: 6px 6px 0 #000000;
+}
+
+:global(html[data-theme="dark"]) .studioHeader,
+:global(html[data-theme="dark"]) .meetingControlsBar,
+:global(html[data-theme="dark"]) .chatSection,
+:global(html[data-theme="dark"]) .sidebarHeaderRow,
+:global(html[data-theme="dark"]) .chatInputArea,
+:global(html[data-theme="dark"]) .membersPanel {
+  background: #111520;
+  border-color: #2E354A;
+  color: #F4F1EA;
+}
+
+:global(html[data-theme="dark"]) .roomCodePill,
+:global(html[data-theme="dark"]) .copyCodeBtn,
+:global(html[data-theme="dark"]) .dialectSelectorPill,
+:global(html[data-theme="dark"]) .controlBtn,
+:global(html[data-theme="dark"]) .sidebarTabBtn,
+:global(html[data-theme="dark"]) .sidebarCloseBtn,
+:global(html[data-theme="dark"]) .messageBubble,
+:global(html[data-theme="dark"]) .chatInput,
+:global(html[data-theme="dark"]) .memberCard,
+:global(html[data-theme="dark"]) .memberBtnIcon,
+:global(html[data-theme="dark"]) .moreMenuDropdown,
+:global(html[data-theme="dark"]) .lobbyLeft,
+:global(html[data-theme="dark"]) .lobbyRight {
+  background: #191E2B;
+  color: #F4F1EA;
+  border-color: #2E354A;
+}
+
+:global(html[data-theme="dark"]) .headerBtn {
+  background: #191E2B;
+  color: #F4F1EA;
+  border-color: #2E354A;
+}
+
+:global(html[data-theme="dark"]) .copyCodeBtn:hover,
+:global(html[data-theme="dark"]) .headerBtn:hover,
+:global(html[data-theme="dark"]) .controlBtn:hover:not(:disabled),
+:global(html[data-theme="dark"]) .sidebarCloseBtn:hover {
+  background: #252D42;
+  color: #FFFFFF;
+  border-color: #4F75FF;
+}
+
+:global(html[data-theme="dark"]) .timerBadge,
+:global(html[data-theme="dark"]) .headerBtnDark,
+:global(html[data-theme="dark"]) .controlBtnActive,
+:global(html[data-theme="dark"]) .sidebarTabBtnActive,
+:global(html[data-theme="dark"]) .sendBtn {
+  background: #4F75FF;
+  color: #FFFFFF;
+  border-color: #6B8CFF;
+}
+
+:global(html[data-theme="dark"]) .roleHost {
+  background: #FF4D2E;
+  color: #FFFFFF;
+  border-color: #000000;
+}
+
+:global(html[data-theme="dark"]) .roleCoHost {
+  background: #4F75FF;
+  color: #FFFFFF;
+  border-color: #000000;
+}
+
+:global(html[data-theme="dark"]) .roleParticipant {
+  background: #232A3C;
+  color: #F4F1EA;
+  border-color: #4F75FF;
+}
+
+:global(html[data-theme="dark"]) .headerBtnLive,
+:global(html[data-theme="dark"]) .controlBtnDanger,
+:global(html[data-theme="dark"]) .controlBtnDanger:hover {
+  background: #FF4D2E;
+  color: #FFFFFF;
+  border-color: #000000;
+}
+
+:global(html[data-theme="dark"]) .controlBtnDisabled {
+  background: #1B2030;
+  color: #9CA6BF;
+  border-color: #2E354A;
+}
+
+:global(html[data-theme="dark"]) .lobbyAlertBtn {
+  background: rgba(255, 77, 46, 0.16);
+  color: #FFA08F;
+  border-color: #FF4D2E;
+}
+
+:global(html[data-theme="dark"]) .captionCard,
+:global(html[data-theme="dark"]) .vadHudPill {
+  background: #141926;
+  color: #F4F1EA;
+  border-color: #2E354A;
+  box-shadow: 4px 4px 0 #000000;
+}
+
+:global(html[data-theme="dark"]) .vadHudSpeaking {
+  background: #10B981;
+  color: #061A12;
+  border-color: #000000;
+  box-shadow: 3px 3px 0 #000000;
+}
+
+:global(html[data-theme="dark"]) .vadHudSpeaking .vadLiveDot {
+  background: #061A12;
+}
+
+:global(html[data-theme="dark"]) .vadHudTranscribing {
+  background: #4F75FF;
+  color: #FFFFFF;
+  border-color: #000000;
+  box-shadow: 3px 3px 0 #000000;
+}
+
+:global(html[data-theme="dark"]) .dialectSelect option {
+  background: #13161F;
+  color: #F4F1EA;
+}
+
+:global(html[data-theme="dark"]) .memberBtnIcon:hover {
+  background: #283148;
+  color: #FFFFFF;
+}
+
+:global(html[data-theme="dark"]) .captionText,
+:global(html[data-theme="dark"]) .brandName,
+:global(html[data-theme="dark"]) .memberName,
+:global(html[data-theme="dark"]) .messageHeader,
+:global(html[data-theme="dark"]) .dialectSelect {
+  color: #F4F1EA;
+}
+
+:global(html[data-theme="dark"]) .translatedText,
+:global(html[data-theme="dark"]) .memberRole,
+:global(html[data-theme="dark"]) .membersSectionTitle {
+  color: #A3ACC2;
+}
+
+:global(html[data-theme="dark"]) .messageBubbleSelf {
+  background: #1D2B4E;
+  color: #F4F1EA;
+  border-color: #4F75FF;
+}
+
+:global(html[data-theme="dark"]) .lobbyContainer {
+  background: #0B0D12;
+  color: #F4F1EA;
+}
+
+:global(html[data-theme="dark"]) .moreMenuItem:hover {
+  background: #232A3C;
+}
+
 /* ==========================================================================
    STUDIO BROADCAST HEADER
    ========================================================================== */

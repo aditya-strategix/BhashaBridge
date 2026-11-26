@@ -14,6 +14,7 @@ import {
 import useAuthStore from '../../../stores/authStore';
 import SFUClient from '../../../services/sfuClient';
 import { getApiBaseUrl, getSocketBaseUrl } from '../../../services/urls';
+import EditorialLoader from '../../../components/EditorialLoader';
 import styles from './meeting.module.css';
 import './theme.css';
 
@@ -159,10 +160,13 @@ function Avatar({ name, size = 36, color = '#0022FF', avatarUrl }) {
 // -------- Video peer tile --------
 const VideoPeer = ({ peer, stream, name, role, isAudioOn = true, isVideoOn = true, isScreenSharing = false, avatarUrl, suppressAudio = false }) => {
   const ref = useRef();
+  const suppressAudioRef = useRef(Boolean(suppressAudio));
   const showVideo = isVideoOn || isScreenSharing;
 
   useEffect(() => {
+    suppressAudioRef.current = Boolean(suppressAudio);
     if (ref.current) {
+      ref.current.muted = Boolean(suppressAudio);
       ref.current.volume = suppressAudio ? 0 : 1;
     }
   }, [suppressAudio]);
@@ -171,6 +175,8 @@ const VideoPeer = ({ peer, stream, name, role, isAudioOn = true, isVideoOn = tru
     const handleStream = nextStream => {
       if (!nextStream) return;
       if (ref.current) {
+        ref.current.muted = suppressAudioRef.current;
+        ref.current.volume = suppressAudioRef.current ? 0 : 1;
         if (ref.current.srcObject !== nextStream) {
           ref.current.srcObject = nextStream;
         }
@@ -209,6 +215,7 @@ const VideoPeer = ({ peer, stream, name, role, isAudioOn = true, isVideoOn = tru
       <video
         playsInline
         autoPlay
+        muted={Boolean(suppressAudio)}
         ref={ref}
         className={styles.videoElement}
         style={{
@@ -218,6 +225,8 @@ const VideoPeer = ({ peer, stream, name, role, isAudioOn = true, isVideoOn = tru
         }}
         onLoadedMetadata={() => {
           if (ref.current) {
+            ref.current.muted = Boolean(suppressAudio);
+            ref.current.volume = suppressAudio ? 0 : 1;
             ref.current.play().catch(() => {});
           }
         }}
@@ -267,7 +276,7 @@ export default function MeetingRoom() {
   const [socket, setSocket] = useState(null);
   useEffect(() => { initialize(); }, [initialize]);
   // Spoken language during a meeting is strictly locked to the user's profile language.
-  const spokenLanguage = user?.language || user?.preferredLanguage || 'en';
+  const spokenLanguage = user?.preferredLanguage || user?.language || 'en';
   const [peers, setPeers] = useState([]);
   const [stream, setStream] = useState(null);
   const [isVideoOn, setIsVideoOn] = useState(true);
@@ -469,7 +478,7 @@ export default function MeetingRoom() {
       if (window._ttsPlayingTimeout) clearTimeout(window._ttsPlayingTimeout);
       window._ttsPlayingTimeout = setTimeout(() => {
         setTtsPlayingState(false);
-      }, 5000);
+      }, 12000);
     }
 
     // Remember what we are about to say so the microphone recognizer can
@@ -1141,6 +1150,7 @@ export default function MeetingRoom() {
         name: info.name || existing.name,
         role: cleanRole || existing.role,
         avatar: info.avatar || existing.avatar,
+        language: info.language || existing.language,
         stream: info.stream || existing.stream,
         isAudioOn: info.isAudioOn !== undefined ? info.isAudioOn : existing.isAudioOn,
         isVideoOn: info.isVideoOn !== undefined ? info.isVideoOn : existing.isVideoOn,
@@ -1156,6 +1166,7 @@ export default function MeetingRoom() {
         name: info.name || 'Participant',
         role: cleanRole || 'PARTICIPANT',
         avatar: info.avatar || null,
+        language: info.language || null,
         stream: info.stream || null,
         isAudioOn: info.isAudioOn !== undefined ? info.isAudioOn : (cachedStatus?.isAudioOn ?? true),
         isVideoOn: info.isVideoOn !== undefined ? info.isVideoOn : (cachedStatus?.isVideoOn ?? true),
@@ -1472,29 +1483,42 @@ export default function MeetingRoom() {
           }
           // Rejoin the meeting room after a network blip / backend restart;
           // Socket.IO reconnects the transport but not the server-side rooms.
+          const latestUser = useAuthStore.getState().user || user;
           newSocket.emit('meeting:join', {
             meetingId,
             userId: user.id,
             peerId: newSocket.id,
-            language: user.language,
+            language: latestUser.preferredLanguage || latestUser.language,
+            captionLang: latestUser.captionLang,
+            ttsLang: latestUser.ttsLang,
+            captionEnabled: latestUser.captionEnabled,
+            ttsEnabled: latestUser.ttsEnabled,
             isAudioOn: audioRef.current,
             isVideoOn: videoRef.current
           });
           newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current });
-          newSocket.emit('user:update_settings', useAuthStore.getState().user || {});
+          newSocket.emit('user:update_settings', latestUser);
         });
         socketRef.current = newSocket;
         setSocket(newSocket);
+        const initUser = useAuthStore.getState().user || user;
         newSocket.emit('meeting:join', {
           meetingId,
           userId: user.id,
           peerId: newSocket.id,
-          language: user.language,
+          language: initUser.preferredLanguage || initUser.language,
+          captionLang: initUser.captionLang,
+          ttsLang: initUser.ttsLang,
+          captionEnabled: initUser.captionEnabled,
+          ttsEnabled: initUser.ttsEnabled,
           isAudioOn: audioRef.current,
           isVideoOn: videoRef.current
         });
         newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current });
-        newSocket.emit('user:update_settings', useAuthStore.getState().user || {});
+        newSocket.emit('user:update_settings', initUser);
+        newSocket.on('meeting:joined', () => {
+          newSocket.emit('user:update_settings', useAuthStore.getState().user || {});
+        });
 
                   
                     newSocket.on('participant:promoted', ({ userId, role }) => {
@@ -1602,15 +1626,21 @@ export default function MeetingRoom() {
             if (statusRef.current !== 'ADMITTED') {
               setParticipantStatus('ADMITTED');
               statusRef.current = 'ADMITTED';
+              const admittedUser = useAuthStore.getState().user || user;
               newSocket.emit('meeting:join', {
                 meetingId,
                 userId: user.id,
                 peerId: newSocket.id,
-                language: user.language,
+                language: admittedUser.preferredLanguage || admittedUser.language,
+                captionLang: admittedUser.captionLang,
+                ttsLang: admittedUser.ttsLang,
+                captionEnabled: admittedUser.captionEnabled,
+                ttsEnabled: admittedUser.ttsEnabled,
                 isAudioOn: audioRef.current,
                 isVideoOn: videoRef.current
               });
               newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current });
+              newSocket.emit('user:update_settings', admittedUser);
               startSfu(streamRef.current || currentStream).catch(() => {});
             }
           } else {
@@ -1654,7 +1684,7 @@ export default function MeetingRoom() {
             screenStreamRef.current = null;
           }
         });
-        newSocket.on('participant:joined', ({ userId, socketId, name, role, avatar, isAudioOn, isVideoOn }) => {
+        newSocket.on('participant:joined', ({ userId, socketId, name, role, avatar, language, isAudioOn, isVideoOn }) => {
           if (!userId || userId === user.id) return;
           newSocket.emit('meeting:status_update', { isAudioOn: audioRef.current, isVideoOn: videoRef.current });
 
@@ -1671,6 +1701,7 @@ export default function MeetingRoom() {
               name,
               role,
               avatar,
+              language,
               isAudioOn,
               isVideoOn
             });
@@ -1698,6 +1729,7 @@ export default function MeetingRoom() {
             name,
             role: cleanRole,
             avatar,
+            language: language || null,
             isAudioOn: initialAudio,
             isVideoOn: initialVideo
           });
@@ -1884,7 +1916,7 @@ export default function MeetingRoom() {
               return m;
             }));
           });
-          newSocket.on('caption:translated', data => {
+          newSocket.on('caption:translated', async data => {
             // Drop duplicate emissions of the exact same speech translation packet
             if (data?.id) {
               if (processedCaptionIdsRef.current.has(data.id)) {
@@ -1899,6 +1931,19 @@ export default function MeetingRoom() {
 
             const u = useAuthStore.getState().user || {};
             const normSrc = String(data.sourceLanguage || 'en').trim().toLowerCase().split(/[-_]/)[0];
+
+            // Record remote speaker's actual spoken language on their peer entry
+            // so raw WebRTC audio muting matches Speech-to-Speech target language.
+            if (data.speakerId || data.senderSocketId) {
+              const pIdx = peersRef.current.findIndex(
+                p => (data.speakerId && p.userId === data.speakerId) ||
+                     (data.senderSocketId && (p.peerID === data.senderSocketId || p.socketId === data.senderSocketId))
+              );
+              if (pIdx !== -1 && peersRef.current[pIdx].language !== normSrc) {
+                peersRef.current[pIdx] = { ...peersRef.current[pIdx], language: normSrc };
+                setPeers([...peersRef.current]);
+              }
+            }
 
             const captionEnabled = u.captionEnabled ?? true;
             const captionLang = u.captionLang || 'original';
@@ -1938,9 +1983,35 @@ export default function MeetingRoom() {
                 return;
               }
               const targetLangCode = ttsLang === 'original' ? normSrc : ttsLang;
-              const textToSpeak = (ttsLang !== 'original' && (data.translations?.[targetLangCode] || data.translations?.[shortTarget]))
-                ? (data.translations[targetLangCode] || data.translations[shortTarget])
-                : data.text;
+              let translatedText = (ttsLang !== 'original')
+                ? (data.translations?.[targetLangCode] || data.translations?.[shortTarget] || null)
+                : null;
+
+              // If the listener switched Speech-to-Speech just as this caption was
+              // broadcast, translate on-the-fly instead of speaking the untranslated source.
+              if (ttsLang !== 'original' && shortTarget !== normSrc && !translatedText && data.text) {
+                try {
+                  const res = await fetch(`${getApiUrl()}/translate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      text: data.text,
+                      sourceLanguage: normSrc,
+                      targetLanguages: [shortTarget]
+                    })
+                  });
+                  if (res.ok) {
+                    const trData = await res.json();
+                    translatedText = trData?.translations?.[shortTarget] || trData?.translations?.[targetLangCode] || null;
+                  }
+                } catch (_) {}
+              }
+
+              if (ttsLang !== 'original' && shortTarget !== normSrc && !translatedText) {
+                return;
+              }
+
+              const textToSpeak = ttsLang === 'original' ? data.text : (translatedText || data.text);
 
               if (textToSpeak && textToSpeak.trim()) {
                 const cleanText = textToSpeak.trim();
@@ -1962,9 +2033,7 @@ export default function MeetingRoom() {
                   return;
                 }
 
-                const actualLangCode = (ttsLang !== 'original' && (data.translations?.[targetLangCode] || data.translations?.[shortTarget]))
-                  ? shortTarget
-                  : normSrc;
+                const actualLangCode = ttsLang === 'original' ? normSrc : shortTarget;
                 const bcpLang = BCP47_LANG_MAP[actualLangCode] || actualLangCode || 'en-US';
                 const normKey = `${actualLangCode}:${cleanText.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim()}`;
                 const now = Date.now();
@@ -2432,7 +2501,26 @@ export default function MeetingRoom() {
     const updated = { ...currentUser, [key]: value };
     const token = localStorage.getItem('token');
     useAuthStore.getState().updateUser(token, updated);
-    if (socket) socket.emit('user:update_settings', updated);
+
+    // Selecting Speech-to-Speech settings is a direct user gesture; unlock audio
+    // playback immediately so translated TTS is never blocked by browser autoplay.
+    if ((key === 'ttsLang' && value && value !== 'original') || (key === 'ttsEnabled' && value)) {
+      audioUnlockedRef.current = true;
+      setAudioUnlocked(true);
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+          setTimeout(() => { try { ctx.close(); } catch (_) {} }, 250);
+        }
+      } catch (_) {}
+    }
+
+    const activeSocket = socketRef.current || socket;
+    if (activeSocket) {
+      activeSocket.emit('user:update_settings', updated);
+    }
   };
 
 
@@ -2677,8 +2765,8 @@ export default function MeetingRoom() {
       <div style={{
         position: 'fixed',
         inset: 0,
-        background: '#FDFBF7',
-        backgroundImage: 'radial-gradient(rgba(10,10,10,0.08) 1px, transparent 0)',
+        background: 'var(--bb-bg)',
+        backgroundImage: 'radial-gradient(var(--bb-bg-grid) 1px, transparent 0)',
         backgroundSize: '24px 24px',
         display: 'flex',
         alignItems: 'center',
@@ -2689,14 +2777,15 @@ export default function MeetingRoom() {
       }}>
         {/* Brutalist modal box */}
         <div style={{
-          background: '#F7F5F0',
-          border: '3px solid #0A0A0A',
-          boxShadow: '12px 12px 0 #0A0A0A',
+          background: 'var(--bb-surface-2)',
+          border: '3px solid var(--bb-border)',
+          boxShadow: '12px 12px 0 var(--bb-shadow)',
           maxWidth: 480,
           width: '100%',
           padding: '2.5rem',
           textAlign: 'center',
-          position: 'relative'
+          position: 'relative',
+          color: 'var(--bb-text)'
         }}>
           {/* Top colored accent stripe */}
           <div style={{
@@ -2712,17 +2801,17 @@ export default function MeetingRoom() {
           <div style={{
             width: 72,
             height: 72,
-            background: '#0A0A0A',
-            color: '#F7F5F0',
+            background: 'var(--bb-surface)',
+            color: 'var(--bb-text)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             margin: '0 auto 1.5rem',
-            border: '2px solid #0A0A0A',
+            border: '2px solid var(--bb-border)',
             boxShadow: `6px 6px 0 ${accentColor}`
           }}>
             {isEnded ? (
-              <Clock size={36} color="#F7F5F0" />
+              <Clock size={36} color="var(--bb-text)" />
             ) : isCancelled ? (
               <Trash2 size={36} color="#FF3311" />
             ) : joinError.type === 'UNAUTHORIZED' ? (
@@ -2735,7 +2824,7 @@ export default function MeetingRoom() {
           {/* Title */}
           <h2 style={{
             margin: '0 0 0.5rem',
-            color: '#0A0A0A',
+            color: 'var(--bb-text)',
             fontSize: '2.2rem',
             fontFamily: 'var(--font-serif)',
             fontStyle: 'italic',
@@ -2754,9 +2843,9 @@ export default function MeetingRoom() {
               gap: '0.4rem',
               fontFamily: 'var(--font-mono)',
               fontSize: '0.8rem',
-              color: '#0A0A0A',
+              color: 'var(--bb-text)',
               background: 'transparent',
-              border: '1px solid #0A0A0A',
+              border: '1px solid var(--bb-border)',
               padding: '0.25rem 0.65rem',
               fontWeight: 700,
               textTransform: 'uppercase'
@@ -2769,7 +2858,7 @@ export default function MeetingRoom() {
           {/* Description message */}
           <p style={{
             margin: '0 0 2rem',
-            color: '#4A4A4A',
+            color: 'var(--bb-text-muted)',
             fontSize: '0.95rem',
             lineHeight: 1.6,
             fontFamily: 'var(--font-grotesk)'
@@ -2777,7 +2866,7 @@ export default function MeetingRoom() {
             {isEnded ? (
               endedByInfo?.name ? (
                 <>
-                  <strong style={{ color: '#0A0A0A' }}>
+                  <strong style={{ color: 'var(--bb-text)' }}>
                     {endedByInfo.role === 'COHOST' ? 'Co-host' : 'Host'} {endedByInfo.name}
                   </strong>{' '}
                   has ended this meeting for everyone.
@@ -2800,15 +2889,15 @@ export default function MeetingRoom() {
                 style={{
                   width: '100%',
                   padding: '1rem',
-                  background: '#0022FF',
-                  color: '#F7F5F0',
-                  border: '2px solid #0A0A0A',
+                  background: 'var(--bb-cobalt)',
+                  color: '#FFFFFF',
+                  border: '2px solid var(--bb-border)',
                   cursor: 'pointer',
                   fontWeight: 700,
                   fontSize: '0.9rem',
                   fontFamily: 'var(--font-mono)',
                   textTransform: 'uppercase',
-                  boxShadow: '4px 4px 0 #0A0A0A',
+                  boxShadow: '4px 4px 0 var(--bb-shadow)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -2834,15 +2923,15 @@ export default function MeetingRoom() {
                 style={{
                   width: '100%',
                   padding: '1rem',
-                  background: '#0022FF',
-                  color: '#F7F5F0',
-                  border: '2px solid #0A0A0A',
+                  background: 'var(--bb-cobalt)',
+                  color: '#FFFFFF',
+                  border: '2px solid var(--bb-border)',
                   cursor: 'pointer',
                   fontWeight: 700,
                   fontSize: '0.9rem',
                   fontFamily: 'var(--font-mono)',
                   textTransform: 'uppercase',
-                  boxShadow: '4px 4px 0 #0A0A0A',
+                  boxShadow: '4px 4px 0 var(--bb-shadow)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -2862,9 +2951,9 @@ export default function MeetingRoom() {
               style={{
                 width: '100%',
                 padding: '1rem',
-                background: joinError.showReport ? '#F7F5F0' : '#0A0A0A',
-                color: joinError.showReport ? '#0A0A0A' : '#F7F5F0',
-                border: '2px solid #0A0A0A',
+                background: 'var(--bb-surface)',
+                color: 'var(--bb-text)',
+                border: '2px solid var(--bb-border)',
                 cursor: 'pointer',
                 fontWeight: 700,
                 fontSize: '0.9rem',
@@ -2891,22 +2980,24 @@ export default function MeetingRoom() {
 
   if (!user || !participantStatus) {
     return (
-      <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', background: '#FDFBF7', color: '#0047AB' }}>
-        <h2 style={{ fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: '2rem' }}>Connecting to meeting...</h2>
-      </div>
+      <EditorialLoader
+        title="Connecting to Studio"
+        subtitle="Preparing encrypted WebRTC audio/video & multilingual speech pipeline..."
+        tag="MEETING CONNECT"
+      />
     );
   }
 
   // ======= REJECTED SCREEN =======
   if (participantStatus === 'REJECTED') {
     return (
-      <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', background: '#F7F5F0', gap: '1.5rem', border: '2px solid #0A0A0A', margin: '2rem' }}>
-        <div style={{ width: 80, height: 80, borderRadius: '0', background: '#0A0A0A', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '8px 8px 0 #FF3311' }}>
-          <UserX size={36} color="#F7F5F0" />
+      <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', background: 'var(--bb-bg)', gap: '1.5rem', border: '2px solid var(--bb-border)', margin: '2rem', color: 'var(--bb-text)' }}>
+        <div style={{ width: 80, height: 80, borderRadius: '0', background: 'var(--bb-surface)', border: '2px solid var(--bb-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '8px 8px 0 var(--bb-vermilion)' }}>
+          <UserX size={36} color="var(--bb-text)" />
         </div>
-        <h2 style={{ color: '#0A0A0A', margin: 0, fontSize: '3rem', fontFamily: 'var(--font-serif)', fontStyle: 'italic', letterSpacing: '-0.02em' }}>Access Denied</h2>
-        <p style={{ color: '#5A5A5A', margin: 0, fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>The host declined your request to join this meeting.</p>
-        <button onClick={() => router.push('/dashboard')} style={{ background: '#0022FF', color: 'white', border: 'none', padding: '1rem 2rem', borderRadius: '0', fontWeight: 600, cursor: 'pointer', fontSize: '1rem', marginTop: '1rem', boxShadow: '4px 4px 0 rgba(10,10,10,1)', fontFamily: 'var(--font-grotesk)' }}>
+        <h2 style={{ color: 'var(--bb-text)', margin: 0, fontSize: '3rem', fontFamily: 'var(--font-serif)', fontStyle: 'italic', letterSpacing: '-0.02em' }}>Access Denied</h2>
+        <p style={{ color: 'var(--bb-text-muted)', margin: 0, fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>The host declined your request to join this meeting.</p>
+        <button onClick={() => router.push('/dashboard')} style={{ background: 'var(--bb-cobalt)', color: 'white', border: 'none', padding: '1rem 2rem', borderRadius: '0', fontWeight: 600, cursor: 'pointer', fontSize: '1rem', marginTop: '1rem', boxShadow: '4px 4px 0 var(--bb-shadow)', fontFamily: 'var(--font-grotesk)' }}>
           Back to Dashboard
         </button>
       </div>
@@ -2929,14 +3020,15 @@ export default function MeetingRoom() {
         fontFamily: 'var(--font-grotesk)'
       }}>
         <div style={{
-          background: '#F7F5F0',
-          border: '3px solid #0A0A0A',
-          boxShadow: '12px 12px 0 #0A0A0A',
+          background: 'var(--bb-surface-2)',
+          border: '3px solid var(--bb-border)',
+          boxShadow: '12px 12px 0 var(--bb-shadow)',
           maxWidth: 480,
           width: '100%',
           padding: '2.5rem',
           textAlign: 'center',
-          position: 'relative'
+          position: 'relative',
+          color: 'var(--bb-text)'
         }}>
           <div style={{
             position: 'absolute',
@@ -2944,25 +3036,25 @@ export default function MeetingRoom() {
             left: 0,
             right: 0,
             height: 6,
-            background: '#0022FF'
+            background: 'var(--bb-cobalt)'
           }} />
           <div style={{
             width: 72,
             height: 72,
-            background: '#0A0A0A',
-            color: '#F7F5F0',
+            background: 'var(--bb-surface)',
+            color: 'var(--bb-text)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             margin: '0 auto 1.5rem',
-            border: '2px solid #0A0A0A',
-            boxShadow: '6px 6px 0 #0022FF'
+            border: '2px solid var(--bb-border)',
+            boxShadow: '6px 6px 0 var(--bb-cobalt)'
           }}>
-            <Clock size={36} color="#F7F5F0" />
+            <Clock size={36} color="var(--bb-text)" />
           </div>
           <h2 style={{
             margin: '0 0 0.5rem',
-            color: '#0A0A0A',
+            color: 'var(--bb-text)',
             fontSize: '2.2rem',
             fontFamily: 'var(--font-serif)',
             fontStyle: 'italic',
@@ -2979,26 +3071,26 @@ export default function MeetingRoom() {
               gap: '0.4rem',
               fontFamily: 'var(--font-mono)',
               fontSize: '0.8rem',
-              color: '#0A0A0A',
-              border: '1px solid #0A0A0A',
+              color: 'var(--bb-text)',
+              border: '1px solid var(--bb-border)',
               padding: '0.25rem 0.65rem',
               fontWeight: 700,
               textTransform: 'uppercase'
             }}>
-              <span style={{ width: 8, height: 8, background: '#0022FF', display: 'inline-block' }} />
+              <span style={{ width: 8, height: 8, background: 'var(--bb-cobalt)', display: 'inline-block' }} />
               ID: {meetingId}
             </span>
           </div>
           <p style={{
             margin: '0 0 2rem',
-            color: '#4A4A4A',
+            color: 'var(--bb-text-muted)',
             fontSize: '0.95rem',
             lineHeight: 1.6,
             fontFamily: 'var(--font-grotesk)'
           }}>
             {endedByInfo?.name ? (
               <>
-                <strong style={{ color: '#0A0A0A' }}>
+                <strong style={{ color: 'var(--bb-text)' }}>
                   {endedByInfo.role === 'COHOST' ? 'Co-host' : 'Host'} {endedByInfo.name}
                 </strong>{' '}
                 has ended this meeting for everyone.
@@ -3015,15 +3107,15 @@ export default function MeetingRoom() {
               style={{
                 width: '100%',
                 padding: '1rem',
-                background: '#0022FF',
-                color: '#F7F5F0',
-                border: '2px solid #0A0A0A',
+                background: 'var(--bb-cobalt)',
+                color: '#FFFFFF',
+                border: '2px solid var(--bb-border)',
                 cursor: 'pointer',
                 fontWeight: 700,
                 fontSize: '0.9rem',
                 fontFamily: 'var(--font-mono)',
                 textTransform: 'uppercase',
-                boxShadow: '4px 4px 0 #0A0A0A',
+                boxShadow: '4px 4px 0 var(--bb-shadow)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -3038,15 +3130,15 @@ export default function MeetingRoom() {
               style={{
                 width: '100%',
                 padding: '1rem',
-                background: '#F7F5F0',
-                color: '#0A0A0A',
-                border: '2px solid #0A0A0A',
+                background: 'var(--bb-surface)',
+                color: 'var(--bb-text)',
+                border: '2px solid var(--bb-border)',
                 cursor: 'pointer',
                 fontWeight: 700,
                 fontSize: '0.9rem',
                 fontFamily: 'var(--font-mono)',
                 textTransform: 'uppercase',
-                boxShadow: '4px 4px 0 #0A0A0A',
+                boxShadow: '4px 4px 0 var(--bb-shadow)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -3110,22 +3202,22 @@ export default function MeetingRoom() {
         <div className={styles.lobbyRight}>
           <div style={{ maxWidth: 380, width: '100%' }}>
             
-            <h1 style={{ margin: '0 0 0.75rem', color: '#0A0A0A', fontSize: '2.5rem', fontWeight: 600, lineHeight: 1.1, fontFamily: 'var(--font-serif)', fontStyle: 'italic' }}>
+            <h1 style={{ margin: '0 0 0.75rem', color: 'var(--bb-text)', fontSize: '2.5rem', fontWeight: 600, lineHeight: 1.1, fontFamily: 'var(--font-serif)', fontStyle: 'italic' }}>
               Waiting to Connect
             </h1>
-            <p style={{ margin: '0 0 2.5rem', color: '#5A5A5A', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', lineHeight: 1.6, textTransform: 'uppercase' }}>
+            <p style={{ margin: '0 0 2.5rem', color: 'var(--bb-text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', lineHeight: 1.6, textTransform: 'uppercase' }}>
               The host will admit you shortly. You will join automatically once admitted.
             </p>
 
             {/* Status indicator */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '1rem', background: 'transparent', border: '2px solid #0A0A0A', borderRadius: '0', marginBottom: '1.5rem', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
-              <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#0022FF', animation: 'pulse 2s infinite' }} />
-              <span style={{ color: '#0A0A0A', fontSize: '0.85rem', fontFamily: 'var(--font-mono)' }}>Lobby <strong>{meetingId}</strong></span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '1rem', background: 'var(--bb-surface)', border: '2px solid var(--bb-border)', borderRadius: '0', marginBottom: '1.5rem', boxShadow: '4px 4px 0 var(--bb-shadow)' }}>
+              <div style={{ width: 12, height: 12, borderRadius: '50%', background: 'var(--bb-cobalt)', animation: 'pulse 2s infinite' }} />
+              <span style={{ color: 'var(--bb-text)', fontSize: '0.85rem', fontFamily: 'var(--font-mono)' }}>Lobby <strong>{meetingId}</strong></span>
             </div>
 
             <button
               onClick={handleLeaveWaitingRoom}
-              style={{ width: '100%', padding: '1rem', background: '#0A0A0A', color: '#F7F5F0', border: 'none', borderRadius: '0', fontWeight: 600, cursor: 'pointer', fontSize: '0.95rem', transition: 'transform 0.2s', boxShadow: '4px 4px 0 #FF3311', fontFamily: 'var(--font-grotesk)' }}
+              style={{ width: '100%', padding: '1rem', background: 'var(--bb-cobalt)', color: '#FFFFFF', border: '2px solid var(--bb-border)', borderRadius: '0', fontWeight: 600, cursor: 'pointer', fontSize: '0.95rem', transition: 'transform 0.2s', boxShadow: '4px 4px 0 #FF3311', fontFamily: 'var(--font-grotesk)' }}
               onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; }}
               onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
             >
@@ -3145,27 +3237,27 @@ export default function MeetingRoom() {
         {isHostOrCoHost && waitingUsers.length > 0 && showLobby && (
           <div style={{
             position: 'fixed', top: '5rem', right: '1rem', zIndex: 500,
-            width: 340, background: '#F7F5F0',
-            border: '2px solid #0A0A0A', borderRadius: '0',
-            boxShadow: '8px 8px 0 rgba(10,10,10,1)', overflow: 'hidden', fontFamily: 'var(--font-grotesk)'
+            width: 340, background: 'var(--bb-surface-2)',
+            border: '2px solid var(--bb-border)', borderRadius: '0',
+            boxShadow: '8px 8px 0 var(--bb-shadow)', overflow: 'hidden', fontFamily: 'var(--font-grotesk)', color: 'var(--bb-text)'
           }}>
-            <div style={{ padding: '1rem', borderBottom: '2px solid #0A0A0A', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0A0A0A' }}>
+            <div style={{ padding: '1rem', borderBottom: '2px solid var(--bb-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bb-surface)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                <div style={{ width: 10, height: 10, borderRadius: '0', background: '#FF3311', animation: 'pulse 1.5s infinite' }} />
-                <span style={{ fontWeight: 600, color: '#F7F5F0', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Lobby ({waitingUsers.length})</span>
+                <div style={{ width: 10, height: 10, borderRadius: '0', background: 'var(--bb-vermilion)', animation: 'pulse 1.5s infinite' }} />
+                <span style={{ fontWeight: 600, color: 'var(--bb-text)', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Lobby ({waitingUsers.length})</span>
               </div>
-              <button onClick={() => setShowLobby(false)} style={{ background: 'none', border: 'none', color: '#F7F5F0', cursor: 'pointer', fontSize: '1.2rem', fontWeight: 600 }}>&times;</button>
+              <button onClick={() => setShowLobby(false)} style={{ background: 'none', border: 'none', color: 'var(--bb-text)', cursor: 'pointer', fontSize: '1.2rem', fontWeight: 600 }}>&times;</button>
             </div>
             <div style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: 350, overflowY: 'auto' }}>
               {waitingUsers.map(w => (
-                <div key={w.userId} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0', borderBottom: '1px solid #0A0A0A' }}>
-                  <Avatar name={w.name} size={34} color="#0022FF" avatarUrl={w.avatar} />
-                  <span style={{ flex: 1, color: '#0A0A0A', fontSize: '0.9rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
+                <div key={w.userId} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.65rem 0', borderBottom: '1px solid var(--bb-border-soft)' }}>
+                  <Avatar name={w.name} size={34} color="var(--bb-cobalt)" avatarUrl={w.avatar} />
+                  <span style={{ flex: 1, color: 'var(--bb-text)', fontSize: '0.9rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
                   <div style={{ display: 'flex', gap: '0.4rem' }}>
-                    <button onClick={() => handleAdmit(w.userId)} title="Admit" style={{ width: 34, height: 34, borderRadius: '0', background: '#0022FF', border: '2px solid #0A0A0A', color: '#F7F5F0', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '2px 2px 0 rgba(10,10,10,1)', transition: 'transform 0.1s' }} onMouseEnter={e => e.currentTarget.style.transform='translateY(-1px)'} onMouseLeave={e => e.currentTarget.style.transform='none'}>
+                    <button onClick={() => handleAdmit(w.userId)} title="Admit" style={{ width: 34, height: 34, borderRadius: '0', background: 'var(--bb-cobalt)', border: '2px solid var(--bb-border)', color: '#FFFFFF', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '2px 2px 0 var(--bb-shadow)', transition: 'transform 0.1s' }} onMouseEnter={e => e.currentTarget.style.transform='translateY(-1px)'} onMouseLeave={e => e.currentTarget.style.transform='none'}>
                       <UserCheck size={16} />
                     </button>
-                    <button onClick={() => handleReject(w.userId)} title="Reject" style={{ width: 34, height: 34, borderRadius: '0', background: '#FF3311', border: '2px solid #0A0A0A', color: '#F7F5F0', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '2px 2px 0 rgba(10,10,10,1)', transition: 'transform 0.1s' }} onMouseEnter={e => e.currentTarget.style.transform='translateY(-1px)'} onMouseLeave={e => e.currentTarget.style.transform='none'}>
+                    <button onClick={() => handleReject(w.userId)} title="Reject" style={{ width: 34, height: 34, borderRadius: '0', background: 'var(--bb-vermilion)', border: '2px solid var(--bb-border)', color: '#FFFFFF', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '2px 2px 0 var(--bb-shadow)', transition: 'transform 0.1s' }} onMouseEnter={e => e.currentTarget.style.transform='translateY(-1px)'} onMouseLeave={e => e.currentTarget.style.transform='none'}>
                       <UserX size={16} />
                     </button>
                   </div>
@@ -3353,20 +3445,26 @@ export default function MeetingRoom() {
                 {/* Peer Tiles */}
                 {peers
                   .filter((peer, index, self) => index === self.findIndex(p => (p.userId && p.userId === peer.userId) || p.peerID === peer.peerID))
-                  .map((peer, i) => (
-                    <VideoPeer
-                      key={peer.userId || peer.peerID || i}
-                      peer={peer.peer}
-                      stream={peer.stream}
-                      name={peer.name || `Participant ${i + 1}`}
-                      role={peer.role}
-                      isAudioOn={peer.isAudioOn}
-                      isVideoOn={peer.isVideoOn}
-                      isScreenSharing={peer.isScreenSharing}
-                      avatarUrl={peer.avatar}
-                      suppressAudio={isTtsPlaying}
-                    />
-                  ))}
+                  .map((peer, i) => {
+                    const myTtsEnabled = user?.ttsEnabled ?? true;
+                    const myTtsLang = String(user?.ttsLang || 'original').trim().toLowerCase().split(/[-_]/)[0];
+                    const peerLang = peer.language ? String(peer.language).trim().toLowerCase().split(/[-_]/)[0] : null;
+                    const suppressOriginalAudio = isTtsPlaying || (myTtsEnabled && myTtsLang !== 'original' && peerLang !== myTtsLang);
+                    return (
+                      <VideoPeer
+                        key={peer.userId || peer.peerID || i}
+                        peer={peer.peer}
+                        stream={peer.stream}
+                        name={peer.name || `Participant ${i + 1}`}
+                        role={peer.role}
+                        isAudioOn={peer.isAudioOn}
+                        isVideoOn={peer.isVideoOn}
+                        isScreenSharing={peer.isScreenSharing}
+                        avatarUrl={peer.avatar}
+                        suppressAudio={suppressOriginalAudio}
+                      />
+                    );
+                  })}
               </div>
             </div>
 
@@ -3580,14 +3678,14 @@ export default function MeetingRoom() {
               <>
                 <div className={styles.chatMessages}>
                   {messages.length === 0 && (
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#5A5A5A', padding: '2rem 1rem', textAlign: 'center' }}>
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--bb-text-muted)', padding: '2rem 1rem', textAlign: 'center' }}>
                       <MessageSquare size={32} style={{ marginBottom: '0.75rem', opacity: 0.4 }} />
                       <p style={{ margin: 0, fontSize: '0.88rem' }}>No messages yet.<br />Start the conversation!</p>
                     </div>
                   )}
                   {messages.map((m, i) => (
                     <div key={i} className={`${styles.message} ${m.senderId === user.id ? styles.self : ''}`}>
-                      {m.senderId !== user.id && <span style={{ fontSize: '0.72rem', color: '#5A5A5A', fontFamily: 'var(--font-mono)', marginBottom: '0.2rem', paddingLeft: '0.25rem' }}>{m.senderName}</span>}
+                      {m.senderId !== user.id && <span style={{ fontSize: '0.72rem', color: 'var(--bb-text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '0.2rem', paddingLeft: '0.25rem' }}>{m.senderName}</span>}
                       <div className={styles.messageContent}>
                         <div style={{ fontSize: '0.9rem', lineHeight: 1.5 }}>{m.text}</div>
                         {m.translatedText && m.senderId !== user.id && (
@@ -3607,7 +3705,7 @@ export default function MeetingRoom() {
               <div className={styles.membersPanel}>
                 {/* Waiting room section for host */}
                 {isHostOrCoHost && waitingUsers.length > 0 && (
-                  <div style={{ marginBottom: '0.5rem', padding: '0.75rem', background: '#FFF1F0', border: '1px solid var(--vermilion)', boxShadow: '2px 2px 0 var(--ink)' }}>
+                  <div style={{ marginBottom: '0.5rem', padding: '0.75rem', background: 'var(--bb-vermilion-soft)', border: '1px solid var(--bb-vermilion)', boxShadow: '2px 2px 0 var(--bb-shadow)' }}>
                     <div className={styles.membersSectionTitle} style={{ color: 'var(--vermilion)', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem' }}>
                       <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--vermilion)', animation: 'pulseBeacon 1s infinite' }} />
                       Waiting Room ({waitingUsers.length})
@@ -3692,22 +3790,24 @@ export default function MeetingRoom() {
       {/* === SUMMARY MODAL === */}
         {summaryModal.isOpen && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))}>
-            <div style={{ background: '#F7F5F0', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '0', padding: '2rem', width: 600, maxWidth: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-grotesk)' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ background: 'var(--bb-surface-2)', border: '2px solid var(--bb-border)', boxShadow: '8px 8px 0 var(--bb-shadow)', borderRadius: '0', padding: '2rem', width: 600, maxWidth: '90%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-grotesk)', color: 'var(--bb-text)' }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', flexShrink: 0 }}>
-                <h2 style={{ margin: 0, color: '#0A0A0A', fontSize: '1.35rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 400 }}>
+                <h2 style={{ margin: 0, color: 'var(--bb-text)', fontSize: '1.35rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 400 }}>
                   ✨ Live Summary
                 </h2>
-                <button onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))} style={{ background: 'transparent', border: 'none', color: '#0A0A0A', cursor: 'pointer', fontSize: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>&times;</button>
+                <button onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))} style={{ background: 'transparent', border: 'none', color: 'var(--bb-text)', cursor: 'pointer', fontSize: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>&times;</button>
               </div>
-              <div style={{ flex: 1, overflowY: 'auto', paddingRight: '0.5rem', color: '#0A0A0A', fontSize: '1rem', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+              <div style={{ flex: 1, overflowY: 'auto', paddingRight: '0.5rem', color: 'var(--bb-text)', fontSize: '1rem', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
                 {summaryModal.loading ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '1rem', color: 'var(--cobalt, #a3c4f3)' }}>
-                    <div style={{ width: 40, height: 40, borderRadius: '50%', border: '3px solid rgba(163,196,243,0.2)', borderTopColor: 'var(--cobalt, #a3c4f3)', animation: 'spin 1s linear infinite' }} />
-                    <p style={{ margin: 0, fontWeight: 400 }}>Analyzing Live Transcript...</p>
-                  </div>
+                  <EditorialLoader
+                    variant="inline"
+                    title="Analyzing Live Transcript"
+                    subtitle="Synthesizing speaker statements & action items in real time..."
+                    tag="AI SYNTHESIS"
+                  />
                 ) : summaryModal.text}
               </div>
-              <button onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))} style={{ width: '100%', marginTop: '1.5rem', padding: '0.8rem', background: 'transparent', background: '#0022FF', color: '#F7F5F0', border: '2px solid #0A0A0A', boxShadow: '4px 4px 0 rgba(10,10,10,1)', borderRadius: '0', fontFamily: 'var(--font-grotesk)', cursor: 'pointer', fontSize: '1rem', flexShrink: 0 }}>
+              <button onClick={() => setSummaryModal(prev => ({ ...prev, isOpen: false }))} style={{ width: '100%', marginTop: '1.5rem', padding: '0.8rem', background: 'var(--bb-cobalt)', color: '#FFFFFF', border: '2px solid var(--bb-border)', boxShadow: '4px 4px 0 var(--bb-shadow)', borderRadius: '0', fontFamily: 'var(--font-grotesk)', cursor: 'pointer', fontSize: '1rem', flexShrink: 0 }}>
                 Close
               </button>
             </div>
@@ -3716,21 +3816,21 @@ export default function MeetingRoom() {
 
         {/* === SETTINGS MODAL === */}        {showLeaveModal && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }} onClick={() => setShowLeaveModal(false)}>
-            <div style={{ background: '#F7F5F0', border: '2px solid #0A0A0A', borderRadius: '0', padding: 'clamp(1.5rem, 5vw, 3rem)', width: '100%', maxWidth: 440, boxSizing: 'border-box', fontFamily: 'var(--font-grotesk)', boxShadow: '8px 8px 0 rgba(10,10,10,1)' }} onClick={(e) => e.stopPropagation()}>
-              <h2 style={{ margin: '0 0 1rem 0', color: '#0A0A0A', fontSize: '1.8rem', fontWeight: 600, fontFamily: 'var(--font-serif)', fontStyle: 'italic' }}>Leave Meeting</h2>
-              <p style={{ margin: '0 0 2rem 0', color: '#5A5A5A', fontSize: '0.95rem', lineHeight: 1.5 }}>
+            <div style={{ background: 'var(--bb-surface-2)', border: '2px solid var(--bb-border)', borderRadius: '0', padding: 'clamp(1.5rem, 5vw, 3rem)', width: '100%', maxWidth: 440, boxSizing: 'border-box', fontFamily: 'var(--font-grotesk)', boxShadow: '8px 8px 0 var(--bb-shadow)', color: 'var(--bb-text)' }} onClick={(e) => e.stopPropagation()}>
+              <h2 style={{ margin: '0 0 1rem 0', color: 'var(--bb-text)', fontSize: '1.8rem', fontWeight: 600, fontFamily: 'var(--font-serif)', fontStyle: 'italic' }}>Leave Meeting</h2>
+              <p style={{ margin: '0 0 2rem 0', color: 'var(--bb-text-muted)', fontSize: '0.95rem', lineHeight: 1.5 }}>
                 {isHost
                   ? 'You are the host. Do you want to end the meeting for everyone, or just leave?'
                   : 'You are a co-host. Do you want to end the meeting for everyone, or just leave?'}
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <button onClick={confirmEndMeeting} style={{ padding: '1rem', background: '#FF3311', color: '#F7F5F0', border: '2px solid #0A0A0A', fontWeight: 600, cursor: 'pointer', fontSize: '1rem', textTransform: 'uppercase', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
+                <button onClick={confirmEndMeeting} style={{ padding: '1rem', background: 'var(--bb-vermilion)', color: '#FFFFFF', border: '2px solid var(--bb-border)', fontWeight: 600, cursor: 'pointer', fontSize: '1rem', textTransform: 'uppercase', boxShadow: '4px 4px 0 var(--bb-shadow)' }}>
                   End Meeting for All
                 </button>
-                <button onClick={confirmLeaveMeeting} style={{ padding: '1rem', background: '#0A0A0A', color: '#F7F5F0', border: '2px solid #0A0A0A', fontWeight: 600, cursor: 'pointer', fontSize: '1rem', textTransform: 'uppercase', boxShadow: '4px 4px 0 rgba(10,10,10,1)' }}>
+                <button onClick={confirmLeaveMeeting} style={{ padding: '1rem', background: 'var(--bb-surface)', color: 'var(--bb-text)', border: '2px solid var(--bb-border)', fontWeight: 600, cursor: 'pointer', fontSize: '1rem', textTransform: 'uppercase', boxShadow: '4px 4px 0 var(--bb-shadow)' }}>
                   Just Leave
                 </button>
-                <button onClick={() => setShowLeaveModal(false)} style={{ padding: '0.75rem', background: 'transparent', color: '#0A0A0A', border: 'none', fontWeight: 600, cursor: 'pointer', fontSize: '0.9rem', textDecoration: 'underline' }}>
+                <button onClick={() => setShowLeaveModal(false)} style={{ padding: '0.75rem', background: 'transparent', color: 'var(--bb-text)', border: 'none', fontWeight: 600, cursor: 'pointer', fontSize: '0.9rem', textDecoration: 'underline' }}>
                   Cancel
                 </button>
               </div>
@@ -3740,25 +3840,25 @@ export default function MeetingRoom() {
 
         {showSettings && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }} onClick={() => setShowSettings(false)}>
-            <div style={{ background: '#F7F5F0', border: '2px solid #0A0A0A', borderRadius: '0', padding: 'clamp(1.5rem, 5vw, 3rem)', width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto', boxSizing: 'border-box', fontFamily: 'var(--font-grotesk)', boxShadow: '8px 8px 0 rgba(10,10,10,1)' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ background: 'var(--bb-surface-2)', border: '2px solid var(--bb-border)', borderRadius: '0', padding: 'clamp(1.5rem, 5vw, 3rem)', width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto', boxSizing: 'border-box', fontFamily: 'var(--font-grotesk)', boxShadow: '8px 8px 0 var(--bb-shadow)', color: 'var(--bb-text)' }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem' }}>
-                <h2 style={{ margin: 0, color: '#0A0A0A', fontSize: '2rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 600, fontFamily: 'var(--font-serif)', fontStyle: 'italic' }}>
-                  <Settings size={20} color="#0A0A0A" /> <span style={{color: "#0A0A0A"}}>Settings</span>
+                <h2 style={{ margin: 0, color: 'var(--bb-text)', fontSize: '2rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontWeight: 600, fontFamily: 'var(--font-serif)', fontStyle: 'italic' }}>
+                  <Settings size={20} color="var(--bb-text)" /> <span style={{ color: 'var(--bb-text)' }}>Settings</span>
                 </h2>
-                <button onClick={() => setShowSettings(false)} style={{ background: 'transparent', border: 'none', color: '#0A0A0A', cursor: 'pointer', fontSize: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>&times;</button>
+                <button onClick={() => setShowSettings(false)} style={{ background: 'transparent', border: 'none', color: 'var(--bb-text)', cursor: 'pointer', fontSize: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>&times;</button>
               </div>
   
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                   {/* Microphone Live Level Monitor */}
-                  <div style={{ padding: '0.85rem 1rem', background: '#FFFFFF', border: '2px solid #0A0A0A', boxShadow: '3px 3px 0 #0A0A0A' }}>
+                  <div style={{ padding: '0.85rem 1rem', background: 'var(--bb-surface)', border: '2px solid var(--bb-border)', boxShadow: '3px 3px 0 var(--bb-shadow)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <Activity size={14} color="#0022FF" />
-                        <span style={{ fontSize: '0.78rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#0A0A0A', fontFamily: 'var(--font-mono)' }}>
+                        <Activity size={14} color="var(--bb-cobalt)" />
+                        <span style={{ fontSize: '0.78rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--bb-text)', fontFamily: 'var(--font-mono)' }}>
                           Mic Input Level
                         </span>
                       </div>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', fontWeight: 700, color: isAudioOn ? '#10B981' : '#FF3311' }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', fontWeight: 700, color: isAudioOn ? '#10B981' : 'var(--bb-vermilion)' }}>
                         {isAudioOn ? `${activeMicVolume}%` : 'MUTED'}
                       </span>
                     </div>
@@ -3768,9 +3868,9 @@ export default function MeetingRoom() {
                   </div>
 
                   <div>
-                    <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.75rem', color: '#0A0A0A', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.75rem', color: 'var(--bb-text)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       <span><Globe size={12} style={{ verticalAlign: 'middle', marginRight: 5 }} />My spoken language (mic)</span>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.68rem', color: '#5A5A5A' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.68rem', color: 'var(--bb-text-muted)' }}>
                         <Lock size={11} /> Locked to Profile
                       </span>
                     </label>
@@ -3778,81 +3878,81 @@ export default function MeetingRoom() {
                       value={spokenLanguage}
                       disabled
                       title="Spoken language is locked to your profile language during a meeting"
-                      style={{ width: '100%', padding: '0.75rem 1rem', background: 'rgba(10,10,10,0.06)', color: '#5A5A5A', border: '2px solid rgba(10,10,10,0.35)', borderRadius: '0', fontSize: '0.9rem', outline: 'none', cursor: 'not-allowed' }}
+                      style={{ width: '100%', padding: '0.75rem 1rem', background: 'var(--bb-surface-3)', color: 'var(--bb-text-muted)', border: '2px solid var(--bb-border)', borderRadius: '0', fontSize: '0.9rem', outline: 'none', cursor: 'not-allowed' }}
                     >
-                      {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#F7F5F0', color: '#0A0A0A' }}>{l.label}</option>)}
+                      {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: 'var(--bb-surface-2)', color: 'var(--bb-text)' }}>{l.label}</option>)}
                     </select>
-                    <p style={{ margin: '0.4rem 0 0', fontSize: '0.72rem', color: '#5A5A5A', fontFamily: 'var(--font-mono)' }}>
+                    <p style={{ margin: '0.4rem 0 0', fontSize: '0.72rem', color: 'var(--bb-text-muted)', fontFamily: 'var(--font-mono)' }}>
                       Matches your profile language and cannot be changed mid-meeting.
                     </p>
                   </div>
                   
                   {/* Speech to Speech */}
-                  <div style={{ padding: '1.25rem', background: 'transparent', borderRadius: '0', borderBottom: '1px solid rgba(10,10,10,0.1)' }}>
+                  <div style={{ padding: '1.25rem', background: 'transparent', borderRadius: '0', borderBottom: '1px solid var(--bb-border-soft)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (user.ttsEnabled ?? true) ? '1rem' : '0' }}>
                       <div>
-                        <p style={{ margin: 0, fontWeight: 600, color: '#0A0A0A', fontSize: '0.9rem' }}>Speech-to-Speech</p>
-                        <p style={{ margin: 0, color: '#5A5A5A', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', marginTop: '0.2rem' }}>Read out audio translations</p>
+                        <p style={{ margin: 0, fontWeight: 600, color: 'var(--bb-text)', fontSize: '0.9rem' }}>Speech-to-Speech</p>
+                        <p style={{ margin: 0, color: 'var(--bb-text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', marginTop: '0.2rem' }}>Read out audio translations</p>
                       </div>
                       <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
                         <input type="checkbox" checked={user.ttsEnabled ?? true} onChange={e => updateUserSettings('ttsEnabled', e.target.checked)} style={{ display: 'none' }} />
-                        <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.ttsEnabled ?? true) ? '#0022FF' : 'rgba(10,10,10,0.2)', transition: 'background 0.2s', position: 'relative' }}>
+                        <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.ttsEnabled ?? true) ? 'var(--bb-cobalt)' : 'var(--bb-border)', transition: 'background 0.2s', position: 'relative' }}>
                           <div style={{ position: 'absolute', top: 2, left: (user.ttsEnabled ?? true) ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
                         </div>
                       </label>
                     </div>
                     {(user.ttsEnabled ?? true) && (
-                      <select value={user.ttsLang || 'original'} onChange={e => updateUserSettings('ttsLang', e.target.value)} style={{ width: '100%', padding: '0.75rem 1rem', background: 'transparent', color: '#0A0A0A', border: '1px solid #0A0A0A', borderRadius: '0', fontSize: '0.9rem', outline: 'none' }}>
-                        <option value="original" style={{ background: '#F7F5F0', color: '#0A0A0A' }}>Original</option>
-                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#F7F5F0', color: '#0A0A0A' }}>{l.label}</option>)}
+                      <select value={user.ttsLang || 'original'} onChange={e => updateUserSettings('ttsLang', e.target.value)} style={{ width: '100%', padding: '0.75rem 1rem', background: 'var(--bb-surface)', color: 'var(--bb-text)', border: '1px solid var(--bb-border)', borderRadius: '0', fontSize: '0.9rem', outline: 'none' }}>
+                        <option value="original" style={{ background: 'var(--bb-surface-2)', color: 'var(--bb-text)' }}>Original</option>
+                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: 'var(--bb-surface-2)', color: 'var(--bb-text)' }}>{l.label}</option>)}
                       </select>
                     )}
                   </div>
   
                   {/* Message Chat Translation */}
-                  <div style={{ padding: '1.25rem', background: 'transparent', borderRadius: '0', borderBottom: '1px solid rgba(10,10,10,0.1)' }}>
+                  <div style={{ padding: '1.25rem', background: 'transparent', borderRadius: '0', borderBottom: '1px solid var(--bb-border-soft)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (user.chatEnabled ?? true) ? '1rem' : '0' }}>
                       <div>
-                        <p style={{ margin: 0, fontWeight: 600, color: '#0A0A0A', fontSize: '0.9rem' }}>Message Chat Translation</p>
+                        <p style={{ margin: 0, fontWeight: 600, color: 'var(--bb-text)', fontSize: '0.9rem' }}>Message Chat Translation</p>
                       </div>
                       <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
                         <input type="checkbox" checked={user.chatEnabled ?? true} onChange={e => updateUserSettings('chatEnabled', e.target.checked)} style={{ display: 'none' }} />
-                        <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.chatEnabled ?? true) ? '#0022FF' : 'rgba(10,10,10,0.2)', transition: 'background 0.2s', position: 'relative' }}>
+                        <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.chatEnabled ?? true) ? 'var(--bb-cobalt)' : 'var(--bb-border)', transition: 'background 0.2s', position: 'relative' }}>
                           <div style={{ position: 'absolute', top: 2, left: (user.chatEnabled ?? true) ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
                         </div>
                       </label>
                     </div>
                     {(user.chatEnabled ?? true) && (
-                      <select value={user.chatLang || 'original'} onChange={e => updateUserSettings('chatLang', e.target.value)} style={{ width: '100%', padding: '0.75rem 1rem', background: 'transparent', color: '#0A0A0A', border: '1px solid #0A0A0A', borderRadius: '0', fontSize: '0.9rem', outline: 'none' }}>
-                        <option value="original" style={{ background: '#F7F5F0', color: '#0A0A0A' }}>Original</option>
-                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#F7F5F0', color: '#0A0A0A' }}>{l.label}</option>)}
+                      <select value={user.chatLang || 'original'} onChange={e => updateUserSettings('chatLang', e.target.value)} style={{ width: '100%', padding: '0.75rem 1rem', background: 'var(--bb-surface)', color: 'var(--bb-text)', border: '1px solid var(--bb-border)', borderRadius: '0', fontSize: '0.9rem', outline: 'none' }}>
+                        <option value="original" style={{ background: 'var(--bb-surface-2)', color: 'var(--bb-text)' }}>Original</option>
+                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: 'var(--bb-surface-2)', color: 'var(--bb-text)' }}>{l.label}</option>)}
                       </select>
                     )}
                   </div>
   
                   {/* Speech to Caption */}
-                  <div style={{ padding: '1.25rem', background: 'transparent', borderRadius: '0', borderBottom: '1px solid rgba(10,10,10,0.1)' }}>
+                  <div style={{ padding: '1.25rem', background: 'transparent', borderRadius: '0', borderBottom: '1px solid var(--bb-border-soft)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (user.captionEnabled ?? true) ? '1rem' : '0' }}>
                       <div>
-                        <p style={{ margin: 0, fontWeight: 600, color: '#0A0A0A', fontSize: '0.9rem' }}>Speech to Caption</p>
+                        <p style={{ margin: 0, fontWeight: 600, color: 'var(--bb-text)', fontSize: '0.9rem' }}>Speech to Caption</p>
                       </div>
                       <label style={{ position: 'relative', display: 'inline-flex', cursor: 'pointer' }}>
                         <input type="checkbox" checked={user.captionEnabled ?? true} onChange={e => updateUserSettings('captionEnabled', e.target.checked)} style={{ display: 'none' }} />
-                        <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.captionEnabled ?? true) ? '#0022FF' : 'rgba(10,10,10,0.2)', transition: 'background 0.2s', position: 'relative' }}>
+                        <div style={{ width: 44, height: 24, borderRadius: '999px', background: (user.captionEnabled ?? true) ? 'var(--bb-cobalt)' : 'var(--bb-border)', transition: 'background 0.2s', position: 'relative' }}>
                           <div style={{ position: 'absolute', top: 2, left: (user.captionEnabled ?? true) ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s' }} />
                         </div>
                       </label>
                     </div>
                     {(user.captionEnabled ?? true) && (
-                      <select value={user.captionLang || 'original'} onChange={e => updateUserSettings('captionLang', e.target.value)} style={{ width: '100%', padding: '0.75rem 1rem', background: 'transparent', color: '#0A0A0A', border: '1px solid #0A0A0A', borderRadius: '0', fontSize: '0.9rem', outline: 'none' }}>
-                        <option value="original" style={{ background: '#F7F5F0', color: '#0A0A0A' }}>Original</option>
-                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: '#F7F5F0', color: '#0A0A0A' }}>{l.label}</option>)}
+                      <select value={user.captionLang || 'original'} onChange={e => updateUserSettings('captionLang', e.target.value)} style={{ width: '100%', padding: '0.75rem 1rem', background: 'var(--bb-surface)', color: 'var(--bb-text)', border: '1px solid var(--bb-border)', borderRadius: '0', fontSize: '0.9rem', outline: 'none' }}>
+                        <option value="original" style={{ background: 'var(--bb-surface-2)', color: 'var(--bb-text)' }}>Original</option>
+                        {LANG_OPTIONS.map(l => <option key={l.value} value={l.value} style={{ background: 'var(--bb-surface-2)', color: 'var(--bb-text)' }}>{l.label}</option>)}
                       </select>
                     )}
                   </div>
               </div>
   
-              <button onClick={() => setShowSettings(false)} style={{ width: '100%', marginTop: '2rem', padding: '1rem', background: 'transparent', background: '#0022FF', color: '#F7F5F0', border: '2px solid #0A0A0A', boxShadow: '4px 4px 0 rgba(10,10,10,1)', borderRadius: '0', fontWeight: 400, cursor: 'pointer', fontSize: '1rem', fontFamily: 'var(--font-grotesk)' }}>
+              <button onClick={() => setShowSettings(false)} style={{ width: '100%', marginTop: '2rem', padding: '1rem', background: 'var(--bb-cobalt)', color: '#FFFFFF', border: '2px solid var(--bb-border)', boxShadow: '4px 4px 0 var(--bb-shadow)', borderRadius: '0', fontWeight: 600, cursor: 'pointer', fontSize: '1rem', fontFamily: 'var(--font-grotesk)' }}>
                 Done
               </button>
             </div>
@@ -3901,9 +4001,9 @@ export default function MeetingRoom() {
         {/* === ALERT MODAL === */}
       {alertMessage && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#F7F5F0', padding: '3rem', borderRadius: '0', border: '2px solid #0A0A0A', boxShadow: '8px 8px 0 rgba(10,10,10,1)', maxWidth: 380, width: '90%', textAlign: 'center' }}>
-            <p style={{ margin: '0 0 1.5rem', color: '#0A0A0A', fontFamily: 'var(--font-mono)', lineHeight: 1.6 }}>{alertMessage}</p>
-            <button onClick={() => setAlertMessage(null)} style={{ width: '100%', padding: '0.875rem', background: '#0022FF', color: '#0A0A0A', border: 'none', borderRadius: '0', fontWeight: 700, cursor: 'pointer' }}>OK</button>
+          <div style={{ background: 'var(--bb-surface-2)', padding: '3rem', borderRadius: '0', border: '2px solid var(--bb-border)', boxShadow: '8px 8px 0 var(--bb-shadow)', maxWidth: 380, width: '90%', textAlign: 'center', color: 'var(--bb-text)' }}>
+            <p style={{ margin: '0 0 1.5rem', color: 'var(--bb-text)', fontFamily: 'var(--font-mono)', lineHeight: 1.6 }}>{alertMessage}</p>
+            <button onClick={() => setAlertMessage(null)} style={{ width: '100%', padding: '0.875rem', background: 'var(--bb-cobalt)', color: '#FFFFFF', border: 'none', borderRadius: '0', fontWeight: 700, cursor: 'pointer' }}>OK</button>
           </div>
         </div>
       )}

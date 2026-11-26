@@ -4,6 +4,7 @@ const SummarizationService = require('../services/summarization.service');
 const TranslationService = require('../services/translation.service');
 const CaptionProcessorService = require('../services/caption-processor.service');
 const AudioTapService = require('../services/audio-tap.service');
+const { defaultSTT } = require('../adapters/stt');
 const { defaultTTS } = require('../adapters/tts');
 const { registry } = require('../avro');
 

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import useAuthStore from '../../../stores/authStore';
+import EditorialLoader from '../../../components/EditorialLoader';
 import styles from '../auth.module.css';
 
 export default function Register() {
@@ -50,6 +51,13 @@ export default function Register() {
 
   return (
     <div className={styles.editorialAuthContainer}>
+      {isLoading && (
+        <EditorialLoader
+          title="Creating Profile"
+          subtitle="Provisioning multilingual profile & studio credentials..."
+          tag="ONBOARDING"
+        />
+      )}
       <div className={styles.editorialAuthWrapper}>
         <h1 className={styles.sharpTitle}>Join</h1>
         <div className={styles.thickRule}></div>

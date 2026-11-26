@@ -25,6 +25,162 @@
   padding: 2.5rem 3.5rem;
   box-sizing: border-box;
   overflow-x: hidden;
+  transition: background-color 0.28s ease, color 0.24s ease;
+}
+
+/* ---------- Night / Obsidian Dark Theme Overrides ---------- */
+:global(html[data-theme="dark"]) .container {
+  --bg-ivory: #0B0D12;
+  --bg-card: #13161F;
+  --cobalt: #4F75FF;
+  --vermilion: #FF4D2E;
+  --ink: #F4F1EA;
+  --muted: #A3ACC2;
+  --border-thick: 2px solid #2E354A;
+  --border-heavy: 3px solid #2E354A;
+  --shadow-sm: 2px 2px 0 #000000;
+  --shadow-md: 4px 4px 0 #000000;
+  --shadow-lg: 6px 6px 0 #000000;
+  background-color: #0B0D12;
+  background-image: radial-gradient(rgba(79, 117, 255, 0.16) 1px, transparent 0);
+  color: #F4F1EA;
+}
+
+:global(html[data-theme="dark"]) .header,
+:global(html[data-theme="dark"]) .kpiHeader,
+:global(html[data-theme="dark"]) .dossierMetaStrip,
+:global(html[data-theme="dark"]) .dossierActionsRow,
+:global(html[data-theme="dark"]) .tabsContainer,
+:global(html[data-theme="dark"]) .orgHeaderRow,
+:global(html[data-theme="dark"]) .orgAccessControlArea {
+  border-color: #2E354A;
+}
+
+:global(html[data-theme="dark"]) .userCapsule,
+:global(html[data-theme="dark"]) .systemStatusPill,
+:global(html[data-theme="dark"]) .navActionBtn,
+:global(html[data-theme="dark"]) .kpiCard,
+:global(html[data-theme="dark"]) .actionCard,
+:global(html[data-theme="dark"]) .workspaceCard,
+:global(html[data-theme="dark"]) .meetingDossierCard,
+:global(html[data-theme="dark"]) .orgCard,
+:global(html[data-theme="dark"]) .emptyStateCard,
+:global(html[data-theme="dark"]) .btnActionSecondary {
+  background-color: #13161F;
+  color: #F4F1EA;
+  border-color: #2E354A;
+}
+
+:global(html[data-theme="dark"]) .brutalistInput,
+:global(html[data-theme="dark"]) .brutalistSelect,
+:global(html[data-theme="dark"]) .meetingIdPill,
+:global(html[data-theme="dark"]) .orgPassBox,
+:global(html[data-theme="dark"]) .segmentedSwitch,
+:global(html[data-theme="dark"]) .tabCounterBadge,
+:global(html[data-theme="dark"]) .scheduledBadge {
+  background-color: #0B0D12;
+  color: #F4F1EA;
+  border-color: #2E354A;
+}
+
+:global(html[data-theme="dark"]) .brutalistSelect option {
+  background-color: #13161F;
+  color: #F4F1EA;
+}
+
+:global(html[data-theme="dark"]) .tipCard {
+  background-color: #161B28;
+  border-color: #3B66FF;
+}
+
+:global(html[data-theme="dark"]) .emptyStateIcon {
+  background-color: #191D29;
+  color: #6B8CFF;
+  border-color: #2E354A;
+}
+
+:global(html[data-theme="dark"]) .navActionBtn:hover,
+:global(html[data-theme="dark"]) .btnActionSecondary:hover,
+:global(html[data-theme="dark"]) .tabBtnInactive:hover {
+  background-color: #222838;
+  color: #FFFFFF;
+  border-color: #4F75FF;
+}
+
+:global(html[data-theme="dark"]) .tabBtnInactive {
+  color: #A3ACC2;
+}
+
+:global(html[data-theme="dark"]) .versionBadge,
+:global(html[data-theme="dark"]) .avatarCircle {
+  background-color: #4F75FF;
+  color: #FFFFFF;
+  border-color: #6B8CFF;
+}
+
+:global(html[data-theme="dark"]) .liveBadge {
+  background-color: #FF4D2E;
+  color: #FFFFFF;
+  border-color: #000000;
+  box-shadow: 1px 1px 0 #000000;
+}
+
+:global(html[data-theme="dark"]) .logoutBtn,
+:global(html[data-theme="dark"]) .cancelledBadge,
+:global(html[data-theme="dark"]) .btnActionDelete {
+  background-color: rgba(255, 77, 46, 0.15);
+  color: #FFA08F;
+  border-color: #FF4D2E;
+}
+
+:global(html[data-theme="dark"]) .btnActionDelete:hover,
+:global(html[data-theme="dark"]) .logoutBtn:hover {
+  background-color: #FF4D2E;
+  color: #FFFFFF;
+}
+
+:global(html[data-theme="dark"]) .completedBadge {
+  background-color: #191D29;
+  color: #A3ACC2;
+  border-color: #2E354A;
+}
+
+:global(html[data-theme="dark"]) .btnActionInvite {
+  background-color: rgba(79, 117, 255, 0.16);
+  color: #8BA6FF;
+  border-color: #4F75FF;
+}
+
+:global(html[data-theme="dark"]) .btnActionReport,
+:global(html[data-theme="dark"]) .btnSchedule,
+:global(html[data-theme="dark"]) .btnJoinCode,
+:global(html[data-theme="dark"]) .tabBtnActive,
+:global(html[data-theme="dark"]) .switchBtnActive {
+  background-color: #4F75FF;
+  color: #FFFFFF;
+  border-color: #6B8CFF;
+}
+
+:global(html[data-theme="dark"]) .btnLaunch,
+:global(html[data-theme="dark"]) .btnActionPrimary {
+  background-color: #FF4D2E;
+  color: #FFFFFF;
+  border-color: #000000;
+}
+
+:global(html[data-theme="dark"]) .heroStrip,
+:global(html[data-theme="dark"]) .actionCard,
+:global(html[data-theme="dark"]) .workspaceCard,
+:global(html[data-theme="dark"]) .meetingDossierCard,
+:global(html[data-theme="dark"]) .orgCard {
+  box-shadow: 4px 4px 0 #000000;
+}
+
+:global(html[data-theme="dark"]) .kpiCard:hover,
+:global(html[data-theme="dark"]) .meetingDossierCard:hover,
+:global(html[data-theme="dark"]) .orgCard:hover {
+  border-color: #4F75FF;
+  box-shadow: 6px 6px 0 #3B66FF;
 }
 
 /* ==========================================================================

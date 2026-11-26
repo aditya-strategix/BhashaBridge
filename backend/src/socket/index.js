@@ -5,6 +5,7 @@ const sfuClient = require('../clients/sfu.client');
 const prisma = require('../prisma');
 const { withDbRetry } = require('../prisma');
 const avro = require('../avro');
+const { clearSummaryRedisCache } = require('../controllers/meeting.controller');
 
 function setupSocket(server) {
   const io = new Server(server, {
@@ -129,12 +130,14 @@ function setupSocket(server) {
         socket.cleanLink = cleanLink;
         socket.isAudioOn = isAudioOn !== undefined ? isAudioOn : true;
         socket.isVideoOn = isVideoOn !== undefined ? isVideoOn : true;
+        // Preserve any user:update_settings emitted while async join DB lookups ran.
+        const prevSettings = socket.userSettings || {};
         socket.userSettings = {
-          language: socket.userLanguage,
-          captionLang: 'original',
-          ttsLang: 'original',
-          captionEnabled: true,
-          ttsEnabled: true
+          captionLang: payload.captionLang || prevSettings.captionLang || 'original',
+          ttsLang: payload.ttsLang || prevSettings.ttsLang || 'original',
+          captionEnabled: payload.captionEnabled ?? prevSettings.captionEnabled ?? true,
+          ttsEnabled: payload.ttsEnabled ?? prevSettings.ttsEnabled ?? true,
+          language: socket.userLanguage
         };
 
         // Evict and disconnect any stale zombie sockets for this user in this meeting
@@ -179,6 +182,7 @@ function setupSocket(server) {
             name: participant.user?.name,
             role: effectiveRole,
             avatar: participant.user?.avatar,
+            language: socket.userLanguage,
             isAudioOn: socket.isAudioOn,
             isVideoOn: socket.isVideoOn
           };
@@ -346,15 +350,7 @@ function setupSocket(server) {
           userId: socket.authUser.userId
         };
 
-        let currentCache = {};
-        if (meeting.summaryCache) {
-          try {
-            currentCache = typeof meeting.summaryCache === 'string'
-              ? JSON.parse(meeting.summaryCache)
-              : meeting.summaryCache;
-          } catch (_) {}
-        }
-        currentCache._endedBy = finalEndedBy;
+        const nextCache = { _endedBy: finalEndedBy };
 
         await withDbRetry(p => p.meeting.update({
           where: { id: meeting.id },
@@ -362,9 +358,11 @@ function setupSocket(server) {
             state: 'COMPLETED',
             endTime: new Date(),
             startTime: meeting.startTime || meeting.createdAt,
-            summaryCache: currentCache
+            summaryCache: nextCache
           }
         }));
+
+        clearSummaryRedisCache(meeting.id).catch(() => {});
 
         const payload = { endedBy: finalEndedBy };
         io.to(meetingId).emit('meeting:ended', payload);
@@ -554,10 +552,11 @@ function setupSocket(server) {
 
       const targetRoom = socket.dbMeetingId || meetingId;
       const roomAliases = new Set([targetRoom, meetingId, socket.meetingId, socket.cleanLink, socket.dbMeetingId].filter(Boolean));
+      const roomList = Array.from(roomAliases);
 
       console.log(`[CAPTION:TEXT] targetRoom: ${targetRoom}, speakerId: ${speakerId}, lang: ${normSrcLang}, text: "${cleanText}"`);
-      for (const r of roomAliases) {
-        io.to(r).emit('caption:text', { ...rawData, speakerId, meetingId: targetRoom, text: cleanText, language: normSrcLang });
+      if (roomList.length > 0) {
+        io.to(roomList).emit('caption:text', { ...rawData, speakerId, meetingId: targetRoom, text: cleanText, language: normSrcLang });
       }
 
       if (socket.dbMeetingId) {
@@ -567,12 +566,7 @@ function setupSocket(server) {
       }
 
       try {
-        const allSockets = [];
-        for (const r of roomAliases) {
-          const socks = await io.in(r).fetchSockets();
-          allSockets.push(...socks);
-        }
-        const clients = Array.from(new Map(allSockets.map(s => [s.id, s])).values());
+        const clients = roomList.length > 0 ? await io.in(roomList).fetchSockets() : [];
         const targetLanguages = new Set();
 
         clients.forEach(c => {
@@ -613,9 +607,9 @@ function setupSocket(server) {
           translations
         };
 
-        console.log(`[CAPTION:EMITTING] Emitting caption:translated to aliases:`, Array.from(roomAliases), captionPayload.id);
-        for (const r of roomAliases) {
-          io.to(r).emit('caption:translated', captionPayload);
+        console.log(`[CAPTION:EMITTING] Emitting caption:translated to aliases:`, roomList, captionPayload.id);
+        if (roomList.length > 0) {
+          io.to(roomList).emit('caption:translated', captionPayload);
         }
 
         // Pillar 3: Apache Avro Binary Serialization
@@ -631,8 +625,8 @@ function setupSocket(server) {
               timestamp: Date.now()
             };
             const avroBuffer = avro.registry.serialize('TranslatedCaptionEvent', avroEvent);
-            for (const r of roomAliases) {
-              io.to(r).emit('caption:translated:avro', avroBuffer);
+            if (roomList.length > 0) {
+              io.to(roomList).emit('caption:translated:avro', avroBuffer);
             }
           }
         } catch (avroErr) {
@@ -671,16 +665,36 @@ function setupSocket(server) {
       try {
         const audioBuffer = Buffer.from(data.audioBase64, 'base64');
         const micLang = socket.userLanguage || data.language || 'auto';
-        const sttResult = await aiClient.transcribeSTT(audioBuffer, micLang);
-        if (sttResult.text && sttResult.text.trim()) {
-          console.log(`[CAPTION:AUDIO:STT] Transcribed (${sttResult.language}): "${sttResult.text.trim()}"`);
+        let sttResult = await aiClient.transcribeSTT(audioBuffer, micLang);
+        let transcribedText = (sttResult.text || '').trim();
+        let resolvedLang = socket.userLanguage || sttResult.language || data.language || 'en';
+
+        // If Whisper was hinted with a non-English language (e.g. speaker profile = 'hi')
+        // yet the transcript contains substantial Latin words, re-run with auto-detection
+        // so English speech is not garbled or mislabeled as the target language.
+        const normHint = String(micLang || '').toLowerCase().split(/[-_]/)[0];
+        if (transcribedText && normHint && normHint !== 'en' && normHint !== 'auto') {
+          const latinCount = (transcribedText.match(/[A-Za-z]/g) || []).length;
+          const nonAsciiCount = (transcribedText.match(/[^\x00-\x7F\s]/g) || []).length;
+          if (latinCount >= 4 && latinCount >= nonAsciiCount) {
+            const autoResult = await aiClient.transcribeSTT(audioBuffer, 'auto');
+            if (autoResult.text && autoResult.text.trim()) {
+              sttResult = autoResult;
+              transcribedText = autoResult.text.trim();
+              resolvedLang = autoResult.language || 'en';
+            }
+          }
+        }
+
+        if (transcribedText) {
+          console.log(`[CAPTION:AUDIO:STT] Transcribed (${resolvedLang}): "${transcribedText}"`);
           await processAndBroadcastCaption({
             socket,
             speakerId,
             speakerName: socket.userName || data.speakerName,
             meetingId,
-            text: sttResult.text.trim(),
-            language: socket.userLanguage || sttResult.language || data.language || 'en',
+            text: transcribedText,
+            language: resolvedLang,
             rawData: data
           });
         }

@@ -34,7 +34,7 @@ class AIServiceClient {
         meetingId: options.meetingId || '',
         transcriptText,
         targetLanguage: targetLanguage || 'en',
-        preferredModel: options.preferredModel || 'gemini-3.7-flash',
+        preferredModel: options.preferredModel || 'deepseek-flash',
         timestamp: Date.now()
       };
 
@@ -47,7 +47,7 @@ class AIServiceClient {
           'Accept': 'application/avro, application/json'
         },
         body: avroBuffer,
-        signal: AbortSignal.timeout(12000)
+        signal: AbortSignal.timeout(28000)
       });
 
       if (!response.ok) {
@@ -74,9 +74,9 @@ class AIServiceClient {
           transcriptText,
           targetLanguage,
           meetingId: options.meetingId,
-          preferredModel: options.preferredModel
+          preferredModel: options.preferredModel || 'deepseek-flash'
         }),
-        signal: AbortSignal.timeout(12000)
+        signal: AbortSignal.timeout(28000)
       });
 
       if (!response.ok) {

@@ -125,7 +125,7 @@ it('Correctly frames and unframes Single Object Encoding with RFC 0xC3 0x01 magi
     meetingId: 'meet_org_boardroom_1',
     transcriptText: 'Dr. Sharma: The patient is stabilizing after medication.',
     targetLanguage: 'en',
-    preferredModel: 'gemini-3.7-flash',
+    preferredModel: 'deepseek-flash',
     timestamp: 1730364000999
   };
 

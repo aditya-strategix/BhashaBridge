@@ -8,7 +8,7 @@
     { "name": "meetingId", "type": "string" },
     { "name": "transcriptText", "type": "string" },
     { "name": "targetLanguage", "type": "string", "default": "en" },
-    { "name": "preferredModel", "type": "string", "default": "gemini-3.7-flash" },
+    { "name": "preferredModel", "type": "string", "default": "deepseek-flash" },
     { "name": "timestamp", "type": "long" }
   ]
 }

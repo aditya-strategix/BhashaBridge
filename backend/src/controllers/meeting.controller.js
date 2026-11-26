@@ -33,6 +33,27 @@ const initRedis = async () => {
   }
 };
 
+const SUMMARY_LANGS = ['en', 'hi', 'bn', 'ta', 'te', 'mr', 'gu', 'es', 'fr', 'de'];
+
+const clearSummaryRedisCache = async (meetingId) => {
+  try {
+    const cache = await initRedis();
+    if (!cache || !meetingId) return;
+    const keys = SUMMARY_LANGS.flatMap((lang) => [
+      `summary:live:${meetingId}:${lang}`,
+      `summary:final:${meetingId}:${lang}`,
+      `summary:${meetingId}:${lang}`
+    ]);
+    if (keys.length > 0) {
+      await cache.del(keys);
+    }
+  } catch (err) {
+    console.warn('[Summary Cache] Redis invalidation warning:', err.message);
+  }
+};
+
+exports.clearSummaryRedisCache = clearSummaryRedisCache;
+
 
 
 const resolveMeetingEntity = async (link, includeOrg = true) => {
@@ -192,11 +213,26 @@ exports.getSummary = async (req, res) => {
     // Combine transcript into plain text
       const transcriptText = captions.map(c => `[${new Date(c.timestamp).toLocaleTimeString()}] ${c.speaker.name}: ${c.originalText}`).join('\n');
 
-      const targetLang = req.query.lang || req.user.language || req.user.preferredLanguage || 'en';
-      const cacheKey = `summary:${meeting.id}:${targetLang}`;
+      let resolvedLang = req.query.lang;
+      if (!resolvedLang) {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: req.user.userId },
+          select: { preferredLanguage: true }
+        }).catch(() => null);
+        resolvedLang = dbUser?.preferredLanguage || req.user.language || req.user.preferredLanguage || 'en';
+      }
+      const targetLang = String(resolvedLang || 'en').trim().toLowerCase().split('-')[0] || 'en';
+
+      // Separate in-meeting live summary cache from post-meeting final summary cache.
+      // That ensures once Host ends the meeting, any requested summary regenerates once
+      // via DeepSeek with the COMPLETE transcript in targetLang and caches it in Redis.
+      const isCompleted = meeting.state === 'COMPLETED';
+      const cacheKey = isCompleted
+        ? `summary:final:${meeting.id}:${targetLang}`
+        : `summary:live:${meeting.id}:${targetLang}`;
       const cache = await initRedis();
 
-      // 1. Check Redis / Valkey Cache FIRST (ultra-fast sub-millisecond retrieval)
+      // 1. Check Redis / Valkey Cache FIRST
       if (cache) {
         try {
           const cachedSummary = await cache.get(cacheKey);
@@ -210,7 +246,7 @@ exports.getSummary = async (req, res) => {
       }
 
       // 2. Permanent Cache Check (PostgreSQL) for COMPLETED meetings
-      if (meeting.state === 'COMPLETED' && meeting.summaryCache) {
+      if (isCompleted && meeting.summaryCache) {
         let cachedJson = {};
         try {
           cachedJson = typeof meeting.summaryCache === 'string' ? JSON.parse(meeting.summaryCache) : meeting.summaryCache;
@@ -226,19 +262,22 @@ exports.getSummary = async (req, res) => {
         }
       }
 
-      // 3. Generate new summary via Gemini
-      console.log(`[Summary Cache] No cache found for meeting ${meeting.id}. Generating summary via Gemini...`);
-      const summary = await aiClient.summarizeTranscript(transcriptText, targetLang, { meetingId: meeting.id });
+      // 3. Generate new summary via DeepSeek-V4.1-Flash using full chronological transcript
+      console.log(`[Summary Cache] No ${isCompleted ? 'post-meeting final' : 'live'} cache found for meeting ${meeting.id} (${targetLang}). Generating summary via DeepSeek-V4.1-Flash...`);
+      const summary = await aiClient.summarizeTranscript(transcriptText, targetLang, {
+        meetingId: meeting.id,
+        preferredModel: 'deepseek-flash'
+      });
 
-      // 4. Save to Redis / Valkey Cache (86400s = 24hr TTL for completed meetings, 300s = 5min TTL for ongoing meetings)
+      // 4. Save to Redis / Valkey Cache (86400s = 24hr TTL for final post-meeting summary, 120s for live ongoing summary)
       if (cache) {
-        const ttl = meeting.state === 'COMPLETED' ? 86400 : 300;
+        const ttl = isCompleted ? 86400 : 120;
         await cache.setEx(cacheKey, ttl, summary).catch(err => console.warn('[Summary Cache] Redis write error:', err.message));
-        console.log(`[Summary Cache] Saved summary for meeting ${meeting.id} (${targetLang}) to Redis Cache with ${ttl}s TTL.`);
+        console.log(`[Summary Cache] Saved summary for meeting ${meeting.id} (${targetLang}) under ${cacheKey} with ${ttl}s TTL.`);
       }
 
       // 5. Save to PostgreSQL permanently for COMPLETED meetings
-      if (meeting.state === 'COMPLETED') {
+      if (isCompleted) {
         let cachedJson = {};
         if (meeting.summaryCache) {
           try { cachedJson = typeof meeting.summaryCache === 'string' ? JSON.parse(meeting.summaryCache) : meeting.summaryCache; } catch(e) {}
@@ -248,10 +287,10 @@ exports.getSummary = async (req, res) => {
           where: { id: meeting.id },
           data: { summaryCache: cachedJson }
         }).catch(err => console.warn('[Summary Cache] Postgres write error:', err.message));
-        console.log(`[Summary Cache] Saved summary to PostgreSQL Permanent Cache.`);
+        console.log(`[Summary Cache] Saved post-meeting summary to PostgreSQL Permanent Cache.`);
       }
 
-      res.json({ summary, source: 'GEMINI' });
+      res.json({ summary, source: 'DEEPSEEK' });
   } catch (error) {
     console.error('Summary error:', error);
     res.status(500).json({ error: 'Server error: ' + error.message });
@@ -287,6 +326,14 @@ exports.getMeetings = async (req, res) => {
       },
       include: { 
         host: { select: { name: true } },
+        organization: {
+          select: {
+            id: true,
+            name: true,
+            ownerId: true,
+            coHosts: { select: { id: true } }
+          }
+        },
         participants: { 
           include: { 
             user: { select: { name: true, email: true } },
@@ -569,7 +616,8 @@ exports.endMeeting = async (req, res) => {
         currentCache = typeof meeting.summaryCache === 'string' ? JSON.parse(meeting.summaryCache) : meeting.summaryCache;
       } catch (_) {}
     }
-    currentCache._endedBy = endedBy;
+    // Reset any prior summary entries so post-meeting requests call DeepSeek with full final transcript
+    const nextCache = { _endedBy: endedBy };
 
     const updated = await withDbRetry(p => p.meeting.update({
       where: { id: meeting.id },
@@ -577,9 +625,11 @@ exports.endMeeting = async (req, res) => {
         state: 'COMPLETED',
         endTime: new Date(),
         startTime: meeting.startTime || meeting.createdAt,
-        summaryCache: currentCache
+        summaryCache: nextCache
       }
     }));
+
+    clearSummaryRedisCache(meeting.id).catch(() => {});
 
     if (global.io) {
       const payload = { endedBy };
@@ -682,18 +732,29 @@ exports.deleteMeeting = async (req, res) => {
       const { id } = req.params;
       const meeting = await withDbRetry(p => p.meeting.findUnique({
         where: { id },
-        include: { organization: { include: { coHosts: true } } }
+        include: {
+          organization: { include: { coHosts: true } },
+          participants: {
+            where: { userId: req.user.userId },
+            select: { role: true }
+          }
+        }
       }));
       
       if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
 
-      let isOrgAdmin = false;
-      if (meeting.organization) {
-        if (meeting.organization.ownerId === req.user.userId || meeting.organization.coHosts.some(c => c.id === req.user.userId)) {
-          isOrgAdmin = true;
-        }
+      const isOrgOwner = meeting.organization?.ownerId === req.user.userId;
+      const isOrgCoHost = meeting.organization?.coHosts?.some(c => c.id === req.user.userId) || false;
+      const isMeetingCoHost = meeting.participants?.some(p => p.role === 'COHOST') || false;
+      const isHostOrCoHost = meeting.hostId === req.user.userId || isOrgOwner || isOrgCoHost || isMeetingCoHost;
+
+      // Organization members (non-host / non-cohost) cannot delete or hide active/upcoming organization meetings
+      const isUpcomingState = meeting.state === 'SCHEDULED' || meeting.state === 'ONGOING';
+      if (meeting.organizationId && isUpcomingState && !isHostOrCoHost) {
+        return res.status(403).json({
+          error: 'Only the host or a co-host can cancel or remove an active/scheduled organization meeting.'
+        });
       }
-      const isHost = meeting.hostId === req.user.userId || isOrgAdmin;
 
       const updateData = {
         hiddenForUserIds: {
@@ -701,10 +762,10 @@ exports.deleteMeeting = async (req, res) => {
         }
       };
 
-      // If host deletes a SCHEDULED meeting, mark it CANCELLED; if ONGOING, mark it COMPLETED
-      if (isHost && meeting.state === 'SCHEDULED') {
+      // If host or co-host deletes a SCHEDULED meeting, mark it CANCELLED; if ONGOING, mark it COMPLETED
+      if (isHostOrCoHost && meeting.state === 'SCHEDULED') {
         updateData.state = 'CANCELLED';
-      } else if (isHost && meeting.state === 'ONGOING') {
+      } else if (isHostOrCoHost && meeting.state === 'ONGOING') {
         updateData.state = 'COMPLETED';
         updateData.endTime = new Date();
       }
@@ -713,6 +774,10 @@ exports.deleteMeeting = async (req, res) => {
         where: { id },
         data: updateData
       }));
+
+      if (updateData.state === 'COMPLETED') {
+        clearSummaryRedisCache(meeting.id).catch(() => {});
+      }
 
       if (global.io) {
         global.io.emit('dashboard:refresh');
@@ -727,7 +792,11 @@ exports.deleteMeeting = async (req, res) => {
       }
       if (global.sseEmit) global.sseEmit('dashboard:refresh');
 
-      res.json({ message: isHost && meeting.state === 'SCHEDULED' ? 'Scheduled meeting cancelled' : 'Meeting removed from your history' });
+      res.json({
+        message: isHostOrCoHost && meeting.state === 'SCHEDULED'
+          ? 'Scheduled meeting cancelled'
+          : (isHostOrCoHost && meeting.state === 'ONGOING' ? 'Live meeting ended' : 'Meeting removed from your history')
+      });
     } catch (error) {
       console.error('deleteMeeting error:', error);
       res.status(500).json({ error: 'Server error' });

@@ -35,7 +35,7 @@ class AIServiceClient {
           meetingId: options.meetingId || '',
           transcriptText,
           targetLanguage: targetLanguage || 'en',
-          preferredModel: options.preferredModel || 'gemini-3.7-flash',
+          preferredModel: options.preferredModel || 'deepseek-flash',
           timestamp: Date.now()
         };
 
@@ -48,7 +48,7 @@ class AIServiceClient {
             'Accept': 'application/avro, application/json'
           },
           body: avroPayload,
-          signal: AbortSignal.timeout(10000)
+          signal: AbortSignal.timeout(28000)
         });
 
         if (response.ok) {

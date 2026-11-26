@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import useAuthStore from '../../../stores/authStore';
+import EditorialLoader from '../../../components/EditorialLoader';
 import styles from '../auth.module.css';
 
 export default function Login() {
@@ -37,6 +38,13 @@ export default function Login() {
 
   return (
     <div className={styles.editorialAuthContainer}>
+      {isLoading && (
+        <EditorialLoader
+          title="Verifying Access"
+          subtitle="Authenticating session & loading multilingual workspace..."
+          tag="AUTH GATEWAY"
+        />
+      )}
       <div className={styles.editorialAuthWrapper}>
         <h1 className={styles.sharpTitle}>Access</h1>
         <div className={styles.thickRule}></div>

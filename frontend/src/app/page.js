@@ -37,9 +37,9 @@ const FEATURES = [
   },
   {
     icon: <Sparkles size={24} />,
-    title: 'Gemini AI Intelligence',
+    title: 'DeepSeek AI Intelligence',
     desc: 'Instant post-session executive summaries, key talking points, action items, and full multilingual transcripts delivered upon meeting conclusion.',
-    tag: 'Gemini 3.7 Flash'
+    tag: 'DeepSeek V4.1 Flash'
   },
   {
     icon: <MessageSquare size={24} />,
@@ -313,7 +313,7 @@ export default function Home() {
           <div className={styles.statDesc}>Zero plugins or app downloads. Runs in any browser.</div>
         </div>
         <div className={styles.statItem}>
-          <div className={styles.statNumber}>Gemini</div>
+          <div className={styles.statNumber}>DeepSeek</div>
           <div className={styles.statLabel}>AI Intelligence</div>
           <div className={styles.statDesc}>Automated summaries and attendance analytics.</div>
         </div>
@@ -372,7 +372,7 @@ export default function Home() {
                 <div className={styles.waveBar} style={{ animationDelay: '0.1s' }} />
                 <div className={styles.waveBar} style={{ animationDelay: '0.5s' }} />
                 <div className={styles.waveBar} style={{ animationDelay: '0.3s' }} />
-                <span style={{ fontSize: '0.72rem', color: '#666', fontFamily: 'var(--font-geist-mono)', marginLeft: '0.5rem' }}>
+                <span style={{ fontSize: '0.72rem', color: 'var(--bb-text-subtle)', fontFamily: 'var(--font-geist-mono)', marginLeft: '0.5rem' }}>
                   Web Audio VAD &bull; Faster-Whisper STT
                 </span>
               </div>
@@ -550,10 +550,10 @@ export default function Home() {
           <div className={styles.footerCol}>
             <h6>Core Features</h6>
             <ul className={styles.footerList}>
-              <li><span style={{ color: '#0A0A0A', fontWeight: 600 }}>HD Video &amp; Audio</span></li>
-              <li><span style={{ color: '#0A0A0A', fontWeight: 600 }}>Gemini 3.7 Flash</span></li>
-              <li><span style={{ color: '#0A0A0A', fontWeight: 600 }}>Live Subtitles &amp; Audio</span></li>
-              <li><span style={{ color: '#0A0A0A', fontWeight: 600 }}>Instant AI Summaries</span></li>
+              <li><span style={{ color: 'var(--bb-text)', fontWeight: 600 }}>HD Video &amp; Audio</span></li>
+              <li><span style={{ color: 'var(--bb-text)', fontWeight: 600 }}>DeepSeek V4.1 Flash</span></li>
+              <li><span style={{ color: 'var(--bb-text)', fontWeight: 600 }}>Live Subtitles &amp; Audio</span></li>
+              <li><span style={{ color: 'var(--bb-text)', fontWeight: 600 }}>Instant AI Summaries</span></li>
             </ul>
           </div>
         </div>
